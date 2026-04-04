@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
+    "@gorhom/bottom-sheet": "^5.2.8",
     "@react-native-community/netinfo": "11.4.1",
     "@reduxjs/toolkit": "^2.11.2",
     "babel-preset-expo": "^55.0.15",
