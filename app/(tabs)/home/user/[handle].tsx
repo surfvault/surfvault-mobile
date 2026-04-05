@@ -6,6 +6,10 @@ import {
   Pressable,
   ActivityIndicator,
   Linking,
+  Share,
+  StyleSheet,
+  useColorScheme,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -30,6 +34,8 @@ export default function UserProfileScreen() {
   const router = useRouter();
   const { user: currentUser } = useUser();
   const requireAuth = useRequireAuth();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
@@ -42,15 +48,13 @@ export default function UserProfileScreen() {
     handle: handle ?? '',
     viewerId: currentUser?.id,
   });
-  const profile = userData?.results;
+  const profile = userData?.results?.photographer ?? userData?.results;
 
   // Sessions
-  const { data: sessionsData } = useGetUserSessionsQuery({
-    handle: handle ?? '',
-    selfFlag: isSelf,
-    limit: 10,
-    continuationToken: '',
-  });
+  const { data: sessionsData, isFetching: sessionsFetching } = useGetUserSessionsQuery(
+    { handle: handle ?? '', selfFlag: isSelf, limit: 10, continuationToken: '' },
+    { skip: !profile }
+  );
 
   useEffect(() => {
     const sessionsList = sessionsData?.results?.sessions ?? [];
@@ -63,7 +67,6 @@ export default function UserProfileScreen() {
         return true;
       });
       setSessions(unique);
-      setContinuationToken(sessionsData?.results?.continuationToken ?? '');
     }
   }, [sessionsData]);
 
@@ -76,13 +79,28 @@ export default function UserProfileScreen() {
     followUser({ userId: profile.id, action });
   }, [profile, requireAuth, followUser]);
 
-  const hasActiveNote =
-    !!profile?.status_note && isNoteActive(profile?.status_note_set_at);
+  // Share profile
+  const handleShare = useCallback(async () => {
+    const shareUrl = `https://app.surf-vault.com/${handle}`;
+    await Share.share(
+      Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl }
+    );
+  }, [handle]);
+
+  // Message
+  const handleMessage = useCallback(() => {
+    if (!requireAuth()) return;
+    // TODO: Navigate to conversation with this user
+  }, [requireAuth]);
+
+  const hasActiveNote = !!profile?.status_note && isNoteActive(profile?.status_note_set_at);
+  const isPrivate = profile?.access === 'private' && !isSelf;
+  const userType = profile?.user_type;
 
   const ProfileHeader = () => (
-    <View className="px-4 pt-4">
-      {/* Avatar + name */}
-      <View className="items-center mb-4">
+    <View style={styles.profileWrap}>
+      {/* Row 1: Avatar + (Name + Stats) */}
+      <View style={styles.topRow}>
         <UserAvatar
           uri={profile?.picture}
           name={profile?.name ?? profile?.handle}
@@ -91,141 +109,140 @@ export default function UserProfileScreen() {
           verified={profile?.verified}
           hasStatusNote={hasActiveNote}
         />
-        <Text className="text-xl font-bold text-gray-900 dark:text-white mt-3">
-          {profile?.name ?? handle}
-        </Text>
-        <Text className="text-sm text-gray-500 dark:text-gray-400">
-          @{profile?.handle ?? handle}
-        </Text>
-
-        {/* Active status */}
-        {profile?.active && (
-          <View className="bg-green-100 dark:bg-green-900/30 rounded-full px-3 py-1 mt-2">
-            <Text className="text-green-600 dark:text-green-400 text-xs font-medium">
-              Currently shooting
-            </Text>
+        <View style={styles.rightColumn}>
+          {/* Name + active dot + social icons */}
+          <View style={styles.nameRowOuter}>
+            <View style={styles.nameAndDot}>
+              <Text style={[styles.nameText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                {profile?.name ?? profile?.handle ?? handle}
+              </Text>
+              <View style={[
+                styles.activeDot,
+                { backgroundColor: profile?.active ? '#10b981' : 'transparent', borderWidth: profile?.active ? 0 : 1, borderColor: '#9ca3af' },
+              ]} />
+            </View>
+            {(profile?.instagram || profile?.youtube || profile?.website) && (
+              <View style={styles.socialIcons}>
+                {profile?.instagram && (
+                  <Pressable onPress={() => Linking.openURL(`https://instagram.com/${profile.instagram.replace(/^@/, '')}`)} hitSlop={6}>
+                    <Ionicons name="logo-instagram" size={16} color="#ec4899" />
+                  </Pressable>
+                )}
+                {profile?.youtube && (
+                  <Pressable onPress={() => Linking.openURL(`https://youtube.com/@${profile.youtube}`)} hitSlop={6}>
+                    <Ionicons name="logo-youtube" size={16} color="#ef4444" />
+                  </Pressable>
+                )}
+                {profile?.website && (
+                  <Pressable onPress={() => Linking.openURL(profile.website?.startsWith('http') ? profile.website : `https://${profile.website}`)} hitSlop={6}>
+                    <Ionicons name="link-outline" size={16} color="#3b82f6" />
+                  </Pressable>
+                )}
+              </View>
+            )}
           </View>
-        )}
-
-        {/* Status note */}
-        {hasActiveNote && (
-          <View className="bg-sky-50 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/20 rounded-xl px-4 py-2 mt-3 max-w-[280px]">
-            <Text className="text-sm text-sky-700 dark:text-sky-300 text-center">
-              {profile?.status_note}
-            </Text>
+          {/* Stats */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
+                {profile?.surfBreaksCount ?? 0}
+              </Text>
+              <Text style={styles.statLabel}>spots</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
+                {profile?.followersCount ?? 0}
+              </Text>
+              <Text style={styles.statLabel}>followers</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={[styles.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
+                {profile?.followingCount ?? 0}
+              </Text>
+              <Text style={styles.statLabel}>following</Text>
+            </View>
           </View>
-        )}
+        </View>
       </View>
+
+      {/* Private badge */}
+      {isPrivate && (
+        <View style={[styles.rolePill, { backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2', alignSelf: 'flex-start', marginBottom: 4 }]}>
+          <Text style={{ fontSize: 10, fontWeight: '600', color: isDark ? '#fca5a5' : '#dc2626' }}>Private</Text>
+        </View>
+      )}
 
       {/* Bio */}
       {profile?.bio && (
-        <Text className="text-sm text-gray-600 dark:text-gray-300 text-center mb-4">
+        <Text style={[styles.bioText, { color: isDark ? '#d1d5db' : '#374151' }]}>
           {profile.bio}
         </Text>
       )}
 
-      {/* Stats */}
-      <View className="flex-row justify-center gap-8 py-3 border-t border-b border-gray-200 dark:border-gray-800 mb-4">
-        <View className="items-center">
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            {profile?.surfBreaksCount ?? 0}
-          </Text>
-          <Text className="text-xs text-gray-500 dark:text-gray-400">Spots</Text>
-        </View>
-        <View className="items-center">
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            {profile?.followersCount ?? 0}
-          </Text>
-          <Text className="text-xs text-gray-500 dark:text-gray-400">Followers</Text>
-        </View>
-        <View className="items-center">
-          <Text className="text-lg font-bold text-gray-900 dark:text-white">
-            {profile?.followingCount ?? 0}
-          </Text>
-          <Text className="text-xs text-gray-500 dark:text-gray-400">Following</Text>
-        </View>
-      </View>
-
-      {/* Action buttons */}
-      {!isSelf && profile && (
-        <View className="flex-row gap-3 mb-4">
-          <Pressable
-            onPress={handleFollow}
-            className={`flex-1 rounded-xl py-3 items-center ${
-              profile.isFollowing
-                ? 'bg-gray-100 dark:bg-gray-800'
-                : 'bg-sky-500 active:bg-sky-600'
-            }`}
-          >
-            <Text
-              className={`font-semibold ${
-                profile.isFollowing
-                  ? 'text-gray-900 dark:text-white'
-                  : 'text-white'
-              }`}
-            >
-              {profile.isFollowing ? 'Following' : 'Follow'}
-            </Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              if (!requireAuth()) return;
-              // TODO: Navigate to conversation
-            }}
-            className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-xl py-3 items-center"
-          >
-            <Text className="font-semibold text-gray-900 dark:text-white">Message</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {/* Social links */}
-      {(profile?.instagram || profile?.youtube || profile?.website) && (
-        <View className="flex-row gap-4 justify-center mb-4">
-          {profile?.instagram && (
-            <Pressable
-              onPress={() =>
-                Linking.openURL(`https://instagram.com/${profile.instagram}`)
-              }
-            >
-              <Ionicons name="logo-instagram" size={22} color="#6b7280" />
-            </Pressable>
+      {/* Role pill + Tags */}
+      {(userType || (profile?.tags?.length ?? 0) > 0) && (
+        <View style={styles.tagsRow}>
+          {userType && (
+            <View style={[styles.tagPill, {
+              backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9',
+            }]}>
+              <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#d1d5db' : '#475569' }}>
+                {userType === 'photographer' ? '📸 Photographer' : '🏄‍♂️ Surfer'}
+              </Text>
+            </View>
           )}
-          {profile?.youtube && (
-            <Pressable
-              onPress={() =>
-                Linking.openURL(`https://youtube.com/${profile.youtube}`)
-              }
-            >
-              <Ionicons name="logo-youtube" size={22} color="#6b7280" />
-            </Pressable>
-          )}
-          {profile?.website && (
-            <Pressable onPress={() => Linking.openURL(profile.website)}>
-              <Ionicons name="globe-outline" size={22} color="#6b7280" />
-            </Pressable>
-          )}
-        </View>
-      )}
-
-      {/* Tags */}
-      {profile?.tags?.length > 0 && (
-        <View className="flex-row flex-wrap gap-2 justify-center mb-4">
-          {profile.tags.map((tag: string) => (
-            <View
-              key={tag}
-              className="bg-gray-100 dark:bg-gray-800 rounded-full px-3 py-1"
-            >
-              <Text className="text-xs text-gray-600 dark:text-gray-400">{tag}</Text>
+          {profile?.tags?.map((tag: string) => (
+            <View key={tag} style={[styles.tagPill, {
+              backgroundColor: isDark ? 'rgba(99,102,241,0.1)' : '#eef2ff',
+            }]}>
+              <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#a5b4fc' : '#4338ca' }}>
+                {tag}
+              </Text>
             </View>
           ))}
         </View>
       )}
 
-      <View className="h-px bg-gray-200 dark:bg-gray-800 mb-2" />
-      <Text className="text-base font-semibold text-gray-900 dark:text-white mb-2">
-        Sessions
-      </Text>
+      {/* Status note */}
+      {hasActiveNote && (
+        <View style={[styles.statusNote, {
+          backgroundColor: isDark ? 'rgba(14,165,233,0.08)' : '#f0f9ff',
+          borderColor: isDark ? 'rgba(14,165,233,0.2)' : '#bae6fd',
+        }]}>
+          <Ionicons name="chatbubble-outline" size={13} color="#0ea5e9" style={{ marginRight: 6 }} />
+          <Text style={{ fontSize: 13, color: isDark ? '#7dd3fc' : '#0369a1', flex: 1 }}>
+            {profile.status_note}
+          </Text>
+        </View>
+      )}
+
+      {/* Action buttons */}
+      {!isSelf && profile && (
+        <View style={styles.actionRow}>
+          <Pressable onPress={handleFollow} style={[styles.actionBtn, {
+            backgroundColor: profile.isFollowing ? (isDark ? '#1f2937' : '#f3f4f6') : '#0ea5e9',
+          }]}>
+            <Text style={[styles.actionBtnText, {
+              color: profile.isFollowing ? (isDark ? '#fff' : '#111827') : '#fff',
+            }]}>
+              {profile.isFollowing ? 'Following' : 'Follow'}
+            </Text>
+          </Pressable>
+          <Pressable onPress={handleMessage} style={[styles.actionBtn, {
+            backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+          }]}>
+            <Text style={[styles.actionBtnText, { color: isDark ? '#fff' : '#111827' }]}>Message</Text>
+          </Pressable>
+          <Pressable onPress={handleShare} style={[styles.iconBtn, {
+            backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+          }]}>
+            <Ionicons name="share-outline" size={18} color={isDark ? '#fff' : '#374151'} />
+          </Pressable>
+        </View>
+      )}
+
+      {/* Divider before sessions */}
+      <View style={[styles.divider, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]} />
     </View>
   );
 
@@ -234,29 +251,35 @@ export default function UserProfileScreen() {
       <Stack.Screen
         options={{
           headerShown: true,
-          headerTitle: `@${handle}`,
-          headerBackTitle: 'Back',
+          headerTitle: '',
+          headerLeft: () => (
+            <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name="chevron-back" size={28} color="#007AFF" />
+              <Text style={{ fontSize: 17, color: '#007AFF' }}>{profile?.handle ?? handle}</Text>
+            </Pressable>
+          ),
         }}
       />
-      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={['bottom']}>
+      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
-          <View className="flex-1 items-center justify-center">
-            <ActivityIndicator size="large" />
-          </View>
+          <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
         ) : (
           <FlatList
             data={sessions}
             keyExtractor={(item) => item.session_id ?? item.id}
             renderItem={({ item }) => (
-              <View className="px-4">
-                <SessionCard session={item} />
+              <View style={{ paddingHorizontal: 16 }}>
+                <SessionCard session={item} hidePhotographer />
               </View>
             )}
             ListHeaderComponent={<ProfileHeader />}
             ListEmptyComponent={
-              <View className="items-center py-12">
-                <Text className="text-gray-400 dark:text-gray-600">No sessions yet</Text>
+              <View style={{ alignItems: 'center', paddingVertical: 48 }}>
+                <Text style={{ color: '#9ca3af' }}>No sessions yet</Text>
               </View>
+            }
+            ListFooterComponent={
+              sessionsFetching ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null
             }
             showsVerticalScrollIndicator={false}
           />
@@ -265,3 +288,43 @@ export default function UserProfileScreen() {
     </>
   );
 }
+
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  profileWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
+
+  topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  rightColumn: { flex: 1, marginLeft: 16 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8, paddingRight: 16 },
+  statItem: { alignItems: 'flex-start' },
+  statNumber: { fontSize: 15, fontWeight: '600' },
+  statLabel: { fontSize: 12, color: '#9ca3af', marginTop: 1 },
+
+  nameRowOuter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  nameAndDot: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  nameText: { fontSize: 15, fontWeight: '700', flexShrink: 1 },
+  rolePill: { borderRadius: 999, paddingHorizontal: 5, paddingVertical: 1 },
+  rolePillText: { fontSize: 12 },
+  activeDot: { width: 8, height: 8, borderRadius: 4 },
+  socialIcons: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: 2 },
+
+  bioText: { fontSize: 14, lineHeight: 19, marginBottom: 8 },
+
+  tagsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 8 },
+  tagPill: { borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2 },
+
+  statusNote: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 10,
+  },
+
+  actionRow: { flexDirection: 'row', gap: 6, marginBottom: 10 },
+  actionBtn: { flex: 1, borderRadius: 8, paddingVertical: 8, alignItems: 'center' },
+  actionBtnText: { fontSize: 13, fontWeight: '600' },
+  iconBtn: { width: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+
+  divider: { height: 1, marginBottom: 8 },
+
+
+});

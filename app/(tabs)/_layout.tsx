@@ -2,12 +2,12 @@ import { Tabs } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useGetUnreadMessageCountQuery } from '../../src/store';
+import { TabBarProvider, useTabBar } from '../../src/context/TabBarContext';
 
-type TabIconName = React.ComponentProps<typeof Ionicons>['name'];
-
-export default function TabLayout() {
+function TabsInner() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { tabBarVisible } = useTabBar();
 
   const { data: unreadData } = useGetUnreadMessageCountQuery(undefined);
   const unreadCount = unreadData?.results?.unreadCount ?? 0;
@@ -18,10 +18,12 @@ export default function TabLayout() {
         headerShown: false,
         tabBarActiveTintColor: '#0ea5e9',
         tabBarInactiveTintColor: isDark ? '#6b7280' : '#9ca3af',
-        tabBarStyle: {
-          backgroundColor: isDark ? '#030712' : '#ffffff',
-          borderTopColor: isDark ? '#1f2937' : '#e5e7eb',
-        },
+        tabBarStyle: tabBarVisible
+          ? {
+              backgroundColor: isDark ? '#030712' : '#ffffff',
+              borderTopColor: isDark ? '#1f2937' : '#e5e7eb',
+            }
+          : { display: 'none' },
       }}
     >
       <Tabs.Screen
@@ -73,5 +75,13 @@ export default function TabLayout() {
       {/* Hide nested stack routes from tab bar */}
       <Tabs.Screen name="home" options={{ href: null }} />
     </Tabs>
+  );
+}
+
+export default function TabLayout() {
+  return (
+    <TabBarProvider>
+      <TabsInner />
+    </TabBarProvider>
   );
 }

@@ -1,32 +1,37 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   FlatList,
   ActivityIndicator,
   Pressable,
+  ScrollView,
   useColorScheme,
+  StyleSheet,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useDispatch } from 'react-redux';
-import BottomSheet, { BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { setCoordinates } from '../../src/store/slices/location';
 import {
   useGetLatestSessionsQuery,
   useGetNearbySurfBreaksQuery,
   useGetNearbyPhotographersQuery,
-  useGetSurfBreaksQuery,
+  useGetMapSearchContentQuery,
   useGetPopularTagsQuery,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
+import { useTabBar } from '../../src/context/TabBarContext';
 import SessionCard from '../../src/components/SessionCard';
-import SearchBar from '../../src/components/SearchBar';
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
+import UserAvatar from '../../src/components/UserAvatar';
+
+type SearchType = 'surf_break' | 'photographer';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -34,10 +39,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
-
-  // Bottom sheet
-  const bottomSheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ['85%'], []);
+  const { setTabBarVisible } = useTabBar();
 
   // Location
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
@@ -56,7 +58,7 @@ export default function HomeScreen() {
     })();
   }, []);
 
-  // ---- Discover Feed (latest sessions) ----
+  // ---- Discover Feed ----
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
   const seenIdsRef = useRef(new Set<string>());
@@ -72,31 +74,20 @@ export default function HomeScreen() {
   useEffect(() => {
     const results = sessionsData?.results;
     if (!results) return;
-
     const incoming = Array.isArray(results.sessions) ? results.sessions : [];
     const nextToken = results.continuationToken || '';
-
     hasMoreRef.current = Boolean(nextToken);
-
-    if (!incoming.length) {
-      isFetchingMoreRef.current = false;
-      return;
-    }
-
+    if (!incoming.length) { isFetchingMoreRef.current = false; return; }
     setSessions((prev) => {
       const newItems: any[] = [];
       for (const s of incoming) {
         const id = s?.session_id ?? s?.id;
         if (!id) continue;
-        if (!seenIdsRef.current.has(id)) {
-          seenIdsRef.current.add(id);
-          newItems.push(s);
-        }
+        if (!seenIdsRef.current.has(id)) { seenIdsRef.current.add(id); newItems.push(s); }
       }
       if (!newItems.length) return prev;
       return prev.concat(newItems);
     });
-
     isFetchingMoreRef.current = false;
   }, [sessionsData]);
 
@@ -104,22 +95,19 @@ export default function HomeScreen() {
     if (!hasMoreRef.current || isFetchingMoreRef.current) return;
     const nextToken = sessionsData?.results?.continuationToken;
     if (!nextToken) return;
-
     isFetchingMoreRef.current = true;
     setContinuationToken(nextToken);
   }, [sessionsData]);
 
-  const handleRefresh = useCallback(() => {
-    seenIdsRef.current = new Set();
-    setSessions([]);
-    setContinuationToken('');
-    hasMoreRef.current = false;
-    isFetchingMoreRef.current = false;
-  }, []);
-
-  // ---- Search drawer state ----
+  // ---- Search overlay ----
+  const [searchVisible, setSearchVisible] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchType, setSearchType] = useState<SearchType>('surf_break');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const searchInputRef = useRef<TextInput>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Nearby data
   const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
     { lat: coords?.lat ?? 0, long: coords?.lon ?? 0 },
     { skip: !coords }
@@ -128,227 +116,536 @@ export default function HomeScreen() {
     { lat: coords?.lat ?? 0, long: coords?.lon ?? 0 },
     { skip: !coords }
   );
-  const { data: searchData, isFetching: searchLoading } = useGetSurfBreaksQuery(
-    { search: searchTerm, limit: 10, continuationToken: '' },
-    { skip: searchTerm.length < 2 }
+
+  // Search — uses /map/search which returns { results: { searchContent: [...] } }
+  // API accepts type: "all" | "surf_break" | "photographer"
+  const hasTagFilter = searchType === 'photographer' && selectedTags.length > 0;
+  const { data: searchData, isFetching: searchLoading } = useGetMapSearchContentQuery(
+    {
+      search: searchTerm,
+      type: searchType, // "surf_break" or "photographer" — matches API
+      tags: searchType === 'photographer' ? selectedTags : [],
+    },
+    { skip: searchTerm.length < 2 && !hasTagFilter }
   );
+
   const { data: tagsData } = useGetPopularTagsQuery(undefined);
 
   const nearbyBreaks = nearbyBreaksData?.results?.surfBreaks ?? [];
   const nearbyPhotographers = nearbyPhotographersData?.results?.photographers ?? [];
-  const searchResults = searchData?.results?.surfBreaks ?? [];
   const popularTags = tagsData?.results?.tags ?? [];
 
+  // Parse search results — API returns searchContent array, dedupe by composite key
+  const rawSearchContent = searchData?.results?.searchContent ?? [];
+  const searchContent = rawSearchContent.filter((item: any, index: number, arr: any[]) => {
+    const key = item.handle
+      ? `user:${item.handle}`
+      : `break:${item.name}:${item.region ?? ''}:${item.country_code ?? ''}`;
+    return arr.findIndex((i: any) => {
+      const iKey = i.handle
+        ? `user:${i.handle}`
+        : `break:${i.name}:${i.region ?? ''}:${i.country_code ?? ''}`;
+      return iKey === key;
+    }) === index;
+  });
+
+  // Recent searches from user profile
+  const recentSearches = user?.recentSearches ?? [];
+  const filteredRecents = recentSearches.filter((r: any) => {
+    if (searchType === 'surf_break') return r.itemType === 'surf_break';
+    return r.itemType === 'user';
+  });
+
+  const handleSearchInput = useCallback((text: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setSearchTerm(text), 350);
+  }, []);
+
+  const toggleTag = useCallback((tag: string) => {
+    setSelectedTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  }, []);
+
   const openSearch = useCallback(() => {
-    bottomSheetRef.current?.expand();
-  }, []);
+    setSearchVisible(true);
+    setTabBarVisible(false);
+    setTimeout(() => searchInputRef.current?.focus(), 100);
+  }, [setTabBarVisible]);
 
-  const handleSearch = useCallback((term: string) => {
-    setSearchTerm(term);
-  }, []);
+  const closeSearch = useCallback(() => {
+    setSearchVisible(false);
+    setTabBarVisible(true);
+    setSearchTerm('');
+    setSelectedTags([]);
+  }, [setTabBarVisible]);
 
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950">
+  const navigateAndClose = useCallback((path: string) => {
+    setSearchVisible(false);
+    setTabBarVisible(true);
+    setSearchTerm('');
+    setSelectedTags([]);
+    router.push(path as any);
+  }, [router, setTabBarVisible]);
+
+  const navigateToBreak = useCallback((item: any) => {
+    const identifier = item.surf_break_identifier;
+    if (identifier) {
+      const parts = identifier.split('/');
+      if (parts.length === 3) {
+        navigateAndClose(`/home/${parts[0]}/${parts[1]}/${parts[2]}`);
+      }
+    }
+  }, [navigateAndClose]);
+
+  const navigateToUser = useCallback((handle: string) => {
+    navigateAndClose(`/home/user/${handle}`);
+  }, [navigateAndClose]);
+
+  const isSearching = searchTerm.length >= 2 || hasTagFilter;
+
+  // ---- Search overlay ----
+  if (searchVisible) {
+    return (
+      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]}>
         {/* Header */}
-        <View className="flex-row items-center justify-between px-4 py-3">
-          <Text className="text-2xl font-bold text-gray-900 dark:text-white">
-            Discover
-          </Text>
-          <Pressable onPress={openSearch} hitSlop={8}>
-            <Ionicons
-              name="search-outline"
-              size={24}
-              color={isDark ? '#e5e7eb' : '#374151'}
-            />
+        <View style={styles.searchHeader}>
+          <Text style={[styles.searchTitle, { color: isDark ? '#ffffff' : '#111827' }]}>Search</Text>
+          <Pressable onPress={closeSearch} hitSlop={8}>
+            <Ionicons name="close" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
           </Pressable>
         </View>
 
-        {/* Session feed */}
-        {isLoading && sessions.length === 0 ? (
-          <View className="flex-1 items-center justify-center">
-            <ActivityIndicator size="large" />
-          </View>
-        ) : (
-          <FlatList
-            data={sessions}
-            keyExtractor={(item) => item.session_id ?? item.id}
-            renderItem={({ item }) => (
-              <View className="px-4">
-                <SessionCard session={item} />
-              </View>
-            )}
-            ListEmptyComponent={
-              !isLoading ? (
-                <View className="items-center py-20">
-                  <Text className="text-gray-400 dark:text-gray-600 text-base">
-                    No sessions yet
-                  </Text>
-                </View>
-              ) : null
-            }
-            ListFooterComponent={
-              isFetching && sessions.length > 0 ? (
-                <View className="py-6">
-                  <ActivityIndicator />
-                </View>
-              ) : null
-            }
-            onEndReached={handleLoadMore}
-            onEndReachedThreshold={0.5}
-            showsVerticalScrollIndicator={false}
+        {/* Search input */}
+        <View style={[styles.searchInputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+          <Ionicons name="search-outline" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
+          <TextInput
+            ref={searchInputRef}
+            placeholder={searchType === 'photographer' ? 'Search photographers...' : 'Search surf breaks...'}
+            placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+            onChangeText={handleSearchInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[styles.searchInput, { color: isDark ? '#ffffff' : '#111827' }]}
           />
+        </View>
+
+        {/* Type toggle */}
+        <View style={[styles.toggleWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+          <Pressable
+            onPress={() => { setSearchType('surf_break'); setSelectedTags([]); setSearchTerm(''); }}
+            style={[
+              styles.toggleBtn,
+              searchType === 'surf_break' && {
+                backgroundColor: isDark ? '#374151' : '#ffffff',
+                shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+              },
+            ]}
+          >
+            <Text style={[
+              styles.toggleText,
+              { color: searchType === 'surf_break' ? (isDark ? '#fff' : '#111827') : (isDark ? '#9ca3af' : '#6b7280') },
+              searchType === 'surf_break' && styles.toggleTextActive,
+            ]}>Surf Breaks</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => { setSearchType('photographer'); setSearchTerm(''); }}
+            style={[
+              styles.toggleBtn,
+              searchType === 'photographer' && {
+                backgroundColor: isDark ? '#374151' : '#ffffff',
+                shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
+              },
+            ]}
+          >
+            <Text style={[
+              styles.toggleText,
+              { color: searchType === 'photographer' ? (isDark ? '#fff' : '#111827') : (isDark ? '#9ca3af' : '#6b7280') },
+              searchType === 'photographer' && styles.toggleTextActive,
+            ]}>Photographers</Text>
+          </Pressable>
+        </View>
+
+        {/* Tags — photographers only */}
+        {searchType === 'photographer' && popularTags.length > 0 && (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tagsWrap}
+            style={{ flexGrow: 0 }}
+          >
+            {popularTags.map((tag: any) => {
+              const tagName = tag.tag ?? tag;
+              const isSelected = selectedTags.includes(tagName);
+              return (
+                <Pressable
+                  key={tagName}
+                  onPress={() => toggleTag(tagName)}
+                  style={[
+                    styles.tagChip,
+                    {
+                      backgroundColor: isSelected ? '#0ea5e9' : 'transparent',
+                      borderColor: isSelected ? '#0ea5e9' : (isDark ? '#374151' : '#e5e7eb'),
+                    },
+                  ]}
+                >
+                  <Text style={[
+                    styles.tagText,
+                    { color: isSelected ? '#ffffff' : (isDark ? '#9ca3af' : '#4b5563') },
+                    isSelected && { fontWeight: '500' },
+                  ]}>{tagName}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         )}
 
-        {/* Search / Explore Bottom Sheet */}
-        <BottomSheet
-          ref={bottomSheetRef}
-          index={-1}
-          snapPoints={snapPoints}
-          enablePanDownToClose
-          backgroundStyle={{
-            backgroundColor: isDark ? '#111827' : '#ffffff',
-          }}
-          handleIndicatorStyle={{
-            backgroundColor: isDark ? '#4b5563' : '#d1d5db',
-          }}
-        >
-          <BottomSheetScrollView
-            contentContainerStyle={{ paddingBottom: 40 }}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Search */}
-            <View className="px-4 pb-4">
-              <SearchBar
-                placeholder="Search surf breaks..."
-                onSearch={handleSearch}
-                debounceMs={350}
-              />
+        {/* Results / Recents / Default */}
+        <ScrollView style={styles.flex} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          {isSearching ? (
+            /* ---- Active search results ---- */
+            <View style={styles.resultsWrap}>
+              {searchLoading ? (
+                <View style={styles.centered}><ActivityIndicator /></View>
+              ) : searchContent.length > 0 ? (
+                searchContent.map((item: any) => {
+                  // User result
+                  if (item.handle) {
+                    return (
+                      <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
+                        <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} />
+                        <View style={styles.resultInfo}>
+                          <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
+                            {item.name ?? item.handle}
+                          </Text>
+                          <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                            @{item.handle}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  }
+                  // Surf break result
+                  return (
+                    <Pressable key={item.id} onPress={() => navigateToBreak(item)} style={styles.resultRow}>
+                      <View style={[styles.resultIcon, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                        <Ionicons name="location-outline" size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
+                      </View>
+                      <View style={styles.resultInfo}>
+                        <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
+                          {item.name}
+                        </Text>
+                        <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                          {item.region ? `${item.region.replaceAll('_', ' ')} · ` : ''}{item.country_code ?? ''}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })
+              ) : (
+                <Text style={[styles.emptyText, { color: '#9ca3af' }]}>
+                  No {searchType === 'photographer' ? 'photographers' : 'surf breaks'} found
+                </Text>
+              )}
             </View>
-
-            {/* Search results */}
-            {searchTerm.length >= 2 ? (
-              <View className="px-4">
-                {searchLoading ? (
-                  <View className="py-8 items-center">
-                    <ActivityIndicator />
-                  </View>
-                ) : searchResults.length > 0 ? (
-                  searchResults.map((item: any) => (
-                    <SurfBreakCard key={item.id} surfBreak={item} />
-                  ))
-                ) : (
-                  <Text className="text-gray-400 text-center py-8">
-                    No results found
+          ) : (
+            <>
+              {/* ---- Recent searches ---- */}
+              {filteredRecents.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                    Recent
                   </Text>
-                )}
-              </View>
-            ) : (
-              <>
-                {/* Nearby Surf Breaks */}
-                {nearbyBreaks.length > 0 && (
-                  <View className="mb-6">
-                    <Text className="text-lg font-bold text-gray-900 dark:text-white px-4 mb-3">
+                  {filteredRecents.map((recent: any, idx: number) => {
+                    const item = recent.itemType === 'surf_break' ? recent.surfBreak : recent.user;
+                    if (!item) return null;
+
+                    if (recent.itemType === 'user' && item.handle) {
+                      return (
+                        <Pressable key={item.id ?? idx} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
+                          <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={36} />
+                          <View style={styles.resultInfo}>
+                            <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
+                              {item.name ?? item.handle}
+                            </Text>
+                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                              @{item.handle}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      );
+                    }
+
+                    return (
+                      <Pressable key={item.id ?? idx} onPress={() => navigateToBreak(item)} style={styles.resultRow}>
+                        <View style={[styles.resultIcon, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                          <Ionicons name="location-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                        </View>
+                        <View style={styles.resultInfo}>
+                          <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
+                            {item.name}
+                          </Text>
+                          <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                            {item.region ? `${item.region.replaceAll('_', ' ')} · ` : ''}{item.country_code ?? ''}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Empty state when no recents */}
+              {filteredRecents.length === 0 && (
+                <View style={styles.centered}>
+                  <Text style={{ color: '#9ca3af', fontSize: 14 }}>
+                    Search for {searchType === 'photographer' ? 'photographers' : 'surf breaks'}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ---- Main discover feed ----
+  return (
+    <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={['top']}>
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <Image
+            source={require('../../assets/surfvault-logo.png')}
+            style={[styles.headerLogo, isDark && { tintColor: '#ffffff' }]}
+            contentFit="contain"
+          />
+          <Text style={[styles.headerTitle, { color: isDark ? '#ffffff' : '#000000' }]}>
+            SurfVault
+          </Text>
+        </View>
+        <Pressable onPress={openSearch} hitSlop={8}>
+          <Ionicons name="search-outline" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
+        </Pressable>
+      </View>
+
+      {isLoading && sessions.length === 0 ? (
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator size="large" />
+        </View>
+      ) : (
+        <FlatList
+          data={sessions}
+          keyExtractor={(item) => item.session_id ?? item.id}
+          renderItem={({ item }) => (
+            <View className="px-4">
+              <SessionCard session={item} />
+            </View>
+          )}
+          ListHeaderComponent={
+            <>
+              {/* Nearby Surf Breaks */}
+              {nearbyBreaks.length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={{ paddingHorizontal: 16, marginBottom: 4 }}>
+                    <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>
                       Nearby Surf Breaks
                     </Text>
-                    <FlatList
-                      data={nearbyBreaks}
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ paddingHorizontal: 16 }}
-                      keyExtractor={(item: any) => item.id}
-                      renderItem={({ item }) => (
-                        <SurfBreakCard surfBreak={item} compact />
-                      )}
-                      scrollEnabled={true}
-                      nestedScrollEnabled={true}
-                    />
+                    <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                      Surf breaks within 300km of you
+                    </Text>
                   </View>
-                )}
+                  <FlatList
+                    data={nearbyBreaks}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8 }}
+                    keyExtractor={(item: any) => item.id}
+                    renderItem={({ item }) => (
+                      <Pressable onPress={() => {
+                        if (item.surf_break_identifier) {
+                          const parts = item.surf_break_identifier.split('/');
+                          if (parts.length === 3) router.push(`/home/${parts[0]}/${parts[1]}/${parts[2]}` as any);
+                        }
+                      }}>
+                        <SurfBreakCard surfBreak={item} compact />
+                      </Pressable>
+                    )}
+                    scrollEnabled
+                  />
+                </View>
+              )}
 
-                {/* Nearby Photographers */}
-                {nearbyPhotographers.length > 0 && (
-                  <View className="mb-6">
-                    <Text className="text-lg font-bold text-gray-900 dark:text-white px-4 mb-3">
+              {/* Nearby Photographers */}
+              {nearbyPhotographers.length > 0 && (
+                <View style={{ marginBottom: 24 }}>
+                  <View style={{ paddingHorizontal: 16, marginBottom: 4 }}>
+                    <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>
                       Nearby Photographers
                     </Text>
-                    <FlatList
-                      data={nearbyPhotographers}
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ paddingHorizontal: 16 }}
-                      keyExtractor={(item: any) => item.id ?? item.handle}
-                      renderItem={({ item }) => (
-                        <PhotographerCard photographer={item} compact />
-                      )}
-                      scrollEnabled={true}
-                      nestedScrollEnabled={true}
-                    />
-                  </View>
-                )}
-
-                {/* Popular Tags */}
-                {popularTags.length > 0 && (
-                  <View className="mb-6 px-4">
-                    <Text className="text-lg font-bold text-gray-900 dark:text-white mb-3">
-                      Popular Tags
+                    <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                      Photographers within 100km of you
                     </Text>
-                    <View className="flex-row flex-wrap gap-2">
-                      {popularTags.map((tag: any) => (
-                        <Pressable
-                          key={tag.tag ?? tag}
-                          className="bg-sky-50 dark:bg-sky-500/10 border border-sky-200 dark:border-sky-500/20 rounded-full px-3 py-1.5"
-                        >
-                          <Text className="text-sky-600 dark:text-sky-400 text-sm">
-                            {tag.tag ?? tag}
-                          </Text>
-                        </Pressable>
-                      ))}
-                    </View>
                   </View>
-                )}
-
-                {/* Browse links */}
-                <View className="px-4">
-                  <Text className="text-lg font-bold text-gray-900 dark:text-white mb-3">
-                    Browse
-                  </Text>
-                  <Pressable
-                    onPress={() => {
-                      bottomSheetRef.current?.close();
-                      router.push('/home/surf-breaks');
-                    }}
-                    className="flex-row items-center justify-between py-4 border-b border-gray-100 dark:border-gray-800"
-                  >
-                    <View className="flex-row items-center">
-                      <Ionicons name="location-outline" size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
-                      <Text className="text-base text-gray-900 dark:text-white ml-3">
-                        Surf Breaks
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
-                  </Pressable>
-                  <Pressable
-                    onPress={() => {
-                      bottomSheetRef.current?.close();
-                      router.push('/home/photographers');
-                    }}
-                    className="flex-row items-center justify-between py-4 border-b border-gray-100 dark:border-gray-800"
-                  >
-                    <View className="flex-row items-center">
-                      <Ionicons name="camera-outline" size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
-                      <Text className="text-base text-gray-900 dark:text-white ml-3">
-                        Photographers
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color="#9ca3af" />
-                  </Pressable>
+                  <FlatList
+                    data={nearbyPhotographers}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, gap: 16 }}
+                    keyExtractor={(item: any) => item.id ?? item.handle}
+                    renderItem={({ item }) => (
+                      <Pressable
+                        onPress={() => router.push(`/home/user/${item.handle}` as any)}
+                        style={{ alignItems: 'center', width: 80 }}
+                      >
+                        <UserAvatar
+                          uri={item.picture}
+                          name={item.name ?? item.handle}
+                          size={64}
+                          active={item.active}
+                          verified={item.verified}
+                          hasStatusNote={!!item.status_note && Date.now() - new Date(item.status_note_set_at).getTime() < 7 * 24 * 60 * 60 * 1000}
+                        />
+                        <Text
+                          style={[styles.photographerHandle, { color: isDark ? '#fff' : '#111827' }]}
+                          numberOfLines={1}
+                        >
+                          @{item.handle}
+                        </Text>
+                        {item.active && (
+                          <View style={[styles.activeDot, { backgroundColor: '#22c55e' }]} />
+                        )}
+                      </Pressable>
+                    )}
+                    scrollEnabled
+                  />
                 </View>
-              </>
-            )}
-          </BottomSheetScrollView>
-        </BottomSheet>
-      </SafeAreaView>
-    </GestureHandlerRootView>
+              )}
+
+            </>
+          }
+          ListEmptyComponent={
+            !isLoading ? (
+              <View className="items-center py-20">
+                <Text className="text-gray-400 dark:text-gray-600 text-base">No sessions yet</Text>
+              </View>
+            ) : null
+          }
+          ListFooterComponent={
+            isFetching && sessions.length > 0 ? (
+              <View className="py-6"><ActivityIndicator /></View>
+            ) : null
+          }
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  flex: { flex: 1 },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  searchTitle: { fontSize: 18, fontWeight: '700' },
+  searchInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 16 },
+  toggleWrap: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 12,
+  },
+  toggleBtn: {
+    flex: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  toggleText: { fontSize: 14 },
+  toggleTextActive: { fontWeight: '600' },
+  tagsWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  tagChip: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    alignSelf: 'center',
+  },
+  tagText: { fontSize: 13 },
+  resultsWrap: { paddingHorizontal: 16 },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e7eb',
+  },
+  resultIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultInfo: { marginLeft: 12, flex: 1 },
+  resultName: { fontSize: 15, fontWeight: '600' },
+  resultSub: { fontSize: 13, marginTop: 1 },
+  centered: { paddingVertical: 48, alignItems: 'center' },
+  emptyText: { textAlign: 'center', paddingVertical: 48 },
+  section: { marginBottom: 24 },
+  sectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingLeft: 4,
+    paddingRight: 16,
+    paddingVertical: 2,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerLogo: {
+    width: 64,
+    height: 64,
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontFamily: 'SurfVaultFont',
+    marginLeft: -8,
+  },
+  nearbyTitle: { fontSize: 18, fontWeight: '700' },
+  nearbySubtitle: { fontSize: 13, marginTop: 2 },
+  photographerHandle: { fontSize: 11, fontWeight: '600', marginTop: 6, textAlign: 'center' },
+  activeDot: { width: 8, height: 8, borderRadius: 4, marginTop: 3 },
+});

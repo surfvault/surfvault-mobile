@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
+import { useFonts } from 'expo-font';
 import { Auth0Provider } from 'react-native-auth0';
 import { Provider as ReduxProvider } from 'react-redux';
 import Constants from 'expo-constants';
@@ -62,6 +63,12 @@ function AppShell() {
 export default function RootLayout() {
   const auth0Domain = Constants.expoConfig?.extra?.auth0Domain ?? '';
   const auth0ClientId = Constants.expoConfig?.extra?.auth0ClientId ?? '';
+
+  const [fontsLoaded] = useFonts({
+    SurfVaultFont: require('../assets/fonts/SurfVaultFont.ttf'),
+  });
+
+  if (!fontsLoaded) return null;
 
   return (
     <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>

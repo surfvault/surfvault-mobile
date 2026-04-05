@@ -11,6 +11,7 @@ interface TaggedUser {
 }
 
 interface SessionCardProps {
+  hidePhotographer?: boolean;
   session: {
     id?: string;
     session_id?: string;
@@ -34,7 +35,7 @@ interface SessionCardProps {
 
 const MAX_VISIBLE_TAGS = 3;
 
-export default function SessionCard({ session }: SessionCardProps) {
+export default function SessionCard({ session, hidePhotographer = false }: SessionCardProps) {
   const router = useRouter();
   const sessionId = session.session_id ?? session.id;
   const handle = session.user_handle ?? session.handle;
@@ -135,18 +136,20 @@ export default function SessionCard({ session }: SessionCardProps) {
         )}
 
         {/* Photographer overlay — bottom right */}
-        <View className="absolute bottom-3 right-3 flex-row items-center bg-black/50 rounded-full px-2.5 py-1.5">
-          <UserAvatar
-            uri={session.user_picture}
-            name={session.user_name ?? handle}
-            size={22}
-          />
-          {handle && (
-            <Text className="text-white text-xs font-medium ml-1.5" numberOfLines={1}>
-              @{handle}
-            </Text>
-          )}
-        </View>
+        {!hidePhotographer && (
+          <View className="absolute bottom-3 right-3 flex-row items-center bg-black/50 rounded-full px-2.5 py-1.5">
+            <UserAvatar
+              uri={session.user_picture}
+              name={session.user_name ?? handle}
+              size={22}
+            />
+            {handle && (
+              <Text className="text-white text-xs font-medium ml-1.5" numberOfLines={1}>
+                @{handle}
+              </Text>
+            )}
+          </View>
+        )}
 
         {/* Photo count badge */}
         {session.photo_count != null && session.photo_count > 0 && (
