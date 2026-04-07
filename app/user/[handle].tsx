@@ -90,8 +90,11 @@ export default function UserProfileScreen() {
   // Message
   const handleMessage = useCallback(() => {
     if (!requireAuth()) return;
-    // TODO: Navigate to conversation with this user
-  }, [requireAuth]);
+    if (profile?.conversationId) {
+      router.push(`/conversation/${profile.conversationId}` as any);
+    }
+    // If no existing conversation, the start conversation flow will be handled separately
+  }, [requireAuth, profile, router]);
 
   const hasActiveNote = !!profile?.status_note && isNoteActive(profile?.status_note_set_at);
   const isPrivate = profile?.access === 'private' && !isSelf;
