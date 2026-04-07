@@ -239,7 +239,6 @@ export default function ConversationDetailScreen() {
       <Stack.Screen
         options={{
           headerShown: true,
-          headerTitle: '',
           headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
           headerShadowVisible: false,
           headerLeft: () => (
