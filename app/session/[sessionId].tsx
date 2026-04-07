@@ -17,8 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '../../../../src/context/UserProvider';
-import { useRequireAuth } from '../../../../src/hooks/useRequireAuth';
+import { useUser } from '../../src/context/UserProvider';
+import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import {
   useGetSessionQuery,
   useGetSessionPhotosQuery,
@@ -27,8 +27,8 @@ import {
   useDownloadSurfMediaMutation,
   useDeleteSurfMediaMutation,
   useUpdateUserFavoritesMutation,
-} from '../../../../src/store';
-import UserAvatar from '../../../../src/components/UserAvatar';
+} from '../../src/store';
+import UserAvatar from '../../src/components/UserAvatar';
 
 const FETCH_AMOUNT = 30;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -351,7 +351,7 @@ export default function SessionDetailScreen() {
                 {/* Photographer + date */}
                 {session && (
                   <Pressable
-                    onPress={() => sessionHandle && router.push(`/home/user/${sessionHandle}` as any)}
+                    onPress={() => sessionHandle && router.push(`/user/${sessionHandle}` as any)}
                     style={styles.photographerRow}
                   >
                     <UserAvatar
