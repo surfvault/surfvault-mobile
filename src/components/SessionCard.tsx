@@ -17,6 +17,7 @@ interface TaggedUser {
 
 interface SessionCardProps {
   hidePhotographer?: boolean;
+  showViewCount?: boolean;
   onPress?: () => void;
   isViewable?: boolean;
   session: {
@@ -37,6 +38,7 @@ interface SessionCardProps {
     region?: string;
     surf_break_identifier?: string;
     hide_location?: boolean;
+    view_count?: number;
     tagged_users?: TaggedUser[];
   };
 }
@@ -86,7 +88,7 @@ function FadingSubtitle({ items, visible = true }: { items: string[]; visible?: 
   );
 }
 
-export default function SessionCard({ session, hidePhotographer = false, onPress: customOnPress, isViewable = true }: SessionCardProps) {
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, onPress: customOnPress, isViewable = true }: SessionCardProps) {
   const router = useRouter();
   const { user } = useUser();
   const requireAuth = useRequireAuth();
@@ -281,6 +283,16 @@ export default function SessionCard({ session, hidePhotographer = false, onPress
             </View>
           )}
 
+          {/* View count — bottom left (self only) */}
+          {showViewCount && session.view_count != null && (
+            <View style={styles.viewCountWrap}>
+              <View style={styles.viewCountBadge}>
+                <Ionicons name="eye-outline" size={13} color="#fff" />
+                <Text style={styles.viewCountText}>{(session.view_count ?? 0).toLocaleString()}</Text>
+              </View>
+            </View>
+          )}
+
           {/* Photo count — top right */}
           {session.photo_count != null && session.photo_count > 0 && (
             <View style={styles.photoCountBadge}>
@@ -368,6 +380,35 @@ const styles = StyleSheet.create({
   },
   tagOverflowText: {
     fontSize: 9,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  viewCountWrap: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 10,
+    paddingBottom: 8,
+    paddingTop: 24,
+    backgroundColor: 'transparent',
+    // Gradient approximation with layered opacity
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    backgroundGradient: 'linear-gradient(transparent, rgba(0,0,0,0.5))',
+  },
+  viewCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  viewCountText: {
+    fontSize: 12,
     fontWeight: '600',
     color: '#fff',
   },

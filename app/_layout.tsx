@@ -44,7 +44,7 @@ function AppShell() {
     skip: !isAuthenticated,
   });
 
-  const user = isAuthenticated ? (selfData?.results ?? null) : null;
+  const user = isAuthenticated ? (selfData?.results?.user ?? selfData?.results ?? null) : null;
   const isOnboarded = user?.onboarded;
 
   // Set up Pusher when we have a user

@@ -22,6 +22,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
+import { useTabBar } from '../../src/context/TabBarContext';
 import {
   useGetSurfBreaksQuery,
   useCreateSurfSessionMutation,
@@ -49,6 +50,7 @@ export default function CreateSessionScreen() {
   const { user } = useUser();
   const { isAuthenticated, login } = useAuth();
   const requireAuth = useRequireAuth();
+  const { setTabBarVisible } = useTabBar();
 
   // Form state
   const [sessionName, setSessionName] = useState('');
@@ -84,12 +86,13 @@ export default function CreateSessionScreen() {
   const selectBreak = useCallback((brk: any) => {
     setSelectedBreak(brk);
     setShowBreakSearch(false);
+    setTabBarVisible(true);
     setBreakSearch('');
     setDebouncedSearch('');
-  }, []);
+  }, [setTabBarVisible]);
 
   const handleDateChange = useCallback((_event: any, date?: Date) => {
-    if (Platform.OS === 'android') setShowDatePicker(false);
+    if (Platform.OS === 'android') { setShowDatePicker(false); setTabBarVisible(true); }
     if (date) setSessionDate(date);
   }, []);
 
@@ -275,7 +278,7 @@ export default function CreateSessionScreen() {
             </View>
           ) : (
             <Pressable
-              onPress={() => setShowBreakSearch(true)}
+              onPress={() => { setShowBreakSearch(true); setTabBarVisible(false); }}
               style={[styles.textInput, styles.selectBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}
             >
               <Ionicons name="search-outline" size={16} color={isDark ? '#6b7280' : '#9ca3af'} />
@@ -288,7 +291,7 @@ export default function CreateSessionScreen() {
         <View style={styles.fieldWrap}>
           <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Date</Text>
           <Pressable
-            onPress={() => setShowDatePicker(true)}
+            onPress={() => { setShowDatePicker(true); setTabBarVisible(false); }}
             style={[styles.textInput, styles.selectBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}
           >
             <Ionicons name="calendar-outline" size={16} color={isDark ? '#6b7280' : '#9ca3af'} />
@@ -364,7 +367,7 @@ export default function CreateSessionScreen() {
       {/* Surf break search bottom sheet */}
       {showBreakSearch && (
         <View style={[styles.sheetOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowBreakSearch(false); setBreakSearch(''); setDebouncedSearch(''); }} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowBreakSearch(false); setTabBarVisible(true); setBreakSearch(''); setDebouncedSearch(''); }} />
           <View style={[styles.breakSheet, { backgroundColor: isDark ? '#111827' : '#fff' }]}>
             {/* Handle bar */}
             <View style={styles.sheetHandle}>
@@ -423,10 +426,10 @@ export default function CreateSessionScreen() {
       {/* Date picker overlay */}
       {showDatePicker && (
         <View style={[styles.dateOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDatePicker(false)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowDatePicker(false); setTabBarVisible(true); }} />
           <View style={[styles.dateSheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
             <View style={styles.dateSheetHeader}>
-              <Pressable onPress={() => setShowDatePicker(false)}>
+              <Pressable onPress={() => { setShowDatePicker(false); setTabBarVisible(true); }}>
                 <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
               </Pressable>
             </View>

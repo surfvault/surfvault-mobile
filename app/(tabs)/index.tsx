@@ -3,6 +3,7 @@ import {
   View,
   Text,
   FlatList,
+  RefreshControl,
   ActivityIndicator,
   Pressable,
   ScrollView,
@@ -72,7 +73,9 @@ export default function HomeScreen() {
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
 
-  const { data: sessionsData, isLoading, isFetching } = useGetLatestSessionsQuery({
+  const [refreshing, setRefreshing] = useState(false);
+
+  const { data: sessionsData, isLoading, isFetching, refetch: refetchSessions } = useGetLatestSessionsQuery({
     userId: user?.id,
     limit: 10,
     continuationToken,
@@ -84,6 +87,22 @@ export default function HomeScreen() {
     const incoming = Array.isArray(results.sessions) ? results.sessions : [];
     const nextToken = results.continuationToken || '';
     hasMoreRef.current = Boolean(nextToken);
+
+    if (isRefreshingRef.current) {
+      // On refresh: replace all sessions with fresh data
+      seenIdsRef.current = new Set();
+      const unique = incoming.filter((s: any) => {
+        const id = s?.session_id ?? s?.id;
+        if (!id || seenIdsRef.current.has(id)) return false;
+        seenIdsRef.current.add(id);
+        return true;
+      });
+      setSessions(unique);
+      isRefreshingRef.current = false;
+      isFetchingMoreRef.current = false;
+      return;
+    }
+
     if (!incoming.length) { isFetchingMoreRef.current = false; return; }
     setSessions((prev) => {
       const newItems: any[] = [];
@@ -97,6 +116,15 @@ export default function HomeScreen() {
     });
     isFetchingMoreRef.current = false;
   }, [sessionsData]);
+
+  const isRefreshingRef = useRef(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    isRefreshingRef.current = true;
+    setContinuationToken('');
+    await refetchSessions();
+    setRefreshing(false);
+  }, [refetchSessions]);
 
   const handleLoadMore = useCallback(() => {
     if (!hasMoreRef.current || isFetchingMoreRef.current) return;
@@ -556,6 +584,7 @@ export default function HomeScreen() {
               <View className="py-6"><ActivityIndicator /></View>
             ) : null
           }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
           showsVerticalScrollIndicator={false}

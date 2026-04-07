@@ -4,6 +4,7 @@ import {
   Text,
   FlatList,
   Pressable,
+  RefreshControl,
   ActivityIndicator,
   StyleSheet,
   useColorScheme,
@@ -40,9 +41,17 @@ export default function MessagesScreen() {
   const { isAuthenticated, login } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data, isLoading } = useGetConversationsQuery(undefined, {
+  const [refreshing, setRefreshing] = useState(false);
+
+  const { data, isLoading, refetch } = useGetConversationsQuery(undefined, {
     skip: !isAuthenticated,
   });
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  }, [refetch]);
 
   const conversations = data?.results?.conversations ?? [];
 
@@ -162,6 +171,7 @@ export default function MessagesScreen() {
               </Text>
             </View>
           }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           showsVerticalScrollIndicator={false}
         />
       )}
