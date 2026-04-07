@@ -24,7 +24,7 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
       // surf_break_identifier format: "country/region/break-name"
       const parts = surfBreak.surf_break_identifier.split('/');
       if (parts.length === 3) {
-        router.push(`/home/${parts[0]}/${parts[1]}/${parts[2]}`);
+        router.push(`/break/${parts[0]}/${parts[1]}/${parts[2]}`);
       }
     }
   };

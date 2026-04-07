@@ -58,6 +58,13 @@ export default function HomeScreen() {
     })();
   }, []);
 
+  // ---- Viewability tracking ----
+  const [viewableIds, setViewableIds] = useState<Set<string>>(new Set());
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    setViewableIds(new Set(viewableItems.map((v) => v.key)));
+  }).current;
+
   // ---- Discover Feed ----
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
@@ -191,15 +198,21 @@ export default function HomeScreen() {
   const navigateToBreak = useCallback((item: any) => {
     const identifier = item.surf_break_identifier;
     if (identifier) {
+      // identifier could be "COUNTRY/REGION/BREAK" or just "BREAK"
       const parts = identifier.split('/');
       if (parts.length === 3) {
-        navigateAndClose(`/home/${parts[0]}/${parts[1]}/${parts[2]}`);
+        navigateAndClose(`/break/${parts[0]}/${parts[1]}/${parts[2]}`);
+      } else {
+        // Build path from separate fields
+        const country = item.country_code ?? item.country ?? '';
+        const region = item.region && item.region !== '' ? item.region : '0';
+        navigateAndClose(`/break/${country}/${region}/${identifier}`);
       }
     }
   }, [navigateAndClose]);
 
   const navigateToUser = useCallback((handle: string) => {
-    navigateAndClose(`/home/user/${handle}`);
+    navigateAndClose(`/user/${handle}`);
   }, [navigateAndClose]);
 
   const isSearching = searchTerm.length >= 2 || hasTagFilter;
@@ -438,10 +451,17 @@ export default function HomeScreen() {
           data={sessions}
           keyExtractor={(item) => item.session_id ?? item.id}
           renderItem={({ item }) => (
-            <View className="px-4">
-              <SessionCard session={item} />
-            </View>
+            <SessionCard
+              session={item}
+              isViewable={viewableIds.has(item.session_id ?? item.id)}
+              onPress={() => {
+                const sid = item.session_id ?? item.id;
+                if (sid) router.push(`/session/${sid}` as any);
+              }}
+            />
           )}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig}
           ListHeaderComponent={
             <>
               {/* Nearby Surf Breaks */}
@@ -465,7 +485,7 @@ export default function HomeScreen() {
                       <Pressable onPress={() => {
                         if (item.surf_break_identifier) {
                           const parts = item.surf_break_identifier.split('/');
-                          if (parts.length === 3) router.push(`/home/${parts[0]}/${parts[1]}/${parts[2]}` as any);
+                          if (parts.length === 3) router.push(`/break/${parts[0]}/${parts[1]}/${parts[2]}` as any);
                         }
                       }}>
                         <SurfBreakCard surfBreak={item} compact />
@@ -495,7 +515,7 @@ export default function HomeScreen() {
                     keyExtractor={(item: any) => item.id ?? item.handle}
                     renderItem={({ item }) => (
                       <Pressable
-                        onPress={() => router.push(`/home/user/${item.handle}` as any)}
+                        onPress={() => router.push(`/user/${item.handle}` as any)}
                         style={{ alignItems: 'center', width: 80 }}
                       >
                         <UserAvatar

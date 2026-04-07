@@ -27,7 +27,7 @@ export default function PhotographerCard({ photographer, compact = false }: Phot
     !!photographer.status_note && isNoteActive(photographer.status_note_set_at);
 
   const handlePress = () => {
-    router.push(`/home/user/${photographer.handle}`);
+    router.push(`/user/${photographer.handle}`);
   };
 
   if (compact) {
