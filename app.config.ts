@@ -18,6 +18,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.surfvault.mobile',
+    infoPlist: {
+      NSPhotoLibraryUsageDescription: 'SurfVault needs access to your photo library to upload surf session photos.',
+      NSCameraUsageDescription: 'SurfVault needs access to your camera to take surf photos.',
+    },
   },
   android: {
     adaptiveIcon: {
@@ -30,6 +34,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: 'surfvault',
   plugins: [
     'expo-router',
+    [
+      'expo-notifications',
+      {
+        icon: './assets/icon.png',
+        color: '#0ea5e9',
+      },
+    ],
+    [
+      'expo-image-picker',
+      {
+        photosPermission: 'SurfVault needs access to your photo library to upload surf session photos.',
+        cameraPermission: 'SurfVault needs access to your camera to take surf photos.',
+      },
+    ],
     'expo-secure-store',
     [
       'expo-location',

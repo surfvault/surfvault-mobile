@@ -1,8 +1,11 @@
 import '../global.css';
 import { useEffect } from 'react';
+import { Platform, Alert } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 import { useFonts } from 'expo-font';
 import { Auth0Provider } from 'react-native-auth0';
 import { Provider as ReduxProvider } from 'react-redux';
@@ -11,6 +14,23 @@ import { store, useGetSelfQuery } from '../src/store';
 import { AuthProvider, useAuth } from '../src/context/AuthProvider';
 import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
+async function requestNotificationPermissions() {
+  if (!Device.isDevice) return; // Skip on simulator
+  const { status: existing } = await Notifications.getPermissionsAsync();
+  if (existing === 'granted') return;
+  await Notifications.requestPermissionsAsync();
+}
 
 SplashScreen.preventAutoHideAsync();
 
@@ -29,6 +49,11 @@ function AppShell() {
 
   // Set up Pusher when we have a user
   usePusher({ userId: user?.id });
+
+  // Request notification permissions on first launch
+  useEffect(() => {
+    requestNotificationPermissions();
+  }, []);
 
   useEffect(() => {
     if (isLoading) return;

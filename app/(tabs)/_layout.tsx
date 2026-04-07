@@ -47,9 +47,9 @@ function TabsInner() {
       <Tabs.Screen
         name="upload"
         options={{
-          title: 'Upload',
+          title: 'Session',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="camera-outline" size={size} color={color} />
+            <Ionicons name="add-circle-outline" size={size + 2} color={color} />
           ),
         }}
       />
