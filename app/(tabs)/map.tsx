@@ -11,13 +11,16 @@ import {
   Keyboard,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useTrackedPush } from '../../src/context/NavigationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
-import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery } from '../../src/store';
+import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
+import UserAvatar from '../../src/components/UserAvatar';
+import { FlatList } from 'react-native';
 
 type FilterType = 'all' | 'favorites' | 'mine';
 
@@ -42,6 +45,7 @@ const INITIAL_REGION: Region = {
 
 export default function MapScreen() {
   const router = useRouter();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
@@ -115,6 +119,65 @@ export default function MapScreen() {
     return arr.findIndex((i: any) => `${i.name}:${i.region ?? ''}:${i.country_code ?? ''}` === key) === index;
   });
 
+  // Nearby — local override or user's current break coordinates
+  const [nearbyOverride, setNearbyOverride] = useState<{ name: string; lat: number; lon: number } | null>(null);
+  const [showNearbyBreakPicker, setShowNearbyBreakPicker] = useState(false);
+  const [nearbyBreakSearch, setNearbyBreakSearch] = useState('');
+  const [debouncedNearbySearch, setDebouncedNearbySearch] = useState('');
+  const nearbyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const userBreakCoords = (user as any)?.surf_break_coordinates;
+  const userCoords = (user as any)?.coordinates;
+  const userBreakName = (user as any)?.surf_break_name ?? (user as any)?.surfBreakName;
+
+  // Try: 1) nearby override, 2) user's break coordinates, 3) user's device coordinates
+  const resolvedLat = nearbyOverride?.lat
+    ?? (userBreakCoords?.lat ? parseFloat(String(userBreakCoords.lat)) : null)
+    ?? (userCoords?.lat ? parseFloat(String(userCoords.lat)) : null);
+  const resolvedLon = nearbyOverride?.lon
+    ?? (userBreakCoords?.lon ? parseFloat(String(userBreakCoords.lon)) : null)
+    ?? (userCoords?.lon ? parseFloat(String(userCoords.lon)) : null);
+  const nearbyLat = (resolvedLat != null && !isNaN(resolvedLat)) ? resolvedLat : null;
+  const nearbyLon = (resolvedLon != null && !isNaN(resolvedLon)) ? resolvedLon : null;
+  const currentNearbyName = nearbyOverride?.name ?? userBreakName;
+  const hasNearbyCoords = nearbyLat != null && nearbyLon != null;
+
+  const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
+    { skip: !hasNearbyCoords }
+  );
+  const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
+    { skip: !hasNearbyCoords }
+  );
+  const nearbyBreaks = nearbyBreaksData?.results?.nearbyBreaks ?? nearbyBreaksData?.results?.surfBreaks ?? [];
+  const nearbyPhotographers = nearbyPhotographersData?.results?.nearbyPhotographers ?? nearbyPhotographersData?.results?.photographers ?? [];
+
+  // Nearby break picker search
+  const { data: nearbyPickerData, isFetching: nearbyPickerLoading } = useGetSurfBreaksQuery(
+    { search: debouncedNearbySearch, limit: 8, continuationToken: '' },
+    { skip: debouncedNearbySearch.length < 2 }
+  );
+  const nearbyPickerResults = nearbyPickerData?.results?.breaks ?? nearbyPickerData?.results?.surfBreaks ?? [];
+
+  const handleNearbySearchInput = useCallback((text: string) => {
+    setNearbyBreakSearch(text);
+    if (nearbyDebounceRef.current) clearTimeout(nearbyDebounceRef.current);
+    nearbyDebounceRef.current = setTimeout(() => setDebouncedNearbySearch(text), 400);
+  }, []);
+
+  const handleSelectNearbyBreak = useCallback((brk: any) => {
+    const lat = parseFloat(brk.coordinates?.lat);
+    const lon = parseFloat(brk.coordinates?.lon);
+    if (!isNaN(lat) && !isNaN(lon)) {
+      setNearbyOverride({ name: brk.name, lat, lon });
+    }
+    setShowNearbyBreakPicker(false);
+    setNearbyBreakSearch('');
+    setDebouncedNearbySearch('');
+    Keyboard.dismiss();
+  }, []);
+
   const handleRegionChange = useCallback((newRegion: Region) => {
     setRegion(newRegion);
   }, []);
@@ -130,7 +193,7 @@ export default function MapScreen() {
     if (id) {
       const country = sb.country_code;
       const region = sb.region && sb.region !== '0' ? sb.region : '0';
-      router.push(`/break/${country}/${region}/${id}` as any);
+      trackedPush(`/break/${country}/${region}/${id}` as any);
     }
   }, [router]);
 
@@ -153,6 +216,9 @@ export default function MapScreen() {
       setSearchOpen(false);
       setSearchTerm('');
       setDebouncedTerm('');
+      setShowNearbyBreakPicker(false);
+      setNearbyBreakSearch('');
+      setDebouncedNearbySearch('');
       Keyboard.dismiss();
     } else {
       setSearchOpen(true);
@@ -300,7 +366,7 @@ export default function MapScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow} style={{ flexGrow: 0 }}>
               {(['all', 'favorites', 'mine'] as FilterType[]).map((f) => {
                 const isActive = filter === f;
-                const labels: Record<FilterType, string> = { all: 'All', favorites: 'Favorites', mine: 'Mine' };
+                const labels: Record<FilterType, string> = { all: 'All', favorites: 'Favorites', mine: 'My Spots' };
                 const icons: Record<FilterType, string> = { all: 'earth-outline', favorites: 'heart-outline', mine: 'camera-outline' };
                 return (
                   <Pressable
@@ -323,34 +389,141 @@ export default function MapScreen() {
               })}
             </ScrollView>
 
-            {debouncedTerm.length >= 2 && (
-              <View style={[styles.resultsWrap, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+            {showNearbyBreakPicker ? (
+              /* Nearby break picker — inline */
+              <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                <View style={[styles.nearbyPickerSearch, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                  <Ionicons name="search-outline" size={16} color={isDark ? '#6b7280' : '#9ca3af'} />
+                  <TextInput
+                    value={nearbyBreakSearch}
+                    onChangeText={handleNearbySearchInput}
+                    placeholder="Search a location..."
+                    placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+                    autoFocus
+                    style={[styles.nearbyPickerInput, { color: isDark ? '#fff' : '#111827' }]}
+                  />
+                  <Pressable onPress={() => { setShowNearbyBreakPicker(false); setNearbyBreakSearch(''); setDebouncedNearbySearch(''); }} hitSlop={8}>
+                    <Ionicons name="close" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
+                  </Pressable>
+                </View>
+                {nearbyPickerLoading && <ActivityIndicator size="small" style={{ marginVertical: 12 }} />}
+                {nearbyPickerResults.map((brk: any) => (
+                  <Pressable key={brk.id} onPress={() => handleSelectNearbyBreak(brk)} style={styles.nearbyRow}>
+                    <Ionicons name="location-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
+                    <View style={{ marginLeft: 8, flex: 1 }}>
+                      <Text style={[styles.nearbyName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{brk.name}</Text>
+                      <Text style={{ fontSize: 11, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                        {brk.region?.replaceAll('_', ' ')} · {brk.country_code}
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))}
+                {debouncedNearbySearch.length < 2 && !nearbyPickerLoading && (
+                  <Text style={{ color: isDark ? '#4b5563' : '#9ca3af', textAlign: 'center', paddingVertical: 16, fontSize: 13 }}>
+                    Search for a break to explore nearby
+                  </Text>
+                )}
+              </ScrollView>
+            ) : debouncedTerm.length >= 2 ? (
+              /* Search results */
+              <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
                 {searchLoading ? (
                   <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                     <ActivityIndicator size="small" />
                   </View>
                 ) : searchResults.length > 0 ? (
-                  <ScrollView style={{ maxHeight: 280 }} keyboardShouldPersistTaps="handled">
-                    {searchResults.map((sb: any) => (
-                      <Pressable key={sb.id} onPress={() => navigateToBreakOnMap(sb)} style={styles.resultRow}>
-                        <Ionicons name="location-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
-                        <View style={{ marginLeft: 10, flex: 1 }}>
-                          <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                            {sb.name}
-                          </Text>
-                          <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-                            {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
-                          </Text>
-                        </View>
-                      </Pressable>
-                    ))}
-                  </ScrollView>
+                  searchResults.map((sb: any) => (
+                    <Pressable key={sb.id} onPress={() => navigateToBreakOnMap(sb)} style={styles.resultRow}>
+                      <Ionicons name="location-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                      <View style={{ marginLeft: 10, flex: 1 }}>
+                        <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                          {sb.name}
+                        </Text>
+                        <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+                          {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))
                 ) : (
                   <Text style={{ color: '#9ca3af', textAlign: 'center', paddingVertical: 20, fontSize: 14 }}>
                     No breaks found
                   </Text>
                 )}
-              </View>
+              </ScrollView>
+            ) : (
+              /* Nearby section — default view */
+              <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {/* Location pill */}
+                <Pressable onPress={() => setShowNearbyBreakPicker(true)} style={styles.nearbyLocationRow}>
+                  <Ionicons name="navigate-outline" size={14} color="#0ea5e9" />
+                  <Text style={[styles.nearbyLocationText, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={1}>
+                    {currentNearbyName ? `Near ${currentNearbyName}` : 'Set a location'}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={14} color={isDark ? '#6b7280' : '#9ca3af'} />
+                </Pressable>
+
+                {/* Nearby Photographers — horizontal */}
+                {nearbyPhotographers.length > 0 && (
+                  <View style={styles.nearbySection}>
+                    <Text style={[styles.nearbySectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                      Photographers
+                    </Text>
+                    <FlatList
+                      data={nearbyPhotographers}
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      keyExtractor={(p: any) => p.id ?? p.handle}
+                      contentContainerStyle={{ paddingHorizontal: 8, gap: 12, paddingVertical: 4 }}
+                      renderItem={({ item: p }) => (
+                        <Pressable
+                          onPress={() => trackedPush(`/user/${p.handle}`)}
+                          style={styles.nearbyPhotographer}
+                        >
+                          <UserAvatar uri={p.picture} name={p.name ?? p.handle} size={44} verified={p.verified} />
+                          <View style={styles.nearbyPhotographerHandleRow}>
+                            <Text style={[styles.nearbyPhotographerHandle, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={1}>
+                              @{p.handle}
+                            </Text>
+                            {p.active && <View style={styles.nearbyActiveDot} />}
+                          </View>
+                        </Pressable>
+                      )}
+                    />
+                  </View>
+                )}
+
+                {/* Nearby Surf Breaks — vertical list */}
+                {nearbyBreaks.length > 0 && (
+                  <View style={styles.nearbySection}>
+                    <Text style={[styles.nearbySectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                      Surf Breaks
+                    </Text>
+                    {nearbyBreaks.slice(0, 8).map((sb: any) => (
+                      <Pressable key={sb.id} onPress={() => navigateToBreakOnMap(sb)} style={styles.nearbyRow}>
+                        <Ionicons name="location-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
+                        <View style={{ marginLeft: 8, flex: 1 }}>
+                          <Text style={[styles.nearbyName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                            {sb.name}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                            {sb.distance > 1 ? `${sb.distance.toFixed(0)}km · ` : sb.distance > 0 ? `${(sb.distance * 1000).toFixed(0)}m · ` : ''}
+                            {sb.region ? sb.region.replaceAll('_', ' ') : ''}{sb.country_code ? ` · ${sb.country_code}` : ''}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+
+                {!currentNearbyName && nearbyBreaks.length === 0 && (
+                  <View style={{ paddingVertical: 16, paddingHorizontal: 12 }}>
+                    <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 13, textAlign: 'center' }}>
+                      Set a location on your profile to see nearby breaks and photographers
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
             )}
           </View>
         ) : (
@@ -384,6 +557,7 @@ export default function MapScreen() {
       >
         <Ionicons name="navigate-outline" size={18} color={isDark ? '#d1d5db' : '#374151'} />
       </Pressable>
+
     </View>
   );
 }
@@ -459,6 +633,28 @@ const styles = StyleSheet.create({
   },
   resultName: { fontSize: 14, fontWeight: '600' },
   resultSub: { fontSize: 12, marginTop: 1 },
+  nearbyLocationRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 12, paddingVertical: 10, marginTop: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'rgba(156,163,175,0.2)',
+  },
+  nearbyLocationText: { fontSize: 13, fontWeight: '500', flex: 1 },
+  nearbySection: { paddingTop: 10, paddingHorizontal: 4 },
+  nearbySectionTitle: { fontSize: 13, fontWeight: '700', paddingHorizontal: 8, marginBottom: 4 },
+  nearbyRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 8, paddingVertical: 10,
+  },
+  nearbyName: { fontSize: 13, fontWeight: '600' },
+  nearbyPhotographer: { alignItems: 'center', maxWidth: 90 },
+  nearbyPhotographerHandleRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 },
+  nearbyPhotographerHandle: { fontSize: 10, fontWeight: '500', flexShrink: 1 },
+  nearbyActiveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10b981', flexShrink: 0 },
+  nearbyPickerSearch: {
+    flexDirection: 'row', alignItems: 'center',
+    marginHorizontal: 8, marginTop: 8, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8,
+  },
+  nearbyPickerInput: { flex: 1, marginLeft: 6, fontSize: 14 },
   myLocationBtn: {
     position: 'absolute', bottom: 16, right: 12,
     width: 40, height: 40, borderRadius: 20,

@@ -15,14 +15,18 @@ import {
   ActivityIndicator,
   Keyboard,
   Dimensions,
+  KeyboardAvoidingView,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
 import {
+  useGetUserQuery,
   useGetUserSessionsQuery,
   useGetUserFavoritesQuery,
   useGetSurfBreaksQuery,
@@ -36,6 +40,7 @@ import SessionCard from '../../src/components/SessionCard';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
@@ -44,6 +49,21 @@ export default function ProfileScreen() {
   const { setTabBarVisible } = useTabBar();
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'favorites'>('grid');
+
+  // Fetch public profile data for follower/following counts
+  const { data: publicProfileData } = useGetUserQuery(
+    { handle: user?.handle ?? '', viewerId: user?.id },
+    { skip: !user?.handle }
+  );
+  const publicProfile = publicProfileData?.results?.photographer;
+
+  // Merge self data with public profile counts
+  const profileWithCounts = user ? {
+    ...user,
+    followersCount: publicProfile?.followersCount ?? user?.follower_count ?? 0,
+    followingCount: publicProfile?.followingCount ?? user?.following_count ?? 0,
+    surfBreaksCount: publicProfile?.surfBreaksCount ?? user?.my_spots?.length ?? 0,
+  } : user;
 
   const storageUsed = parseFloat(String(user?.current_storage ?? 0)) || 0;
   const storageLimit = parseFloat(String(user?.storage_limit ?? 15)) || 15;
@@ -62,6 +82,40 @@ export default function ProfileScreen() {
   const breakResults = breaksData?.results?.breaks ?? breaksData?.results?.surfBreaks ?? [];
 
   const currentBreakName = (user as any)?.surf_break_name ?? (user as any)?.surfBreakName;
+
+  // Status note editor
+  const STATUS_NOTE_MAX = 150;
+  const [showNoteEditor, setShowNoteEditor] = useState(false);
+  const [noteText, setNoteText] = useState('');
+  const noteInputRef = useRef<any>(null);
+
+  const handleOpenNoteEditor = useCallback(() => {
+    setNoteText((user?.status_note as string) ?? '');
+    setShowNoteEditor(true);
+    setTabBarVisible(false);
+    setTimeout(() => noteInputRef.current?.focus(), 100);
+  }, [user, setTabBarVisible]);
+
+  const handleSaveNote = useCallback(async () => {
+    await updateMeta({ metaData: { status_note: noteText.trim() || '' } });
+    setShowNoteEditor(false);
+    setTabBarVisible(true);
+    Keyboard.dismiss();
+  }, [noteText, updateMeta, setTabBarVisible]);
+
+  const handleClearNote = useCallback(async () => {
+    await updateMeta({ metaData: { status_note: '' } });
+    setShowNoteEditor(false);
+    setTabBarVisible(true);
+    setNoteText('');
+    Keyboard.dismiss();
+  }, [updateMeta, setTabBarVisible]);
+
+  const handleCloseNoteEditor = useCallback(() => {
+    setShowNoteEditor(false);
+    setTabBarVisible(true);
+    Keyboard.dismiss();
+  }, [setTabBarVisible]);
 
   const handleBreakSearchInput = useCallback((text: string) => {
     setBreakSearch(text);
@@ -135,7 +189,7 @@ export default function ProfileScreen() {
   const handleMenu = useCallback(() => {
     const options = [
       'Edit Profile',
-      'Reports',
+      'Share Profile',
       'Plans & Billing',
       'Settings',
       'Sign Out',
@@ -148,13 +202,18 @@ export default function ProfileScreen() {
       ActionSheetIOS.showActionSheetWithOptions(
         { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
         (index) => {
-          if (options[index] === 'Sign Out') logout();
+          if (options[index] === 'Edit Profile') trackedPush('/edit-profile');
+          else if (options[index] === 'Share Profile') {
+            const shareUrl = `https://app.surf-vault.com/${user?.handle}`;
+            Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+          }
+          else if (options[index] === 'Sign Out') logout();
         }
       );
     } else {
       Alert.alert('Menu', undefined, [
-        { text: 'Edit Profile' },
-        { text: 'Reports' },
+        { text: 'Edit Profile', onPress: () => trackedPush('/edit-profile') },
+        { text: 'Share Profile', onPress: () => Share.share({ message: `https://app.surf-vault.com/${user?.handle}` }) },
         { text: 'Plans & Billing' },
         { text: 'Settings' },
         { text: 'Sign Out', style: 'destructive', onPress: logout },
@@ -168,13 +227,23 @@ export default function ProfileScreen() {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
         <View style={s.emptyWrap}>
-          <Ionicons name="person-circle-outline" size={56} color={isDark ? '#374151' : '#d1d5db'} />
+          <View style={s.emptyIconRow}>
+            <View style={[s.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f0f9ff' }]}>
+              <Ionicons name="person-outline" size={24} color="#0ea5e9" />
+            </View>
+            <View style={[s.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#fef3c7' }]}>
+              <Ionicons name="stats-chart-outline" size={24} color="#f59e0b" />
+            </View>
+            <View style={[s.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f5f3ff' }]}>
+              <Ionicons name="settings-outline" size={24} color="#8b5cf6" />
+            </View>
+          </View>
           <Text style={[s.emptyTitle, { color: isDark ? '#fff' : '#111827' }]}>Your SurfVault</Text>
           <Text style={[s.emptySubtitle, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
-            Sign in to manage your profile, upload photos, and track your sessions
+            Manage your profile, track session analytics, and customize your settings
           </Text>
           <Pressable onPress={login} style={s.signInBtn}>
-            <Text style={s.signInText}>Sign In</Text>
+            <Text style={s.signInText}>Sign In to Get Started</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -189,7 +258,7 @@ export default function ProfileScreen() {
           {user?.handle ?? ''}
         </Text>
         <View style={s.headerRight}>
-          <Pressable onPress={() => router.push('/notifications' as any)} hitSlop={8}>
+          <Pressable onPress={() => trackedPush('/notifications' as any)} hitSlop={8}>
             <View>
               <Ionicons name="notifications-outline" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
               {unreadNotifCount > 0 && (
@@ -220,7 +289,7 @@ export default function ProfileScreen() {
             const region = (item.region ?? '').replaceAll('_', ' ');
             return (
               <Pressable
-                onPress={() => router.push(`/break/${item.country_code}/${item.region || '0'}/${item.surf_break_identifier}` as any)}
+                onPress={() => trackedPush(`/break/${item.country_code}/${item.region || '0'}/${item.surf_break_identifier}` as any)}
                 style={[s.favRow, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
               >
                 <Ionicons name="location-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
@@ -251,7 +320,7 @@ export default function ProfileScreen() {
               <Pressable
                 onPress={() => {
                   const sid = item.session_id ?? item.id;
-                  if (sid) router.push(`/session/${sid}` as any);
+                  if (sid) trackedPush(`/session/${sid}` as any);
                 }}
                 style={{ width: GRID_SIZE, height: GRID_SIZE * 1.3, margin: GRID_GAP / 2 }}
               >
@@ -270,8 +339,11 @@ export default function ProfileScreen() {
                 )}
                 {(item.session_date || item.surf_break_name) && (
                   <View style={s.gridDate}>
-                    {item.surf_break_name && !item.hide_location && (
-                      <Text style={s.gridDateText} numberOfLines={1}>{item.surf_break_name}</Text>
+                    {item.surf_break_name && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                        {item.hide_location && <Ionicons name="eye-off-outline" size={9} color="rgba(255,255,255,0.7)" />}
+                        <Text style={s.gridDateText} numberOfLines={1}>{item.surf_break_name}</Text>
+                      </View>
                     )}
                     {item.session_date && (
                       <Text style={[s.gridDateText, { opacity: 0.75 }]}>
@@ -288,9 +360,10 @@ export default function ProfileScreen() {
               session={item}
               hidePhotographer
               showViewCount
+              showHiddenLocations
               onPress={() => {
                 const sid = item.session_id ?? item.id;
-                if (sid) router.push(`/session/${sid}` as any);
+                if (sid) trackedPush(`/session/${sid}` as any);
               }}
             />
           );
@@ -298,14 +371,15 @@ export default function ProfileScreen() {
         ListHeaderComponent={
           <>
             <ProfileHeader
-              profile={user}
+              profile={profileWithCounts}
               isDark={isDark}
               isSelf
               showStorage
               showActiveToggle
-              onEditProfile={() => { /* TODO */ }}
+              onEditProfile={() => trackedPush('/edit-profile')}
               onToggleActive={handleToggleActive}
               onSelectBreak={handleOpenBreakSearch}
+              onEditStatusNote={handleOpenNoteEditor}
               currentBreakName={currentBreakName}
               storageUsed={storageUsed}
               storageLimit={storageLimit}
@@ -341,6 +415,46 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}
       />
+
+      {/* Status note editor */}
+      {showNoteEditor && (
+        <View style={[s.sheetOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={handleCloseNoteEditor} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ justifyContent: 'flex-end' }}>
+            <View style={[s.noteSheet, { backgroundColor: isDark ? '#111827' : '#fff' }]}>
+              <View style={s.noteSheetHeader}>
+                <Text style={[s.noteSheetTitle, { color: isDark ? '#fff' : '#111827' }]}>Status Note</Text>
+                <Pressable onPress={handleSaveNote}>
+                  <Text style={{ fontSize: 15, color: '#0ea5e9', fontWeight: '600' }}>Save</Text>
+                </Pressable>
+              </View>
+              <TextInput
+                ref={noteInputRef}
+                value={noteText}
+                onChangeText={(t) => t.length <= STATUS_NOTE_MAX && setNoteText(t)}
+                placeholder="What's happening? e.g. Heading to Pipeline next week..."
+                placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+                multiline
+                maxLength={STATUS_NOTE_MAX}
+                style={[s.noteInput, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', color: isDark ? '#fff' : '#111827' }]}
+              />
+              <View style={s.noteFooter}>
+                <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                  {noteText.length}/{STATUS_NOTE_MAX}
+                </Text>
+                {(user?.status_note as string)?.length > 0 && (
+                  <Pressable onPress={handleClearNote}>
+                    <Text style={{ fontSize: 13, color: '#ef4444', fontWeight: '500' }}>Clear Note</Text>
+                  </Pressable>
+                )}
+              </View>
+              <Text style={{ fontSize: 11, color: isDark ? '#4b5563' : '#9ca3af', paddingHorizontal: 16, paddingBottom: 12 }}>
+                Notes auto-expire after 7 days
+              </Text>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      )}
 
       {/* Break search bottom sheet */}
       {showBreakSearch && (
@@ -411,7 +525,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 3,
   },
   notifBadgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80, paddingHorizontal: 32 },
+  emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16 },
   emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 },
   signInBtn: { marginTop: 16, backgroundColor: '#0ea5e9', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 },
@@ -447,6 +563,20 @@ const s = StyleSheet.create({
     paddingHorizontal: 5, paddingVertical: 2,
   },
   gridDateText: { fontSize: 9, fontWeight: '600', color: '#fff' },
+  noteSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
+  noteSheetHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
+  },
+  noteSheetTitle: { fontSize: 17, fontWeight: '700' },
+  noteInput: {
+    marginHorizontal: 16, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 15, minHeight: 80, textAlignVertical: 'top',
+  },
+  noteFooter: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 8,
+  },
   sheetOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', zIndex: 100 },
   breakSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '75%', paddingBottom: 34 },
   sheetHandle: { alignItems: 'center', paddingVertical: 10 },

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
@@ -35,6 +36,7 @@ const formatTime = (dateStr?: string) => {
 
 export default function MessagesScreen() {
   const router = useRouter();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
@@ -43,7 +45,7 @@ export default function MessagesScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, isLoading, refetch } = useGetConversationsQuery(undefined, {
+  const { data, isLoading, error, refetch } = useGetConversationsQuery(undefined, {
     skip: !isAuthenticated,
   });
 
@@ -54,6 +56,7 @@ export default function MessagesScreen() {
   }, [refetch]);
 
   const conversations = data?.results?.conversations ?? [];
+
 
   // Filter by search
   const filtered = searchTerm
@@ -75,15 +78,25 @@ export default function MessagesScreen() {
           <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>Messages</Text>
         </View>
         <View style={styles.emptyWrap}>
-          <Ionicons name="chatbubble-ellipses-outline" size={48} color={isDark ? '#374151' : '#d1d5db'} />
+          <View style={styles.emptyIconRow}>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#eff6ff' }]}>
+              <Ionicons name="chatbubble-outline" size={24} color="#3b82f6" />
+            </View>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#fef2f2' }]}>
+              <Ionicons name="images-outline" size={24} color="#ef4444" />
+            </View>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f0fdf4' }]}>
+              <Ionicons name="people-outline" size={24} color="#10b981" />
+            </View>
+          </View>
           <Text style={[styles.emptyTitle, { color: isDark ? '#fff' : '#111827' }]}>
-            Connect with photographers and surfers
+            Your conversations
           </Text>
           <Text style={[styles.emptySubtitle, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
-            Request photos, coordinate sessions, and chat directly
+            Chat with photographers, request photos, and coordinate surf sessions all in one place
           </Text>
           <Pressable onPress={login} style={styles.signInBtn}>
-            <Text style={styles.signInText}>Sign In</Text>
+            <Text style={styles.signInText}>Sign In to Get Started</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -100,7 +113,7 @@ export default function MessagesScreen() {
 
     return (
       <Pressable
-        onPress={() => router.push(`/conversation/${item.id}` as any)}
+        onPress={() => trackedPush(`/conversation/${item.id}` as any)}
         style={[styles.conversationRow, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
       >
         <UserAvatar
@@ -184,9 +197,11 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingVertical: 12 },
   headerTitle: { fontSize: 24, fontWeight: '700' },
   searchWrap: { paddingHorizontal: 16, paddingBottom: 8 },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
-  emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' },
-  emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80, paddingHorizontal: 32 },
+  emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 0, textAlign: 'center' },
+  emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center' },
   signInBtn: { marginTop: 16, backgroundColor: '#0ea5e9', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 },
   signInText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   conversationRow: {

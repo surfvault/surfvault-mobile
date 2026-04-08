@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
-import { useSmartBack } from '../../src/context/NavigationContext';
+import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import { Ionicons } from '@expo/vector-icons';
 import {
   useGetNotificationsQuery,
@@ -62,6 +62,7 @@ const getNotifTitle = (n: any): string => {
 export default function NotificationsScreen() {
   const router = useRouter();
   const smartBack = useSmartBack();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -104,32 +105,32 @@ export default function NotificationsScreen() {
       case 'photographerUpload':
       case 'photographerActive': {
         const handle = n.resource_user?.handle;
-        if (handle) router.push(`/user/${handle}` as any);
+        if (handle) trackedPush(`/user/${handle}` as any);
         break;
       }
       case 'surfBreakUpload': {
         const sb = n.resource_surfbreak;
-        if (sb) router.push(`/break/${sb.country_code}/${sb.region || '0'}/${sb.surf_break_identifier}` as any);
+        if (sb) trackedPush(`/break/${sb.country_code}/${sb.region || '0'}/${sb.surf_break_identifier}` as any);
         break;
       }
       case 'uploadCompleted': {
         const sessionId = n.resource_upload_session?.id;
-        if (sessionId) router.push(`/session/${sessionId}` as any);
+        if (sessionId) trackedPush(`/session/${sessionId}` as any);
         break;
       }
       case 'taggedInSurfSession': {
         const sessionId = n.resource_surfsession?.id;
-        if (sessionId) router.push(`/session/${sessionId}` as any);
+        if (sessionId) trackedPush(`/session/${sessionId}` as any);
         break;
       }
       case 'newFollower': {
         const handle = n.metadata_user?.handle;
-        if (handle) router.push(`/user/${handle}` as any);
+        if (handle) trackedPush(`/user/${handle}` as any);
         break;
       }
       case 'userAccessRequestApproval': {
         const handle = n.metadata_user?.handle;
-        if (handle) router.push(`/user/${handle}` as any);
+        if (handle) trackedPush(`/user/${handle}` as any);
         break;
       }
     }

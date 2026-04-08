@@ -6,6 +6,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import { useUser } from '../context/UserProvider';
 import { useRequireAuth } from '../hooks/useRequireAuth';
+import { useTrackedPush } from '../context/NavigationContext';
 import { useFollowUserMutation, useUpdateUserFavoritesMutation } from '../store';
 
 interface TaggedUser {
@@ -18,6 +19,7 @@ interface TaggedUser {
 interface SessionCardProps {
   hidePhotographer?: boolean;
   showViewCount?: boolean;
+  showHiddenLocations?: boolean;
   onPress?: () => void;
   isViewable?: boolean;
   session: {
@@ -88,8 +90,9 @@ function FadingSubtitle({ items, visible = true }: { items: string[]; visible?: 
   );
 }
 
-export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, onPress: customOnPress, isViewable = true }: SessionCardProps) {
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, onPress: customOnPress, isViewable = true }: SessionCardProps) {
   const router = useRouter();
+  const trackedPush = useTrackedPush();
   const { user } = useUser();
   const requireAuth = useRequireAuth();
   const [followUser] = useFollowUserMutation();
@@ -101,18 +104,18 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
   const isFollowing = (session as any).is_following;
   const isFavorited = (session as any).surf_break_is_favorited;
   const surfBreakId = (session as any).surf_break_id;
-  const showLocation = !session.hide_location && session.surf_break_name;
+  const showLocation = (!session.hide_location || showHiddenLocations) && session.surf_break_name;
 
   const handlePress = () => {
     if (customOnPress) {
       customOnPress();
     } else if (sessionId) {
-      router.push(`/session/${sessionId}`);
+      trackedPush(`/session/${sessionId}`);
     }
   };
 
   const handleProfilePress = () => {
-    if (handle) router.push(`/user/${handle}` as any);
+    if (handle) trackedPush(`/user/${handle}`);
   };
 
   const handleEllipsis = () => {
@@ -156,7 +159,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             const id = session.surf_break_identifier!;
             const country = (session as any).surf_break_country ?? (session as any).country_code ?? '';
             const region = (session as any).surf_break_region ?? (session as any).region ?? '0';
-            router.push(`/break/${country}/${region}/${id}` as any);
+            trackedPush(`/break/${country}/${region}/${id}`);
           } else if (selected === 'Share') {
             const shareUrl = `https://share.surf-vault.com/s/${sessionId}`;
             Share.share({ url: shareUrl });
@@ -221,7 +224,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
               <FadingSubtitle
                 items={[
                   session.session_name,
-                  !session.hide_location ? session.surf_break_name : undefined,
+                  (!session.hide_location || showHiddenLocations) ? session.surf_break_name : undefined,
                 ].filter(Boolean) as string[]}
                 visible={isViewable}
               />
@@ -235,7 +238,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
               )}
               <FadingSubtitle
                 items={[
-                  !session.hide_location ? session.surf_break_name : undefined,
+                  (!session.hide_location || showHiddenLocations) ? session.surf_break_name : undefined,
                   session.session_date ? formatDate(session.session_date) : undefined,
                 ].filter(Boolean) as string[]}
                 visible={isViewable}

@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import Auth0, { useAuth0 } from 'react-native-auth0';
 import Constants from 'expo-constants';
-import { saveAuthToken, clearAuthToken, getAuthToken } from '../store/apis/customBaseQuery';
+import { saveAuthToken, clearAuthToken, getAuthToken, setTokenRefresher } from '../store/apis/customBaseQuery';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -53,8 +53,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!auth0Loading) {
       refreshToken();
+
+      // Register token refresher for customBaseQuery to use on 401
+      setTokenRefresher(async () => {
+        try {
+          const credentials = await getCredentials();
+          return credentials?.accessToken ?? null;
+        } catch {
+          return null;
+        }
+      });
     }
-  }, [auth0Loading, refreshToken]);
+  }, [auth0Loading, refreshToken, getCredentials]);
 
   const login = useCallback(async () => {
     try {

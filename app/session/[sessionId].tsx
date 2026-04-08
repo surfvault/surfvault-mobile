@@ -19,7 +19,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
-import { useSmartBack } from '../../src/context/NavigationContext';
+import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import {
   useGetSessionQuery,
   useGetSessionPhotosQuery,
@@ -48,6 +48,7 @@ export default function SessionDetailScreen() {
   const { user } = useUser();
   const router = useRouter();
   const smartBack = useSmartBack();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const requireAuth = useRequireAuth();
@@ -353,7 +354,7 @@ export default function SessionDetailScreen() {
                 {/* Photographer + date */}
                 {session && (
                   <Pressable
-                    onPress={() => sessionHandle && router.push(`/user/${sessionHandle}` as any)}
+                    onPress={() => sessionHandle && trackedPush(`/user/${sessionHandle}`)}
                     style={styles.photographerRow}
                   >
                     <UserAvatar

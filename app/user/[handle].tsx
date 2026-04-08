@@ -17,7 +17,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
-import { useSmartBack } from '../../src/context/NavigationContext';
+import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
 import {
   useGetUserQuery,
@@ -32,6 +32,7 @@ export default function UserProfileScreen() {
   const { user: currentUser } = useUser();
   const requireAuth = useRequireAuth();
   const smartBack = useSmartBack();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -90,7 +91,7 @@ export default function UserProfileScreen() {
   const handleMessage = useCallback(() => {
     if (!requireAuth()) return;
     if (profile?.conversationId) {
-      router.push(`/conversation/${profile.conversationId}` as any);
+      trackedPush(`/conversation/${profile.conversationId}` as any);
     }
     // If no existing conversation, the start conversation flow will be handled separately
   }, [requireAuth, profile, router]);
@@ -139,7 +140,7 @@ export default function UserProfileScreen() {
                   <Pressable
                     onPress={() => {
                       const sid = item.session_id ?? item.id;
-                      if (sid) router.push(`/session/${sid}` as any);
+                      if (sid) trackedPush(`/session/${sid}` as any);
                     }}
                     style={{ width: SIZE, height: SIZE * 1.3, margin: GAP / 2 }}
                   >

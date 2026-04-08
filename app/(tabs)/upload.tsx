@@ -206,19 +206,26 @@ export default function CreateSessionScreen() {
   if (!isAuthenticated) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
-        <View style={styles.header}>
-          <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>New Session</Text>
-        </View>
         <View style={styles.emptyWrap}>
-          <Ionicons name="camera-outline" size={48} color={isDark ? '#374151' : '#d1d5db'} />
+          <View style={styles.emptyIconRow}>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f0f9ff' }]}>
+              <Ionicons name="camera-outline" size={24} color="#0ea5e9" />
+            </View>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f0fdf4' }]}>
+              <Ionicons name="people-outline" size={24} color="#10b981" />
+            </View>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#fef3c7' }]}>
+              <Ionicons name="share-outline" size={24} color="#f59e0b" />
+            </View>
+          </View>
           <Text style={[styles.emptyTitle, { color: isDark ? '#fff' : '#111827' }]}>
-            Upload your surf photos
+            Create a surf session
           </Text>
           <Text style={[styles.emptySubtitle, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
-            Create a session, tag surfers, and share your shots
+            Upload photos, organize them into groups, tag surfers, and share your sessions with the community
           </Text>
           <Pressable onPress={login} style={styles.signInBtn}>
-            <Text style={styles.signInText}>Sign In</Text>
+            <Text style={styles.signInText}>Sign In to Get Started</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -521,7 +528,9 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 4, right: 4,
     backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10,
   },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80, paddingHorizontal: 32 },
+  emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' },
   emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 },
   signInBtn: { marginTop: 16, backgroundColor: '#0ea5e9', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 },

@@ -32,6 +32,11 @@ export default function UserAvatar({
         borderColor,
         justifyContent: 'center',
         alignItems: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.15,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 4,
       }}
     >
       {uri ? (
