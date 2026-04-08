@@ -14,16 +14,20 @@ import {
   Alert,
   ActivityIndicator,
   Keyboard,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
 import {
   useGetUserSessionsQuery,
+  useGetUserFavoritesQuery,
   useGetSurfBreaksQuery,
   useUpdateUserMetaDataMutation,
+  useUpdateUserFavoritesMutation,
   useGetNotificationsQuery,
 } from '../../src/store';
 import { useTabBar } from '../../src/context/TabBarContext';
@@ -38,6 +42,8 @@ export default function ProfileScreen() {
   const { isAuthenticated, login, logout } = useAuth();
   const [updateMeta] = useUpdateUserMetaDataMutation();
   const { setTabBarVisible } = useTabBar();
+
+  const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'favorites'>('grid');
 
   const storageUsed = parseFloat(String(user?.current_storage ?? 0)) || 0;
   const storageLimit = parseFloat(String(user?.storage_limit ?? 15)) || 15;
@@ -85,6 +91,11 @@ export default function ProfileScreen() {
   );
   const unreadNotifCount = notifData?.results?.notifications?.length ?? 0;
 
+  // Favorites
+  const { data: favoritesData } = useGetUserFavoritesQuery({} as any, { skip: !isAuthenticated });
+  const [updateFavorite] = useUpdateUserFavoritesMutation();
+  const favorites = favoritesData?.results?.favorites ?? [];
+
   // Sessions
   const [sessions, setSessions] = useState<any[]>([]);
   const seenIdsRef = useRef(new Set<string>());
@@ -124,7 +135,6 @@ export default function ProfileScreen() {
   const handleMenu = useCallback(() => {
     const options = [
       'Edit Profile',
-      'Favorites',
       'Reports',
       'Plans & Billing',
       'Settings',
@@ -144,7 +154,6 @@ export default function ProfileScreen() {
     } else {
       Alert.alert('Menu', undefined, [
         { text: 'Edit Profile' },
-        { text: 'Favorites' },
         { text: 'Reports' },
         { text: 'Plans & Billing' },
         { text: 'Settings' },
@@ -180,7 +189,7 @@ export default function ProfileScreen() {
           {user?.handle ?? ''}
         </Text>
         <View style={s.headerRight}>
-          <Pressable onPress={() => router.push('/notifications?from=profile' as any)} hitSlop={8}>
+          <Pressable onPress={() => router.push('/notifications' as any)} hitSlop={8}>
             <View>
               <Ionicons name="notifications-outline" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
               {unreadNotifCount > 0 && (
@@ -199,29 +208,133 @@ export default function ProfileScreen() {
       </View>
 
       <FlatList
-        data={sessions}
-        keyExtractor={(item) => item.session_id ?? item.id}
-        renderItem={({ item }) => <SessionCard session={item} hidePhotographer showViewCount />}
+        data={activeTab === 'favorites' ? favorites : sessions}
+        keyExtractor={(item) =>
+          activeTab === 'favorites' ? item.surf_break_id : (item.session_id ?? item.id)
+        }
+        numColumns={activeTab === 'grid' ? 3 : 1}
+        key={activeTab === 'grid' ? 'grid' : 'list'} // force re-render on column change
+        renderItem={({ item }) => {
+          if (activeTab === 'favorites') {
+            const breakName = (item.surf_break_identifier ?? '').replaceAll('_', ' ');
+            const region = (item.region ?? '').replaceAll('_', ' ');
+            return (
+              <Pressable
+                onPress={() => router.push(`/break/${item.country_code}/${item.region || '0'}/${item.surf_break_identifier}` as any)}
+                style={[s.favRow, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
+              >
+                <Ionicons name="location-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <View style={s.favNameRow}>
+                    <Text style={[s.favName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                      {breakName}
+                    </Text>
+                    {item.hasActivePhotographer && (
+                      <View style={s.activePulse}>
+                        <View style={s.activePulseDot} />
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: '#ef4444' }}>Active</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af', marginTop: 1 }}>
+                    {item.country_code}{region ? ` · ${region}` : ''}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={isDark ? '#4b5563' : '#d1d5db'} />
+              </Pressable>
+            );
+          }
+          if (activeTab === 'grid') {
+            const GRID_GAP = 1;
+            const GRID_SIZE = (Dimensions.get('window').width - GRID_GAP * 2) / 3;
+            return (
+              <Pressable
+                onPress={() => {
+                  const sid = item.session_id ?? item.id;
+                  if (sid) router.push(`/session/${sid}` as any);
+                }}
+                style={{ width: GRID_SIZE, height: GRID_SIZE * 1.3, margin: GRID_GAP / 2 }}
+              >
+                {item.thumbnail ? (
+                  <Image source={{ uri: item.thumbnail }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                ) : (
+                  <View style={{ width: '100%', height: '100%', backgroundColor: isDark ? '#1f2937' : '#f3f4f6', alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="image-outline" size={24} color={isDark ? '#374151' : '#d1d5db'} />
+                  </View>
+                )}
+                {item.view_count != null && (
+                  <View style={s.gridViewCount}>
+                    <Ionicons name="eye-outline" size={10} color="#fff" />
+                    <Text style={s.gridViewCountText}>{(item.view_count ?? 0).toLocaleString()}</Text>
+                  </View>
+                )}
+                {(item.session_date || item.surf_break_name) && (
+                  <View style={s.gridDate}>
+                    {item.surf_break_name && !item.hide_location && (
+                      <Text style={s.gridDateText} numberOfLines={1}>{item.surf_break_name}</Text>
+                    )}
+                    {item.session_date && (
+                      <Text style={[s.gridDateText, { opacity: 0.75 }]}>
+                        {new Date(item.session_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </Text>
+                    )}
+                  </View>
+                )}
+              </Pressable>
+            );
+          }
+          return (
+            <SessionCard
+              session={item}
+              hidePhotographer
+              showViewCount
+              onPress={() => {
+                const sid = item.session_id ?? item.id;
+                if (sid) router.push(`/session/${sid}` as any);
+              }}
+            />
+          );
+        }}
         ListHeaderComponent={
-          <ProfileHeader
-            profile={user}
-            isDark={isDark}
-            isSelf
-            showStorage
-            showActiveToggle
-            onEditProfile={() => { /* TODO */ }}
-            onToggleActive={handleToggleActive}
-            onSelectBreak={handleOpenBreakSearch}
-            currentBreakName={currentBreakName}
-            storageUsed={storageUsed}
-            storageLimit={storageLimit}
-          />
+          <>
+            <ProfileHeader
+              profile={user}
+              isDark={isDark}
+              isSelf
+              showStorage
+              showActiveToggle
+              onEditProfile={() => { /* TODO */ }}
+              onToggleActive={handleToggleActive}
+              onSelectBreak={handleOpenBreakSearch}
+              currentBreakName={currentBreakName}
+              storageUsed={storageUsed}
+              storageLimit={storageLimit}
+            />
+            {/* Tab selector */}
+            <View style={[s.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+              <Pressable onPress={() => setActiveTab('grid')} style={[s.tabBtn, activeTab === 'grid' && s.tabBtnActive]}>
+                <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+              </Pressable>
+              <Pressable onPress={() => setActiveTab('list')} style={[s.tabBtn, activeTab === 'list' && s.tabBtnActive]}>
+                <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+              </Pressable>
+              <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
+                <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+              </Pressable>
+            </View>
+          </>
         }
         ListEmptyComponent={
           !isFetching ? (
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-              <Ionicons name="camera-outline" size={40} color={isDark ? '#374151' : '#d1d5db'} />
-              <Text style={{ color: '#9ca3af', marginTop: 8, fontSize: 14 }}>No sessions yet</Text>
+              <Ionicons
+                name={activeTab === 'favorites' ? 'heart-outline' : 'camera-outline'}
+                size={40}
+                color={isDark ? '#374151' : '#d1d5db'}
+              />
+              <Text style={{ color: '#9ca3af', marginTop: 8, fontSize: 14 }}>
+                {activeTab === 'favorites' ? 'No favorites yet' : 'No sessions yet'}
+              </Text>
             </View>
           ) : null
         }
@@ -303,6 +416,37 @@ const s = StyleSheet.create({
   emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 },
   signInBtn: { marginTop: 16, backgroundColor: '#0ea5e9', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 },
   signInText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  tabBar: {
+    flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 2,
+  },
+  tabBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: 12,
+  },
+  tabBtnActive: {
+    borderBottomWidth: 2, borderBottomColor: '#111827',
+  },
+  favRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  favNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  favName: { fontSize: 15, fontWeight: '600' },
+  activePulse: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  activePulseDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444' },
+  gridViewCount: {
+    position: 'absolute', bottom: 4, left: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 2,
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    paddingHorizontal: 5, paddingVertical: 2,
+  },
+  gridViewCountText: { fontSize: 10, fontWeight: '600', color: '#fff' },
+  gridDate: {
+    position: 'absolute', top: 4, left: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    paddingHorizontal: 5, paddingVertical: 2,
+  },
+  gridDateText: { fontSize: 9, fontWeight: '600', color: '#fff' },
   sheetOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', zIndex: 100 },
   breakSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '75%', paddingBottom: 34 },
   sheetHandle: { alignItems: 'center', paddingVertical: 10 },

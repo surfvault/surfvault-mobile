@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
+import { useSmartBack } from '../../src/context/NavigationContext';
 import {
   useGetSurfBreakWithLatestSessionsQuery,
   useGetSurfBreakSessionsQuery,
@@ -30,7 +31,7 @@ const formatDateParam = (date: Date): string =>
   date.toISOString().split('T')[0];
 
 export default function SurfBreakDetailScreen() {
-  const { breakRoute, from } = useLocalSearchParams<{ breakRoute: string[] | string; from?: string }>();
+  const { breakRoute } = useLocalSearchParams<{ breakRoute: string[] | string }>();
   // Catch-all returns an array of segments: ["US", "FLORIDA", "THE_MAYPORT_POLES"]
   const parts = Array.isArray(breakRoute) ? breakRoute : (breakRoute ?? '').split('/');
   const country = parts[0] ?? '';
@@ -38,6 +39,7 @@ export default function SurfBreakDetailScreen() {
   const surfBreak = parts.length >= 3 ? parts[2] : parts[1] ?? parts[0] ?? '';
 
   const router = useRouter();
+  const smartBack = useSmartBack();
   const { user } = useUser();
   const requireAuth = useRequireAuth();
   const colorScheme = useColorScheme();
@@ -125,11 +127,7 @@ export default function SurfBreakDetailScreen() {
         headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' }, headerShadowVisible: false,
         headerLeft: () => (
           <Pressable onPress={() => {
-            if (from === 'map') {
-              router.replace('/(tabs)/map' as any);
-            } else {
-              router.back();
-            }
+            smartBack();
           }} hitSlop={8}>
             <Ionicons name="chevron-back" size={28} color="#007AFF" />
           </Pressable>

@@ -10,7 +10,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
+import { useRouter, Stack } from 'expo-router';
+import { useSmartBack } from '../../src/context/NavigationContext';
 import { Ionicons } from '@expo/vector-icons';
 import {
   useGetNotificationsQuery,
@@ -60,7 +61,7 @@ const getNotifTitle = (n: any): string => {
 
 export default function NotificationsScreen() {
   const router = useRouter();
-  const { from } = useLocalSearchParams<{ from?: string }>();
+  const smartBack = useSmartBack();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -178,13 +179,7 @@ export default function NotificationsScreen() {
           headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
           headerShadowVisible: false,
           headerLeft: () => (
-            <Pressable onPress={() => {
-              if (from === 'profile') {
-                router.replace('/(tabs)/profile' as any);
-              } else {
-                router.back();
-              }
-            }} hitSlop={8}>
+            <Pressable onPress={smartBack} hitSlop={8}>
               <Ionicons name="chevron-back" size={28} color="#007AFF" />
             </Pressable>
           ),

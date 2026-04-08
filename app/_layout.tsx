@@ -14,6 +14,7 @@ import { store, useGetSelfQuery } from '../src/store';
 import { AuthProvider, useAuth } from '../src/context/AuthProvider';
 import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
+import { NavigationProvider } from '../src/context/NavigationContext';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -96,12 +97,14 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
-      <ReduxProvider store={store}>
-        <AuthProvider>
-          <AppShell />
-        </AuthProvider>
-      </ReduxProvider>
-    </Auth0Provider>
+    <NavigationProvider>
+      <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
+        <ReduxProvider store={store}>
+          <AuthProvider>
+            <AppShell />
+          </AuthProvider>
+        </ReduxProvider>
+      </Auth0Provider>
+    </NavigationProvider>
   );
 }

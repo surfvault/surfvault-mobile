@@ -9,12 +9,15 @@ import {
   StyleSheet,
   useColorScheme,
   Platform,
+  Dimensions,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
+import { useSmartBack } from '../../src/context/NavigationContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
 import {
   useGetUserQuery,
@@ -28,9 +31,11 @@ export default function UserProfileScreen() {
   const router = useRouter();
   const { user: currentUser } = useUser();
   const requireAuth = useRequireAuth();
+  const smartBack = useSmartBack();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
+  const [activeTab, setActiveTab] = useState<'grid' | 'list'>('grid');
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
   const seenIdsRef = useRef(new Set<string>());
@@ -110,7 +115,7 @@ export default function UserProfileScreen() {
           headerShown: true,
           headerTitle: '',
           headerLeft: () => (
-            <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Pressable onPress={smartBack} style={{ flexDirection: 'row', alignItems: 'center' }}>
               <Ionicons name="chevron-back" size={28} color="#007AFF" />
               <Text style={{ fontSize: 17, color: '#007AFF' }}>{profile?.handle ?? handle}</Text>
             </Pressable>
@@ -124,10 +129,58 @@ export default function UserProfileScreen() {
           <FlatList
             data={sessions}
             keyExtractor={(item) => item.session_id ?? item.id}
-            renderItem={({ item }) => (
-              <SessionCard session={item} hidePhotographer />
-            )}
-            ListHeaderComponent={<UserProfileHeader />}
+            numColumns={activeTab === 'grid' ? 3 : 1}
+            key={activeTab === 'grid' ? 'grid' : 'list'}
+            renderItem={({ item }) => {
+              if (activeTab === 'grid') {
+                const GAP = 1;
+                const SIZE = (Dimensions.get('window').width - GAP * 2) / 3;
+                return (
+                  <Pressable
+                    onPress={() => {
+                      const sid = item.session_id ?? item.id;
+                      if (sid) router.push(`/session/${sid}` as any);
+                    }}
+                    style={{ width: SIZE, height: SIZE * 1.3, margin: GAP / 2 }}
+                  >
+                    {item.thumbnail ? (
+                      <Image source={{ uri: item.thumbnail }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                    ) : (
+                      <View style={{ width: '100%', height: '100%', backgroundColor: isDark ? '#1f2937' : '#f3f4f6', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="image-outline" size={24} color={isDark ? '#374151' : '#d1d5db'} />
+                      </View>
+                    )}
+                    {(item.session_date || item.surf_break_name) && (
+                      <View style={styles.gridDate}>
+                        {item.surf_break_name && !item.hide_location && (
+                          <Text style={styles.gridDateText} numberOfLines={1}>{item.surf_break_name}</Text>
+                        )}
+                        {item.session_date && (
+                          <Text style={[styles.gridDateText, { opacity: 0.75 }]}>
+                            {new Date(item.session_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          </Text>
+                        )}
+                      </View>
+                    )}
+                  </Pressable>
+                );
+              }
+              return <SessionCard session={item} hidePhotographer />;
+            }}
+            ListHeaderComponent={
+              <>
+                <UserProfileHeader />
+                {/* Grid / List tabs */}
+                <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+                  <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                  <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                </View>
+              </>
+            }
             ListEmptyComponent={
               <View style={{ alignItems: 'center', paddingVertical: 48 }}>
                 <Text style={{ color: '#9ca3af' }}>No sessions yet</Text>
@@ -180,6 +233,14 @@ const styles = StyleSheet.create({
   iconBtn: { width: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 
   divider: { height: 1, marginBottom: 8 },
-
-
+  tabBar: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 2 },
+  tabBtn: { flex: 1, alignItems: 'center', paddingVertical: 12 },
+  tabBtnActive: { borderBottomWidth: 2, borderBottomColor: '#111827' },
+  gridDate: {
+    position: 'absolute', top: 4, left: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    paddingHorizontal: 5, paddingVertical: 2,
+    maxWidth: '90%',
+  },
+  gridDateText: { fontSize: 9, fontWeight: '600', color: '#fff' },
 });

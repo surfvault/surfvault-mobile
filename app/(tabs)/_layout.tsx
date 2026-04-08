@@ -6,6 +6,7 @@ import * as Notifications from 'expo-notifications';
 import { useGetUnreadMessageCountQuery, useGetNotificationsQuery } from '../../src/store';
 import { useAuth } from '../../src/context/AuthProvider';
 import { TabBarProvider, useTabBar } from '../../src/context/TabBarContext';
+import { useActiveTab } from '../../src/context/NavigationContext';
 
 function TabsInner() {
   const colorScheme = useColorScheme();
@@ -13,6 +14,15 @@ function TabsInner() {
   const { tabBarVisible } = useTabBar();
 
   const { isAuthenticated } = useAuth();
+  const { setActiveTab } = useActiveTab();
+
+  const tabMap: Record<string, string> = {
+    index: '/(tabs)',
+    map: '/(tabs)/map',
+    upload: '/(tabs)/upload',
+    messages: '/(tabs)/messages',
+    profile: '/(tabs)/profile',
+  };
 
   const { data: unreadData } = useGetUnreadMessageCountQuery(undefined, { skip: !isAuthenticated });
   const unreadCount = unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0;
@@ -31,6 +41,16 @@ function TabsInner() {
 
   return (
     <Tabs
+      screenListeners={{
+        state: (e) => {
+          const state = e.data?.state;
+          if (state) {
+            const route = state.routes[state.index];
+            const tab = tabMap[route?.name] ?? '/(tabs)';
+            setActiveTab(tab);
+          }
+        },
+      }}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: '#0ea5e9',

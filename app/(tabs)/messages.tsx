@@ -100,7 +100,7 @@ export default function MessagesScreen() {
 
     return (
       <Pressable
-        onPress={() => router.push(`/conversation/${item.id}?from=messages` as any)}
+        onPress={() => router.push(`/conversation/${item.id}` as any)}
         style={[styles.conversationRow, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
       >
         <UserAvatar

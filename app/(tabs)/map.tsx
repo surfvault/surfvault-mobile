@@ -130,7 +130,7 @@ export default function MapScreen() {
     if (id) {
       const country = sb.country_code;
       const region = sb.region && sb.region !== '0' ? sb.region : '0';
-      router.push(`/break/${country}/${region}/${id}?from=map` as any);
+      router.push(`/break/${country}/${region}/${id}` as any);
     }
   }, [router]);
 

@@ -392,10 +392,6 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     paddingTop: 24,
     backgroundColor: 'transparent',
-    // Gradient approximation with layered opacity
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-    backgroundGradient: 'linear-gradient(transparent, rgba(0,0,0,0.5))',
   },
   viewCountBadge: {
     flexDirection: 'row',

@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Linking } from 'react-native';
 import { useUser } from '../../src/context/UserProvider';
+import { useSmartBack } from '../../src/context/NavigationContext';
 import {
   useGetConversationWithMessagesQuery,
   useReplyToConversationMutation,
@@ -116,8 +117,9 @@ const formatDateSeparator = (dateStr: string) => {
 const getDateKey = (dateStr: string) => new Date(dateStr).toDateString();
 
 export default function ConversationDetailScreen() {
-  const { conversationId, from } = useLocalSearchParams<{ conversationId: string; from?: string }>();
+  const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const router = useRouter();
+  const smartBack = useSmartBack();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
@@ -242,13 +244,7 @@ export default function ConversationDetailScreen() {
           headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
           headerShadowVisible: false,
           headerLeft: () => (
-            <Pressable onPress={() => {
-              if (from === 'messages') {
-                router.replace('/(tabs)/messages' as any);
-              } else {
-                router.back();
-              }
-            }} hitSlop={8}>
+            <Pressable onPress={smartBack} hitSlop={8}>
               <Ionicons name="chevron-back" size={28} color="#007AFF" />
             </Pressable>
           ),
