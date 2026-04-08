@@ -19,6 +19,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
+import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import {
   useGetSessionQuery,
   useGetSessionPhotosQuery,
@@ -46,6 +47,8 @@ export default function SessionDetailScreen() {
   const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
   const { user } = useUser();
   const router = useRouter();
+  const smartBack = useSmartBack();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const requireAuth = useRequireAuth();
@@ -318,7 +321,7 @@ export default function SessionDetailScreen() {
           headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
           headerShadowVisible: false,
           headerLeft: () => (
-            <Pressable onPress={() => router.back()} hitSlop={8}>
+            <Pressable onPress={smartBack} hitSlop={8}>
               <Ionicons name="chevron-back" size={28} color="#007AFF" />
             </Pressable>
           ),
@@ -351,7 +354,7 @@ export default function SessionDetailScreen() {
                 {/* Photographer + date */}
                 {session && (
                   <Pressable
-                    onPress={() => sessionHandle && router.push(`/user/${sessionHandle}` as any)}
+                    onPress={() => sessionHandle && trackedPush(`/user/${sessionHandle}`)}
                     style={styles.photographerRow}
                   >
                     <UserAvatar

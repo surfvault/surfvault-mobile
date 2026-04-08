@@ -1,4 +1,3 @@
-import Pusher from 'pusher-js';
 import { useEffect } from 'react';
 import { useDispatch } from 'react-redux';
 import Constants from 'expo-constants';
@@ -18,9 +17,21 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
 
     if (!pusherAppKey) return;
 
-    const pusher = new Pusher(pusherAppKey, {
-      cluster: pusherCluster ?? 'us2',
-    });
+    let pusher: any;
+    try {
+      const PusherModule = require('pusher-js/react-native');
+      const PusherClass = PusherModule?.default ?? PusherModule;
+      if (typeof PusherClass !== 'function') {
+        console.warn('Pusher: constructor not available, skipping real-time');
+        return;
+      }
+      pusher = new PusherClass(pusherAppKey, {
+        cluster: pusherCluster ?? 'us2',
+      });
+    } catch (e) {
+      console.warn('Pusher: failed to initialize', e);
+      return;
+    }
 
     const channel = pusher.subscribe(`user-${userId}`);
 

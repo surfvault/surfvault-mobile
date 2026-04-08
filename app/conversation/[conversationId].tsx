@@ -16,6 +16,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Linking } from 'react-native';
 import { useUser } from '../../src/context/UserProvider';
+import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import {
   useGetConversationWithMessagesQuery,
   useReplyToConversationMutation,
@@ -26,7 +27,7 @@ import UserAvatar from '../../src/components/UserAvatar';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_REGEX = /(https?:\/\/[^\s]+)/gi;
 
-function MessageBody({ body, isOutbound, isDark, router }: { body: string; isOutbound: boolean; isDark: boolean; router: any }) {
+function MessageBody({ body, isOutbound, isDark, onNavigate }: { body: string; isOutbound: boolean; isDark: boolean; onNavigate: (path: string) => void }) {
   const textColor = isOutbound ? '#fff' : (isDark ? '#fff' : '#111827');
   const linkColor = isOutbound ? '#bfdbfe' : '#3b82f6';
 
@@ -39,7 +40,7 @@ function MessageBody({ body, isOutbound, isDark, router }: { body: string; isOut
           Photo Access Request:{' '}
           <Text
             style={{ color: linkColor, textDecorationLine: 'underline' }}
-            onPress={() => router.push(`/access/${id}` as any)}
+            onPress={() => onNavigate(`/access/${id}`)}
           >
             View Request
           </Text>
@@ -57,7 +58,7 @@ function MessageBody({ body, isOutbound, isDark, router }: { body: string; isOut
           Photos Granted!{' '}
           <Text
             style={{ color: linkColor, textDecorationLine: 'underline' }}
-            onPress={() => router.push(`/access/${id}` as any)}
+            onPress={() => onNavigate(`/access/${id}`)}
           >
             View Photos
           </Text>
@@ -116,8 +117,10 @@ const formatDateSeparator = (dateStr: string) => {
 const getDateKey = (dateStr: string) => new Date(dateStr).toDateString();
 
 export default function ConversationDetailScreen() {
-  const { conversationId, from } = useLocalSearchParams<{ conversationId: string; from?: string }>();
+  const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
   const router = useRouter();
+  const smartBack = useSmartBack();
+  const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
@@ -225,7 +228,7 @@ export default function ConversationDetailScreen() {
             ? { backgroundColor: '#3b82f6', borderBottomRightRadius: 4 }
             : { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', borderTopLeftRadius: 4 },
         ]}>
-          <MessageBody body={item.body} isOutbound={isOutbound} isDark={isDark} router={router} />
+          <MessageBody body={item.body} isOutbound={isOutbound} isDark={isDark} onNavigate={trackedPush} />
         </View>
         {isSeen && (
           <Text style={[styles.seenText, { color: isDark ? '#6b7280' : '#9ca3af' }]}>Seen</Text>
@@ -242,18 +245,12 @@ export default function ConversationDetailScreen() {
           headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
           headerShadowVisible: false,
           headerLeft: () => (
-            <Pressable onPress={() => {
-              if (from === 'messages') {
-                router.replace('/(tabs)/messages' as any);
-              } else {
-                router.back();
-              }
-            }} hitSlop={8}>
+            <Pressable onPress={smartBack} hitSlop={8}>
               <Ionicons name="chevron-back" size={28} color="#007AFF" />
             </Pressable>
           ),
           headerTitle: () => otherUser ? (
-            <Pressable onPress={() => router.push(`/user/${otherUser.handle}` as any)} style={styles.headerCenter}>
+            <Pressable onPress={() => trackedPush(`/user/${otherUser.handle}` as any)} style={styles.headerCenter}>
               <UserAvatar uri={otherUser.picture} name={otherUser.name ?? otherUser.handle} size={44} verified={otherUser.verified} />
               <Text style={[styles.headerHandle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
                 {otherUser.handle}

@@ -1,19 +1,59 @@
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
-import { useColorScheme } from 'react-native';
+import { useColorScheme, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useGetUnreadMessageCountQuery } from '../../src/store';
+import { Image } from 'expo-image';
+import { useUser } from '../../src/context/UserProvider';
+import * as Notifications from 'expo-notifications';
+import { useGetUnreadMessageCountQuery, useGetNotificationsQuery } from '../../src/store';
+import { useAuth } from '../../src/context/AuthProvider';
 import { TabBarProvider, useTabBar } from '../../src/context/TabBarContext';
+import { useActiveTab } from '../../src/context/NavigationContext';
 
 function TabsInner() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { tabBarVisible } = useTabBar();
 
-  const { data: unreadData } = useGetUnreadMessageCountQuery(undefined);
-  const unreadCount = unreadData?.results?.unreadCount ?? 0;
+  const { isAuthenticated } = useAuth();
+  const { user } = useUser();
+  const { setActiveTab } = useActiveTab();
+
+  const tabMap: Record<string, string> = {
+    index: '/(tabs)',
+    map: '/(tabs)/map',
+    upload: '/(tabs)/upload',
+    messages: '/(tabs)/messages',
+    profile: '/(tabs)/profile',
+  };
+
+  const { data: unreadData } = useGetUnreadMessageCountQuery(undefined, { skip: !isAuthenticated });
+  const unreadCount = unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0;
+
+  const { data: notifData } = useGetNotificationsQuery(
+    { read: false, filter: '', limit: 0, continuationToken: '' },
+    { skip: !isAuthenticated }
+  );
+  const unreadNotifCount = notifData?.results?.notifications?.length ?? 0;
+
+  // Update app badge count
+  useEffect(() => {
+    const total = unreadCount + unreadNotifCount;
+    Notifications.setBadgeCountAsync(total).catch(() => {});
+  }, [unreadCount, unreadNotifCount]);
 
   return (
     <Tabs
+      screenListeners={{
+        state: (e) => {
+          const state = e.data?.state;
+          if (state) {
+            const route = state.routes[state.index];
+            const tab = tabMap[route?.name] ?? '/(tabs)';
+            setActiveTab(tab);
+          }
+        },
+      }}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: '#0ea5e9',
@@ -30,8 +70,8 @@ function TabsInner() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -39,8 +79,8 @@ function TabsInner() {
         name="map"
         options={{
           title: 'Map',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="map-outline" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'map' : 'map-outline'} size={size} color={color} />
           ),
         }}
       />
@@ -48,8 +88,8 @@ function TabsInner() {
         name="upload"
         options={{
           title: 'Session',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle-outline" size={size + 2} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'add-circle' : 'add-circle-outline'} size={size + 2} color={color} />
           ),
         }}
       />
@@ -57,8 +97,8 @@ function TabsInner() {
         name="messages"
         options={{
           title: 'Messages',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble-outline" size={size} color={color} />
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? 'chatbubble' : 'chatbubble-outline'} size={size} color={color} />
           ),
           tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
         }}
@@ -66,10 +106,49 @@ function TabsInner() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-outline" size={size} color={color} />
-          ),
+          title: isAuthenticated && user?.picture ? '' : 'Profile',
+          tabBarIcon: ({ color, size, focused }) => {
+            if (isAuthenticated && user?.picture) {
+              const avatarSize = size + 6;
+              return (
+                <View style={{
+                  width: avatarSize + 4,
+                  height: avatarSize + 4,
+                  borderRadius: (avatarSize + 4) / 2,
+                  borderWidth: 2,
+                  borderColor: focused ? '#0ea5e9' : 'transparent',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginTop: 6,
+                }}>
+                  <Image
+                    source={{ uri: user.picture as string }}
+                    style={{
+                      width: avatarSize,
+                      height: avatarSize,
+                      borderRadius: avatarSize / 2,
+                    }}
+                    contentFit="cover"
+                  />
+                  {user?.active && (
+                    <View style={{
+                      position: 'absolute',
+                      bottom: -1,
+                      right: -1,
+                      width: 13,
+                      height: 13,
+                      borderRadius: 7,
+                      backgroundColor: '#10b981',
+                      borderWidth: 1.5,
+                      borderColor: isDark ? '#030712' : '#ffffff',
+                    }} />
+                  )}
+                </View>
+              );
+            }
+            return <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />;
+          },
+          tabBarBadge: unreadNotifCount > 0 ? unreadNotifCount : undefined,
         }}
       />
       {/* Hide nested stack routes from tab bar */}

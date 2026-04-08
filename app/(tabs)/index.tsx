@@ -3,6 +3,7 @@ import {
   View,
   Text,
   FlatList,
+  RefreshControl,
   ActivityIndicator,
   Pressable,
   ScrollView,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -35,6 +37,7 @@ type SearchType = 'surf_break' | 'photographer';
 
 export default function HomeScreen() {
   const router = useRouter();
+  const trackedPush = useTrackedPush();
   const dispatch = useDispatch();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -72,7 +75,9 @@ export default function HomeScreen() {
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
 
-  const { data: sessionsData, isLoading, isFetching } = useGetLatestSessionsQuery({
+  const [refreshing, setRefreshing] = useState(false);
+
+  const { data: sessionsData, isLoading, isFetching, refetch: refetchSessions } = useGetLatestSessionsQuery({
     userId: user?.id,
     limit: 10,
     continuationToken,
@@ -84,6 +89,22 @@ export default function HomeScreen() {
     const incoming = Array.isArray(results.sessions) ? results.sessions : [];
     const nextToken = results.continuationToken || '';
     hasMoreRef.current = Boolean(nextToken);
+
+    if (isRefreshingRef.current) {
+      // On refresh: replace all sessions with fresh data
+      seenIdsRef.current = new Set();
+      const unique = incoming.filter((s: any) => {
+        const id = s?.session_id ?? s?.id;
+        if (!id || seenIdsRef.current.has(id)) return false;
+        seenIdsRef.current.add(id);
+        return true;
+      });
+      setSessions(unique);
+      isRefreshingRef.current = false;
+      isFetchingMoreRef.current = false;
+      return;
+    }
+
     if (!incoming.length) { isFetchingMoreRef.current = false; return; }
     setSessions((prev) => {
       const newItems: any[] = [];
@@ -97,6 +118,15 @@ export default function HomeScreen() {
     });
     isFetchingMoreRef.current = false;
   }, [sessionsData]);
+
+  const isRefreshingRef = useRef(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    isRefreshingRef.current = true;
+    setContinuationToken('');
+    await refetchSessions();
+    setRefreshing(false);
+  }, [refetchSessions]);
 
   const handleLoadMore = useCallback(() => {
     if (!hasMoreRef.current || isFetchingMoreRef.current) return;
@@ -456,7 +486,7 @@ export default function HomeScreen() {
               isViewable={viewableIds.has(item.session_id ?? item.id)}
               onPress={() => {
                 const sid = item.session_id ?? item.id;
-                if (sid) router.push(`/session/${sid}` as any);
+                if (sid) trackedPush(`/session/${sid}` as any);
               }}
             />
           )}
@@ -485,7 +515,7 @@ export default function HomeScreen() {
                       <Pressable onPress={() => {
                         if (item.surf_break_identifier) {
                           const parts = item.surf_break_identifier.split('/');
-                          if (parts.length === 3) router.push(`/break/${parts[0]}/${parts[1]}/${parts[2]}` as any);
+                          if (parts.length === 3) trackedPush(`/break/${parts[0]}/${parts[1]}/${parts[2]}` as any);
                         }
                       }}>
                         <SurfBreakCard surfBreak={item} compact />
@@ -515,7 +545,7 @@ export default function HomeScreen() {
                     keyExtractor={(item: any) => item.id ?? item.handle}
                     renderItem={({ item }) => (
                       <Pressable
-                        onPress={() => router.push(`/user/${item.handle}` as any)}
+                        onPress={() => trackedPush(`/user/${item.handle}` as any)}
                         style={{ alignItems: 'center', width: 80 }}
                       >
                         <UserAvatar
@@ -556,6 +586,7 @@ export default function HomeScreen() {
               <View className="py-6"><ActivityIndicator /></View>
             ) : null
           }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.5}
           showsVerticalScrollIndicator={false}
@@ -621,6 +652,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: '#e5e7eb',
   },

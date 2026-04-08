@@ -22,6 +22,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
+import { useTabBar } from '../../src/context/TabBarContext';
 import {
   useGetSurfBreaksQuery,
   useCreateSurfSessionMutation,
@@ -49,6 +50,7 @@ export default function CreateSessionScreen() {
   const { user } = useUser();
   const { isAuthenticated, login } = useAuth();
   const requireAuth = useRequireAuth();
+  const { setTabBarVisible } = useTabBar();
 
   // Form state
   const [sessionName, setSessionName] = useState('');
@@ -84,12 +86,13 @@ export default function CreateSessionScreen() {
   const selectBreak = useCallback((brk: any) => {
     setSelectedBreak(brk);
     setShowBreakSearch(false);
+    setTabBarVisible(true);
     setBreakSearch('');
     setDebouncedSearch('');
-  }, []);
+  }, [setTabBarVisible]);
 
   const handleDateChange = useCallback((_event: any, date?: Date) => {
-    if (Platform.OS === 'android') setShowDatePicker(false);
+    if (Platform.OS === 'android') { setShowDatePicker(false); setTabBarVisible(true); }
     if (date) setSessionDate(date);
   }, []);
 
@@ -203,19 +206,26 @@ export default function CreateSessionScreen() {
   if (!isAuthenticated) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
-        <View style={styles.header}>
-          <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>New Session</Text>
-        </View>
         <View style={styles.emptyWrap}>
-          <Ionicons name="camera-outline" size={48} color={isDark ? '#374151' : '#d1d5db'} />
+          <View style={styles.emptyIconRow}>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f0f9ff' }]}>
+              <Ionicons name="camera-outline" size={24} color="#0ea5e9" />
+            </View>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f0fdf4' }]}>
+              <Ionicons name="people-outline" size={24} color="#10b981" />
+            </View>
+            <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#fef3c7' }]}>
+              <Ionicons name="share-outline" size={24} color="#f59e0b" />
+            </View>
+          </View>
           <Text style={[styles.emptyTitle, { color: isDark ? '#fff' : '#111827' }]}>
-            Upload your surf photos
+            Create a surf session
           </Text>
           <Text style={[styles.emptySubtitle, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
-            Create a session, tag surfers, and share your shots
+            Upload photos, organize them into groups, tag surfers, and share your sessions with the community
           </Text>
           <Pressable onPress={login} style={styles.signInBtn}>
-            <Text style={styles.signInText}>Sign In</Text>
+            <Text style={styles.signInText}>Sign In to Get Started</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -275,7 +285,7 @@ export default function CreateSessionScreen() {
             </View>
           ) : (
             <Pressable
-              onPress={() => setShowBreakSearch(true)}
+              onPress={() => { setShowBreakSearch(true); setTabBarVisible(false); }}
               style={[styles.textInput, styles.selectBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}
             >
               <Ionicons name="search-outline" size={16} color={isDark ? '#6b7280' : '#9ca3af'} />
@@ -288,7 +298,7 @@ export default function CreateSessionScreen() {
         <View style={styles.fieldWrap}>
           <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Date</Text>
           <Pressable
-            onPress={() => setShowDatePicker(true)}
+            onPress={() => { setShowDatePicker(true); setTabBarVisible(false); }}
             style={[styles.textInput, styles.selectBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}
           >
             <Ionicons name="calendar-outline" size={16} color={isDark ? '#6b7280' : '#9ca3af'} />
@@ -364,7 +374,7 @@ export default function CreateSessionScreen() {
       {/* Surf break search bottom sheet */}
       {showBreakSearch && (
         <View style={[styles.sheetOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowBreakSearch(false); setBreakSearch(''); setDebouncedSearch(''); }} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowBreakSearch(false); setTabBarVisible(true); setBreakSearch(''); setDebouncedSearch(''); }} />
           <View style={[styles.breakSheet, { backgroundColor: isDark ? '#111827' : '#fff' }]}>
             {/* Handle bar */}
             <View style={styles.sheetHandle}>
@@ -423,10 +433,10 @@ export default function CreateSessionScreen() {
       {/* Date picker overlay */}
       {showDatePicker && (
         <View style={[styles.dateOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDatePicker(false)} />
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowDatePicker(false); setTabBarVisible(true); }} />
           <View style={[styles.dateSheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
             <View style={styles.dateSheetHeader}>
-              <Pressable onPress={() => setShowDatePicker(false)}>
+              <Pressable onPress={() => { setShowDatePicker(false); setTabBarVisible(true); }}>
                 <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
               </Pressable>
             </View>
@@ -518,7 +528,9 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 4, right: 4,
     backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10,
   },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
+  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80, paddingHorizontal: 32 },
+  emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
+  emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' },
   emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 },
   signInBtn: { marginTop: 16, backgroundColor: '#0ea5e9', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 },

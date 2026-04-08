@@ -6,6 +6,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import { useUser } from '../context/UserProvider';
 import { useRequireAuth } from '../hooks/useRequireAuth';
+import { useTrackedPush } from '../context/NavigationContext';
 import { useFollowUserMutation, useUpdateUserFavoritesMutation } from '../store';
 
 interface TaggedUser {
@@ -17,6 +18,8 @@ interface TaggedUser {
 
 interface SessionCardProps {
   hidePhotographer?: boolean;
+  showViewCount?: boolean;
+  showHiddenLocations?: boolean;
   onPress?: () => void;
   isViewable?: boolean;
   session: {
@@ -37,6 +40,7 @@ interface SessionCardProps {
     region?: string;
     surf_break_identifier?: string;
     hide_location?: boolean;
+    view_count?: number;
     tagged_users?: TaggedUser[];
   };
 }
@@ -86,8 +90,9 @@ function FadingSubtitle({ items, visible = true }: { items: string[]; visible?: 
   );
 }
 
-export default function SessionCard({ session, hidePhotographer = false, onPress: customOnPress, isViewable = true }: SessionCardProps) {
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, onPress: customOnPress, isViewable = true }: SessionCardProps) {
   const router = useRouter();
+  const trackedPush = useTrackedPush();
   const { user } = useUser();
   const requireAuth = useRequireAuth();
   const [followUser] = useFollowUserMutation();
@@ -99,18 +104,18 @@ export default function SessionCard({ session, hidePhotographer = false, onPress
   const isFollowing = (session as any).is_following;
   const isFavorited = (session as any).surf_break_is_favorited;
   const surfBreakId = (session as any).surf_break_id;
-  const showLocation = !session.hide_location && session.surf_break_name;
+  const showLocation = (!session.hide_location || showHiddenLocations) && session.surf_break_name;
 
   const handlePress = () => {
     if (customOnPress) {
       customOnPress();
     } else if (sessionId) {
-      router.push(`/session/${sessionId}`);
+      trackedPush(`/session/${sessionId}`);
     }
   };
 
   const handleProfilePress = () => {
-    if (handle) router.push(`/user/${handle}` as any);
+    if (handle) trackedPush(`/user/${handle}`);
   };
 
   const handleEllipsis = () => {
@@ -154,7 +159,7 @@ export default function SessionCard({ session, hidePhotographer = false, onPress
             const id = session.surf_break_identifier!;
             const country = (session as any).surf_break_country ?? (session as any).country_code ?? '';
             const region = (session as any).surf_break_region ?? (session as any).region ?? '0';
-            router.push(`/break/${country}/${region}/${id}` as any);
+            trackedPush(`/break/${country}/${region}/${id}`);
           } else if (selected === 'Share') {
             const shareUrl = `https://share.surf-vault.com/s/${sessionId}`;
             Share.share({ url: shareUrl });
@@ -219,7 +224,7 @@ export default function SessionCard({ session, hidePhotographer = false, onPress
               <FadingSubtitle
                 items={[
                   session.session_name,
-                  !session.hide_location ? session.surf_break_name : undefined,
+                  (!session.hide_location || showHiddenLocations) ? session.surf_break_name : undefined,
                 ].filter(Boolean) as string[]}
                 visible={isViewable}
               />
@@ -233,7 +238,7 @@ export default function SessionCard({ session, hidePhotographer = false, onPress
               )}
               <FadingSubtitle
                 items={[
-                  !session.hide_location ? session.surf_break_name : undefined,
+                  (!session.hide_location || showHiddenLocations) ? session.surf_break_name : undefined,
                   session.session_date ? formatDate(session.session_date) : undefined,
                 ].filter(Boolean) as string[]}
                 visible={isViewable}
@@ -278,6 +283,16 @@ export default function SessionCard({ session, hidePhotographer = false, onPress
                   <Text style={styles.tagOverflowText}>+{taggedUsers.length - MAX_VISIBLE_TAGS}</Text>
                 </View>
               )}
+            </View>
+          )}
+
+          {/* View count — bottom left (self only) */}
+          {showViewCount && session.view_count != null && (
+            <View style={styles.viewCountWrap}>
+              <View style={styles.viewCountBadge}>
+                <Ionicons name="eye-outline" size={13} color="#fff" />
+                <Text style={styles.viewCountText}>{(session.view_count ?? 0).toLocaleString()}</Text>
+              </View>
             </View>
           )}
 
@@ -368,6 +383,31 @@ const styles = StyleSheet.create({
   },
   tagOverflowText: {
     fontSize: 9,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  viewCountWrap: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 10,
+    paddingBottom: 8,
+    paddingTop: 24,
+    backgroundColor: 'transparent',
+  },
+  viewCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  viewCountText: {
+    fontSize: 12,
     fontWeight: '600',
     color: '#fff',
   },
