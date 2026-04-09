@@ -16,6 +16,7 @@ import { AuthProvider, useAuth } from '../src/context/AuthProvider';
 import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
+import { UploadProvider } from '../src/context/UploadContext';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -92,6 +93,15 @@ function AppShell() {
         case 'conversation':
           if (data.conversationId) router.push(`/conversation/${data.conversationId}` as any);
           break;
+        case 'session':
+          if (data.sessionId) router.push(`/session/${data.sessionId}` as any);
+          break;
+        case 'user':
+          if (data.userId) router.push(`/user/${data.userId}` as any);
+          break;
+        case 'access':
+          if (data.requestId) router.push(`/access/${data.requestId}` as any);
+          break;
       }
     });
 
@@ -99,8 +109,10 @@ function AppShell() {
   }, [router]);
 
   // Request notification permissions on first launch (non-authenticated)
+  // Delayed to avoid racing with location permission dialog on iOS
   useEffect(() => {
-    requestNotificationPermissions();
+    const timer = setTimeout(() => requestNotificationPermissions(), 2000);
+    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -154,7 +166,9 @@ export default function RootLayout() {
         <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
           <ReduxProvider store={store}>
             <AuthProvider>
-              <AppShell />
+              <UploadProvider>
+                <AppShell />
+              </UploadProvider>
             </AuthProvider>
           </ReduxProvider>
         </Auth0Provider>

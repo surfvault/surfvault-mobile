@@ -9,6 +9,7 @@ import { useGetUnreadMessageCountQuery, useGetNotificationsQuery } from '../../s
 import { useAuth } from '../../src/context/AuthProvider';
 import { TabBarProvider, useTabBar } from '../../src/context/TabBarContext';
 import { useActiveTab } from '../../src/context/NavigationContext';
+import UploadProgressPill from '../../src/components/UploadProgressPill';
 
 function TabsInner() {
   const colorScheme = useColorScheme();
@@ -99,6 +100,7 @@ function TabsInner() {
         name="messages"
         options={{
           title: 'Messages',
+          href: isAuthenticated ? '/(tabs)/messages' : null,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'chatbubble' : 'chatbubble-outline'} size={size} color={color} />
           ),
@@ -162,7 +164,10 @@ function TabsInner() {
 export default function TabLayout() {
   return (
     <TabBarProvider>
-      <TabsInner />
+      <View style={{ flex: 1 }}>
+        <TabsInner />
+        <UploadProgressPill />
+      </View>
     </TabBarProvider>
   );
 }

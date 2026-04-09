@@ -47,9 +47,19 @@ export default function HomeScreen() {
   // Location
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
 
+  const locationRequestedRef = useRef(false);
+
   useEffect(() => {
+    if (locationRequestedRef.current) return;
+    locationRequestedRef.current = true;
+
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
+      // Check current status first to avoid re-triggering the popup
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status === 'undetermined') {
+        const result = await Location.requestForegroundPermissionsAsync();
+        status = result.status;
+      }
       if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({
           accuracy: Location.Accuracy.Balanced,

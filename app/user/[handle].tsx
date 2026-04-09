@@ -40,6 +40,8 @@ export default function UserProfileScreen() {
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
   const seenIdsRef = useRef(new Set<string>());
+  const hasMoreRef = useRef(false);
+  const isFetchingMoreRef = useRef(false);
 
   const isSelf = currentUser?.handle === handle;
 
@@ -52,23 +54,52 @@ export default function UserProfileScreen() {
 
   // Sessions
   const { data: sessionsData, isFetching: sessionsFetching } = useGetUserSessionsQuery(
-    { handle: handle ?? '', selfFlag: isSelf, limit: 10, continuationToken: '' },
+    { handle: handle ?? '', selfFlag: isSelf, limit: 10, continuationToken },
     { skip: !profile }
   );
 
   useEffect(() => {
-    const sessionsList = sessionsData?.results?.sessions ?? [];
-    if (sessionsList.length > 0) {
+    const results = sessionsData?.results;
+    if (!results) return;
+    const sessionsList = results.sessions ?? [];
+    const nextToken = results.continuationToken || '';
+    hasMoreRef.current = Boolean(nextToken);
+
+    if (!continuationToken) {
+      // Initial load — replace all
       seenIdsRef.current = new Set();
       const unique = sessionsList.filter((s: any) => {
         const key = s.session_id ?? s.id;
-        if (seenIdsRef.current.has(key)) return false;
+        if (!key || seenIdsRef.current.has(key)) return false;
         seenIdsRef.current.add(key);
         return true;
       });
       setSessions(unique);
+    } else {
+      // Paginated load — append
+      setSessions((prev) => {
+        const newItems: any[] = [];
+        for (const s of sessionsList) {
+          const key = s.session_id ?? s.id;
+          if (!key) continue;
+          if (!seenIdsRef.current.has(key)) {
+            seenIdsRef.current.add(key);
+            newItems.push(s);
+          }
+        }
+        return newItems.length ? prev.concat(newItems) : prev;
+      });
     }
+    isFetchingMoreRef.current = false;
   }, [sessionsData]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!hasMoreRef.current || isFetchingMoreRef.current || sessionsFetching) return;
+    const nextToken = sessionsData?.results?.continuationToken;
+    if (!nextToken) return;
+    isFetchingMoreRef.current = true;
+    setContinuationToken(nextToken);
+  }, [sessionsData, sessionsFetching]);
 
   // Follow
   const [followUser] = useFollowUserMutation();
@@ -190,6 +221,8 @@ export default function UserProfileScreen() {
             ListFooterComponent={
               sessionsFetching ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null
             }
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.5}
             showsVerticalScrollIndicator={false}
           />
         )}

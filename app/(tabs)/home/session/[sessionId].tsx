@@ -29,13 +29,12 @@ import {
   useDeleteSurfMediaMutation,
   useUpdateUserFavoritesMutation,
   useSaveSurfMediaMutation,
-  useFinalizeSurfMediaMutation,
-  useCompleteSurfMediaUploadMutation,
 } from '../../../../src/store';
 import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../../../src/components/UserAvatar';
 import { toOriginalKey, getWatermarkUrl } from '../../../../src/helpers/mediaUrl';
 import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../../../src/helpers/saveToPhotos';
+import { useUpload } from '../../../../src/context/UploadContext';
 
 const FETCH_AMOUNT = 30;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -76,9 +75,7 @@ export default function SessionDetailScreen() {
   const [deleteSurfMedia] = useDeleteSurfMediaMutation();
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
   const [saveSurfMedia] = useSaveSurfMediaMutation();
-  const [finalizeSurfMedia] = useFinalizeSurfMediaMutation();
-  const [completeSurfMediaUpload] = useCompleteSurfMediaUploadMutation();
-  const [uploading, setUploading] = useState(false);
+  const { startUpload, upload: activeUpload } = useUpload();
 
   // Session data
   const { data: sessionData, isLoading } = useGetSessionQuery({
@@ -235,7 +232,7 @@ export default function SessionDetailScreen() {
 
   // Upload photos to existing session
   const handleUploadPhotos = useCallback(async () => {
-    if (!session?.id || uploading) return;
+    if (!session?.id || activeUpload?.isUploading) return;
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -251,21 +248,19 @@ export default function SessionDetailScreen() {
 
     if (result.canceled || result.assets.length === 0) return;
 
-    setUploading(true);
-
     try {
-      const files = result.assets.map((asset) => ({
+      const pickedFiles = result.assets.map((asset) => ({
         uri: asset.uri,
         name: asset.fileName ?? `photo_${Date.now()}.jpg`,
         size: asset.fileSize ?? 0,
         type: asset.mimeType ?? 'image/jpeg',
       }));
 
-      const totalSizeInGB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
+      const totalSizeInGB = pickedFiles.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
 
       const uploadResult = await saveSurfMedia({
         sessionId: session.id,
-        mediaFiles: files.map((f) => ({ name: f.name, size: f.size, type: f.type, source: 'device' })),
+        mediaFiles: pickedFiles.map((f) => ({ name: f.name, size: f.size, type: f.type, source: 'device' })),
         totalSizeInGB,
       }).unwrap();
 
@@ -277,34 +272,24 @@ export default function SessionDetailScreen() {
         throw new Error('Failed to get upload URLs');
       }
 
-      for (const file of files) {
-        const presignedUrl = presignedUrlMap[file.name];
-        if (!presignedUrl) continue;
+      const uploadFiles = pickedFiles.map((f, i) => ({
+        name: f.name,
+        uri: f.uri,
+        type: f.type,
+        uploadFileId: uploadFileIds[i],
+        presignedUrl: presignedUrlMap[f.name],
+      })).filter((f) => f.presignedUrl && f.uploadFileId);
 
-        const response = await fetch(file.uri);
-        const blob = await response.blob();
-
-        await fetch(presignedUrl, {
-          method: 'PUT',
-          body: blob,
-          headers: { 'Content-Type': file.type },
-        });
-      }
-
-      if (uploadFileIds.length > 0) {
-        await finalizeSurfMedia({ uploadId, uploadFileIds }).unwrap();
-      }
-
-      await completeSurfMediaUpload({ uploadId }).unwrap();
-
-      Alert.alert('Upload Complete', `${files.length} photo${files.length > 1 ? 's' : ''} uploaded.`);
+      startUpload({
+        uploadId,
+        sessionName: session.session_name ?? 'Session',
+        files: uploadFiles,
+      });
     } catch (error: any) {
       console.error('Upload error:', error);
       Alert.alert('Upload Failed', error?.data?.message ?? 'Please try again.');
-    } finally {
-      setUploading(false);
     }
-  }, [session?.id, uploading, saveSurfMedia, finalizeSurfMedia, completeSurfMediaUpload]);
+  }, [session?.id, activeUpload?.isUploading, saveSurfMedia, startUpload]);
 
   // Ellipsis menu
   const handleEllipsisMenu = useCallback(() => {
