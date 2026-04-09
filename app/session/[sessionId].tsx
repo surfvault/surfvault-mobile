@@ -29,7 +29,10 @@ import {
   useDeleteSurfMediaMutation,
   useUpdateUserFavoritesMutation,
 } from '../../src/store';
+import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../src/components/UserAvatar';
+import { toOriginalKey, getWatermarkUrl } from '../../src/helpers/mediaUrl';
+import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../src/helpers/saveToPhotos';
 
 const FETCH_AMOUNT = 30;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -57,6 +60,11 @@ export default function SessionDetailScreen() {
   const [continuationToken, setContinuationToken] = useState('');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const seenMediaRef = useRef(new Set<string>());
+
+  // Photo viewer (lightbox)
+  const [viewerVisible, setViewerVisible] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
+  const [savingPhoto, setSavingPhoto] = useState(false);
 
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
@@ -179,10 +187,18 @@ export default function SessionDetailScreen() {
           }).unwrap();
           Alert.alert('Request Sent', `Photo request sent to @${sessionHandle}. (${selectedPhotoIds.length} photo${selectedPhotoIds.length > 1 ? 's' : ''})`);
           break;
-        case 'download':
-          await downloadSurfMedia({ photos: selectedPhotoIds }).unwrap();
-          Alert.alert('Download Started', 'Your download is being prepared. You\'ll be notified when ready.');
+        case 'download': {
+          const total = selectedPhotoIds.length;
+          const result = await savePhotosToCameraRoll(selectedPhotoIds);
+          if (result.saved === total) {
+            Alert.alert('Saved', `${result.saved} photo${result.saved > 1 ? 's' : ''} saved to your camera roll.`);
+          } else if (result.saved > 0) {
+            Alert.alert('Partially Saved', `${result.saved}/${total} photos saved. ${result.failed} failed.`);
+          } else {
+            Alert.alert('Error', result.errors[0] ?? 'Failed to save photos.');
+          }
           break;
+        }
         case 'delete':
           await deleteSurfMedia({ sessionId: session.id, photos: selectedPhotoIds as any }).unwrap();
           Alert.alert('Deleted', `Deleted ${selectedPhotoIds.length} photo${selectedPhotoIds.length > 1 ? 's' : ''}.`);
@@ -215,16 +231,16 @@ export default function SessionDetailScreen() {
 
   // Ellipsis menu
   const handleEllipsisMenu = useCallback(() => {
-    const options: string[] = ['Share'];
+    const favLabel = isFavorited ? 'Unfavorite Break' : 'Favorite Break';
+    const options: string[] = [favLabel, 'Share Session'];
 
     if (isOwner) {
-      options.push('Download', 'Delete');
+      options.push('Save to Photos', 'Delete Photos');
     }
 
-    options.push(isFavorited ? 'Unfavorite Break' : 'Favorite Break');
     options.push('Cancel');
     const cancelIndex = options.length - 1;
-    const destructiveIndex = isOwner ? options.indexOf('Delete') : -1;
+    const destructiveIndex = isOwner ? options.indexOf('Delete Photos') : -1;
 
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
@@ -235,21 +251,21 @@ export default function SessionDetailScreen() {
         },
         (buttonIndex) => {
           const selected = options[buttonIndex];
-          if (selected === 'Share') handleShare();
-          else if (selected === 'Download') handleStartAction('download');
-          else if (selected === 'Delete') handleStartAction('delete');
-          else if (selected === 'Favorite Break' || selected === 'Unfavorite Break') handleFavorite();
+          if (selected === favLabel) handleFavorite();
+          else if (selected === 'Share Session') handleShare();
+          else if (selected === 'Save to Photos') handleStartAction('download');
+          else if (selected === 'Delete Photos') handleStartAction('delete');
         }
       );
     } else {
       // Android fallback
       Alert.alert('Actions', undefined, [
-        { text: 'Share', onPress: handleShare },
+        { text: favLabel, onPress: handleFavorite },
+        { text: 'Share Session', onPress: handleShare },
         ...(isOwner ? [
-          { text: 'Download', onPress: () => handleStartAction('download') },
-          { text: 'Delete', onPress: () => handleStartAction('delete'), style: 'destructive' as const },
+          { text: 'Save to Photos', onPress: () => handleStartAction('download') },
+          { text: 'Delete Photos', onPress: () => handleStartAction('delete'), style: 'destructive' as const },
         ] : []),
-        { text: isFavorited ? 'Unfavorite Break' : 'Favorite Break', onPress: handleFavorite },
         { text: 'Cancel', style: 'cancel' as const },
       ]);
     }
@@ -267,14 +283,22 @@ export default function SessionDetailScreen() {
   const showLocation = !session?.hide_location && session?.surf_break_name;
 
   const renderPhoto = useCallback(
-    ({ item }: { item: any }) => {
+    ({ item, index }: { item: any; index: number }) => {
       const photoGroups: any[] = item.groups ?? [];
       const isSelected = selectedPhotoIds.includes(item.id);
       const inActionMode = !!sessionAction;
 
       return (
         <Pressable
-          onPress={() => { if (inActionMode) togglePhotoSelection(item.id); }}
+          onPress={() => {
+            if (inActionMode) {
+              togglePhotoSelection(item.id);
+            } else {
+              setViewerIndex(index);
+              setViewerVisible(true);
+            }
+          }}
+          onLongPress={() => {}} // consume long-press to prevent iOS context menu
           style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
         >
           <View style={{ position: 'relative' }}>
@@ -479,6 +503,48 @@ export default function SessionDetailScreen() {
           </View>
         )}
       </SafeAreaView>
+
+      {/* Photo lightbox viewer — shows watermarked preview */}
+      <ImageViewing
+        images={sessionMedia.map((m) => ({
+          uri: getWatermarkUrl(m.original_s3_key || toOriginalKey(m.thumbnail) || ''),
+        }))}
+        imageIndex={viewerIndex}
+        visible={viewerVisible}
+        onRequestClose={() => setViewerVisible(false)}
+        swipeToCloseEnabled
+        doubleTapToZoomEnabled
+        onImageIndexChange={setViewerIndex}
+        FooterComponent={({ imageIndex }) => (
+          <View style={styles.viewerFooter}>
+            <Pressable
+              onPress={async () => {
+                const photo = sessionMedia[imageIndex];
+                if (!photo?.id || savingPhoto) return;
+                setSavingPhoto(true);
+                const result = await savePhotoToCameraRoll(photo.id);
+                setSavingPhoto(false);
+                if (result.success) {
+                  Alert.alert('Saved', 'Photo saved to your camera roll.');
+                } else {
+                  Alert.alert('Error', result.error ?? 'Failed to save photo.');
+                }
+              }}
+              disabled={savingPhoto}
+              style={styles.viewerSaveBtn}
+            >
+              {savingPhoto ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Ionicons name="download-outline" size={22} color="#ffffff" />
+              )}
+              <Text style={styles.viewerSaveText}>
+                {savingPhoto ? 'Saving...' : 'Save to Photos'}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+      />
     </>
   );
 }
@@ -519,4 +585,13 @@ const styles = StyleSheet.create({
   actionBarCount: { fontSize: 14, fontWeight: '600' },
   confirmBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 999 },
   confirmBtnText: { fontSize: 14, fontWeight: '600' },
+  viewerFooter: {
+    alignItems: 'center', paddingBottom: 50, paddingTop: 12,
+  },
+  viewerSaveBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 20, paddingVertical: 12,
+    borderRadius: 999,
+  },
+  viewerSaveText: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
 });

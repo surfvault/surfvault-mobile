@@ -20,7 +20,7 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
     let pusher: any;
     try {
       const PusherModule = require('pusher-js/react-native');
-      const PusherClass = PusherModule?.default ?? PusherModule;
+      const PusherClass = PusherModule?.default ?? PusherModule?.Pusher ?? PusherModule;
       if (typeof PusherClass !== 'function') {
         console.warn('Pusher: constructor not available, skipping real-time');
         return;

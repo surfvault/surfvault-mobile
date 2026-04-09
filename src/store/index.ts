@@ -51,6 +51,7 @@ export {
   useRequestAccessToSurfMediaMutation,
   useSaveSurfMediaAccessRequestToVaultMutation,
   useSaveSurfMediaMutation,
+  useLazyGetPhotoDownloadUrlQuery,
 } from './apis/endpoints/media';
 
 export {
