@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useCallback } from 'react';
 import { Tabs } from 'expo-router';
 import { useColorScheme, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,13 +19,24 @@ function TabsInner() {
   const { user } = useUser();
   const { setActiveTab } = useActiveTab();
 
-  const tabMap: Record<string, string> = {
+  const tabMap = useMemo<Record<string, string>>(() => ({
     index: '/(tabs)',
     map: '/(tabs)/map',
     upload: '/(tabs)/upload',
     messages: '/(tabs)/messages',
     profile: '/(tabs)/profile',
-  };
+  }), []);
+
+  const screenListeners = useMemo(() => ({
+    state: (e: any) => {
+      const state = e.data?.state;
+      if (state) {
+        const route = state.routes[state.index];
+        const mapped = tabMap[route?.name] ?? '/(tabs)';
+        setActiveTab(mapped);
+      }
+    },
+  }), [tabMap, setActiveTab]);
 
   const { data: unreadData } = useGetUnreadMessageCountQuery(undefined, { skip: !isAuthenticated });
   const unreadCount = unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0;
@@ -44,16 +55,7 @@ function TabsInner() {
 
   return (
     <Tabs
-      screenListeners={{
-        state: (e) => {
-          const state = e.data?.state;
-          if (state) {
-            const route = state.routes[state.index];
-            const tab = tabMap[route?.name] ?? '/(tabs)';
-            setActiveTab(tab);
-          }
-        },
-      }}
+      screenListeners={screenListeners}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: '#0ea5e9',

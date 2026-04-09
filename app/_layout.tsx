@@ -7,6 +7,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { useFonts } from 'expo-font';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Auth0Provider } from 'react-native-auth0';
 import { Provider as ReduxProvider } from 'react-redux';
 import Constants from 'expo-constants';
@@ -97,14 +98,16 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <NavigationProvider>
-      <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
-        <ReduxProvider store={store}>
-          <AuthProvider>
-            <AppShell />
-          </AuthProvider>
-        </ReduxProvider>
-      </Auth0Provider>
-    </NavigationProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <NavigationProvider>
+        <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
+          <ReduxProvider store={store}>
+            <AuthProvider>
+              <AppShell />
+            </AuthProvider>
+          </ReduxProvider>
+        </Auth0Provider>
+      </NavigationProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -20,6 +20,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: 'com.surfvault.mobile',
     infoPlist: {
       NSPhotoLibraryUsageDescription: 'SurfVault needs access to your photo library to upload surf session photos.',
+      NSPhotoLibraryAddUsageDescription: 'SurfVault needs permission to save photos to your camera roll.',
       NSCameraUsageDescription: 'SurfVault needs access to your camera to take surf photos.',
     },
   },
@@ -48,6 +49,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         cameraPermission: 'SurfVault needs access to your camera to take surf photos.',
       },
     ],
+    [
+      'expo-media-library',
+      {
+        photosPermission: 'SurfVault needs permission to save photos to your camera roll.',
+        savePhotosPermission: 'SurfVault needs permission to save photos to your camera roll.',
+      },
+    ],
     'expo-secure-store',
     [
       'expo-location',
@@ -68,6 +76,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     auth0ClientId: process.env.AUTH0_CLIENT_ID ?? '',
     auth0Audience: process.env.AUTH0_AUDIENCE ?? '',
     pusherAppKey: process.env.PUSHER_APP_KEY ?? '',
+    pusherBeamsInstanceId: process.env.PUSHER_BEAMS_INSTANCE_ID ?? '',
     pusherCluster: process.env.PUSHER_CLUSTER ?? 'us2',
     revenuecatApiKey: process.env.REVENUCAT_API_KEY ?? '',
     googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',

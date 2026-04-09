@@ -190,6 +190,7 @@ export default function ProfileScreen() {
     const options = [
       'Edit Profile',
       'Share Profile',
+      'Manage Favorites',
       'Plans & Billing',
       'Settings',
       'Sign Out',
@@ -207,6 +208,7 @@ export default function ProfileScreen() {
             const shareUrl = `https://app.surf-vault.com/${user?.handle}`;
             Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
           }
+          else if (options[index] === 'Manage Favorites') trackedPush('/manage-favorites');
           else if (options[index] === 'Sign Out') logout();
         }
       );
@@ -214,6 +216,7 @@ export default function ProfileScreen() {
       Alert.alert('Menu', undefined, [
         { text: 'Edit Profile', onPress: () => trackedPush('/edit-profile') },
         { text: 'Share Profile', onPress: () => Share.share({ message: `https://app.surf-vault.com/${user?.handle}` }) },
+        { text: 'Manage Favorites', onPress: () => trackedPush('/manage-favorites') },
         { text: 'Plans & Billing' },
         { text: 'Settings' },
         { text: 'Sign Out', style: 'destructive', onPress: logout },
@@ -250,6 +253,36 @@ export default function ProfileScreen() {
     );
   }
 
+  const listHeader = (
+    <>
+      <ProfileHeader
+        profile={profileWithCounts}
+        isDark={isDark}
+        isSelf
+        showStorage
+        showActiveToggle
+        onEditProfile={() => trackedPush('/edit-profile')}
+        onToggleActive={handleToggleActive}
+        onSelectBreak={handleOpenBreakSearch}
+        onEditStatusNote={handleOpenNoteEditor}
+        currentBreakName={currentBreakName}
+        storageUsed={storageUsed}
+        storageLimit={storageLimit}
+      />
+      <View style={[s.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+        <Pressable onPress={() => setActiveTab('grid')} style={[s.tabBtn, activeTab === 'grid' && s.tabBtnActive]}>
+          <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+        </Pressable>
+        <Pressable onPress={() => setActiveTab('list')} style={[s.tabBtn, activeTab === 'list' && s.tabBtnActive]}>
+          <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+        </Pressable>
+        <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
+          <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+        </Pressable>
+      </View>
+    </>
+  );
+
   return (
     <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
       {/* Header */}
@@ -282,7 +315,7 @@ export default function ProfileScreen() {
           activeTab === 'favorites' ? item.surf_break_id : (item.session_id ?? item.id)
         }
         numColumns={activeTab === 'grid' ? 3 : 1}
-        key={activeTab === 'grid' ? 'grid' : 'list'} // force re-render on column change
+        key={activeTab === 'grid' ? 'grid' : 'list'}
         renderItem={({ item }) => {
           if (activeTab === 'favorites') {
             const breakName = (item.surf_break_identifier ?? '').replaceAll('_', ' ');
@@ -368,38 +401,13 @@ export default function ProfileScreen() {
             />
           );
         }}
-        ListHeaderComponent={
-          <>
-            <ProfileHeader
-              profile={profileWithCounts}
-              isDark={isDark}
-              isSelf
-              showStorage
-              showActiveToggle
-              onEditProfile={() => trackedPush('/edit-profile')}
-              onToggleActive={handleToggleActive}
-              onSelectBreak={handleOpenBreakSearch}
-              onEditStatusNote={handleOpenNoteEditor}
-              currentBreakName={currentBreakName}
-              storageUsed={storageUsed}
-              storageLimit={storageLimit}
-            />
-            {/* Tab selector */}
-            <View style={[s.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
-              <Pressable onPress={() => setActiveTab('grid')} style={[s.tabBtn, activeTab === 'grid' && s.tabBtnActive]}>
-                <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
-              </Pressable>
-              <Pressable onPress={() => setActiveTab('list')} style={[s.tabBtn, activeTab === 'list' && s.tabBtnActive]}>
-                <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
-              </Pressable>
-              <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
-                <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
-              </Pressable>
-            </View>
-          </>
-        }
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={
-          !isFetching ? (
+          isFetching ? (
+            <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+              <ActivityIndicator size="small" color={isDark ? '#6b7280' : '#9ca3af'} />
+            </View>
+          ) : (
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
               <Ionicons
                 name={activeTab === 'favorites' ? 'heart-outline' : 'camera-outline'}
@@ -410,7 +418,7 @@ export default function ProfileScreen() {
                 {activeTab === 'favorites' ? 'No favorites yet' : 'No sessions yet'}
               </Text>
             </View>
-          ) : null
+          )
         }
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}

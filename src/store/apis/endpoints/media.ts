@@ -107,6 +107,12 @@ const mediaApi = rootApi.injectEndpoints({
         body: { photos },
       }),
     }),
+    getPhotoDownloadUrl: builder.query({
+      query: ({ photoId }: { photoId: string }) => ({
+        url: `/media/photo/${photoId}/download-url`,
+        method: 'GET',
+      }),
+    }),
     finalizeSurfMedia: builder.mutation({
       invalidatesTags: [ApiTag.Media],
       query: ({
@@ -152,6 +158,7 @@ export const {
   useCancelSurfMediaUploadMutation,
   useCompleteSurfMediaUploadMutation,
   useDownloadSurfMediaAccessRequestPhotosMutation,
+  useLazyGetPhotoDownloadUrlQuery,
 } = mediaApi;
 
 export { mediaApi };
