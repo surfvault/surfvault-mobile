@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
@@ -28,6 +29,9 @@ import {
   useDownloadSurfMediaMutation,
   useDeleteSurfMediaMutation,
   useUpdateUserFavoritesMutation,
+  useSaveSurfMediaMutation,
+  useFinalizeSurfMediaMutation,
+  useCompleteSurfMediaUploadMutation,
 } from '../../src/store';
 import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../src/components/UserAvatar';
@@ -64,7 +68,6 @@ export default function SessionDetailScreen() {
   // Photo viewer (lightbox)
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [savingPhoto, setSavingPhoto] = useState(false);
 
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
@@ -75,6 +78,10 @@ export default function SessionDetailScreen() {
   const [downloadSurfMedia] = useDownloadSurfMediaMutation();
   const [deleteSurfMedia] = useDeleteSurfMediaMutation();
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
+  const [saveSurfMedia] = useSaveSurfMediaMutation();
+  const [finalizeSurfMedia] = useFinalizeSurfMediaMutation();
+  const [completeSurfMediaUpload] = useCompleteSurfMediaUploadMutation();
+  const [uploading, setUploading] = useState(false);
 
   // Session data
   const { data: sessionData, isLoading } = useGetSessionQuery({
@@ -229,13 +236,90 @@ export default function SessionDetailScreen() {
     await favoriteSurfBreak({ surfBreakId: session.surf_break_id, action });
   }, [requireAuth, session, isFavorited, favoriteSurfBreak]);
 
+  // Upload photos to existing session
+  const handleUploadPhotos = useCallback(async () => {
+    if (!session?.id || uploading) return;
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      quality: 1,
+    });
+
+    if (result.canceled || result.assets.length === 0) return;
+
+    setUploading(true);
+
+    try {
+      const files = result.assets.map((asset) => ({
+        uri: asset.uri,
+        name: asset.fileName ?? `photo_${Date.now()}.jpg`,
+        size: asset.fileSize ?? 0,
+        type: asset.mimeType ?? 'image/jpeg',
+      }));
+
+      const totalSizeInGB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
+
+      // Get presigned URLs
+      const uploadResult = await saveSurfMedia({
+        sessionId: session.id,
+        mediaFiles: files.map((f) => ({ name: f.name, size: f.size, type: f.type, source: 'device' })),
+        totalSizeInGB,
+      }).unwrap();
+
+      const presignedUrlMap = uploadResult?.results?.presignedUrlMap;
+      const uploadId = uploadResult?.results?.uploadId;
+      const uploadFileIds = uploadResult?.results?.uploadFileIds ?? [];
+
+      if (!presignedUrlMap || !uploadId) {
+        throw new Error('Failed to get upload URLs');
+      }
+
+      // Upload each file to S3
+      for (const file of files) {
+        const presignedUrl = presignedUrlMap[file.name];
+        if (!presignedUrl) continue;
+
+        const response = await fetch(file.uri);
+        const blob = await response.blob();
+
+        await fetch(presignedUrl, {
+          method: 'PUT',
+          body: blob,
+          headers: { 'Content-Type': file.type },
+        });
+      }
+
+      // Finalize upload
+      if (uploadFileIds.length > 0) {
+        await finalizeSurfMedia({ uploadId, uploadFileIds }).unwrap();
+      }
+
+      // Complete upload
+      await completeSurfMediaUpload({ uploadId }).unwrap();
+
+      Alert.alert('Upload Complete', `${files.length} photo${files.length > 1 ? 's' : ''} uploaded.`);
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      Alert.alert('Upload Failed', error?.data?.message ?? 'Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  }, [session?.id, uploading, saveSurfMedia, finalizeSurfMedia, completeSurfMediaUpload]);
+
   // Ellipsis menu
   const handleEllipsisMenu = useCallback(() => {
     const favLabel = isFavorited ? 'Unfavorite Break' : 'Favorite Break';
     const options: string[] = [favLabel, 'Share Session'];
 
     if (isOwner) {
-      options.push('Save to Photos', 'Delete Photos');
+      options.push('Upload Photos', 'Save Photos', 'Delete Photos');
     }
 
     options.push('Cancel');
@@ -253,7 +337,8 @@ export default function SessionDetailScreen() {
           const selected = options[buttonIndex];
           if (selected === favLabel) handleFavorite();
           else if (selected === 'Share Session') handleShare();
-          else if (selected === 'Save to Photos') handleStartAction('download');
+          else if (selected === 'Upload Photos') handleUploadPhotos();
+          else if (selected === 'Save Photos') handleStartAction('download');
           else if (selected === 'Delete Photos') handleStartAction('delete');
         }
       );
@@ -263,13 +348,14 @@ export default function SessionDetailScreen() {
         { text: favLabel, onPress: handleFavorite },
         { text: 'Share Session', onPress: handleShare },
         ...(isOwner ? [
-          { text: 'Save to Photos', onPress: () => handleStartAction('download') },
+          { text: 'Upload Photos', onPress: handleUploadPhotos },
+          { text: 'Save Photos', onPress: () => handleStartAction('download') },
           { text: 'Delete Photos', onPress: () => handleStartAction('delete'), style: 'destructive' as const },
         ] : []),
         { text: 'Cancel', style: 'cancel' as const },
       ]);
     }
-  }, [isOwner, isFavorited, handleShare, handleStartAction, handleFavorite]);
+  }, [isOwner, isFavorited, handleShare, handleStartAction, handleFavorite, handleUploadPhotos]);
 
   // Action bar color config
   const actionColors = {
@@ -345,13 +431,13 @@ export default function SessionDetailScreen() {
           headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
           headerShadowVisible: false,
           headerLeft: () => (
-            <Pressable onPress={smartBack} hitSlop={8}>
-              <Ionicons name="chevron-back" size={28} color="#007AFF" />
+            <Pressable onPress={smartBack} hitSlop={8} style={styles.headerBtn}>
+              <Ionicons name="chevron-back" size={24} color="#007AFF" />
             </Pressable>
           ),
           headerRight: () => (
-            <Pressable onPress={handleEllipsisMenu} hitSlop={12} style={{ paddingRight: 4 }}>
-              <Ionicons name="ellipsis-horizontal" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
+            <Pressable onPress={handleEllipsisMenu} hitSlop={12} style={styles.headerBtn}>
+              <Ionicons name="ellipsis-horizontal" size={20} color={isDark ? '#e5e7eb' : '#374151'} />
             </Pressable>
           ),
         }}
@@ -514,42 +600,16 @@ export default function SessionDetailScreen() {
         onRequestClose={() => setViewerVisible(false)}
         swipeToCloseEnabled
         doubleTapToZoomEnabled
-        onImageIndexChange={setViewerIndex}
-        FooterComponent={({ imageIndex }) => (
-          <View style={styles.viewerFooter}>
-            <Pressable
-              onPress={async () => {
-                const photo = sessionMedia[imageIndex];
-                if (!photo?.id || savingPhoto) return;
-                setSavingPhoto(true);
-                const result = await savePhotoToCameraRoll(photo.id);
-                setSavingPhoto(false);
-                if (result.success) {
-                  Alert.alert('Saved', 'Photo saved to your camera roll.');
-                } else {
-                  Alert.alert('Error', result.error ?? 'Failed to save photo.');
-                }
-              }}
-              disabled={savingPhoto}
-              style={styles.viewerSaveBtn}
-            >
-              {savingPhoto ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Ionicons name="download-outline" size={22} color="#ffffff" />
-              )}
-              <Text style={styles.viewerSaveText}>
-                {savingPhoto ? 'Saving...' : 'Save to Photos'}
-              </Text>
-            </Pressable>
-          </View>
-        )}
       />
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  headerBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    alignItems: 'center', justifyContent: 'center',
+  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   headerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 },
   sessionName: { fontSize: 20, fontWeight: '700', marginBottom: 10 },
@@ -585,13 +645,4 @@ const styles = StyleSheet.create({
   actionBarCount: { fontSize: 14, fontWeight: '600' },
   confirmBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 999 },
   confirmBtnText: { fontSize: 14, fontWeight: '600' },
-  viewerFooter: {
-    alignItems: 'center', paddingBottom: 50, paddingTop: 12,
-  },
-  viewerSaveBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 20, paddingVertical: 12,
-    borderRadius: 999,
-  },
-  viewerSaveText: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
 });

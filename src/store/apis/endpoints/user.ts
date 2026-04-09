@@ -87,6 +87,19 @@ const userApi = rootApi.injectEndpoints({
         body: metaData,
       }),
     }),
+    updateUserPushToken: builder.mutation({
+      query: ({ expoPushToken }: { expoPushToken: string }) => ({
+        url: '/user/push-token',
+        method: 'PATCH',
+        body: { expoPushToken },
+      }),
+    }),
+    clearUserPushToken: builder.mutation({
+      query: () => ({
+        url: '/user/clear-push-token',
+        method: 'PATCH',
+      }),
+    }),
     updateUserRecentSearches: builder.mutation({
       invalidatesTags: [ApiTag.User],
       query: ({ payload }: { payload: Record<string, unknown> }) => ({
@@ -176,6 +189,8 @@ export const {
   useGetUserQuery,
   useUpdateUserHandleMutation,
   useUpdateUserMetaDataMutation,
+  useUpdateUserPushTokenMutation,
+  useClearUserPushTokenMutation,
   useFollowUserMutation,
   useUpdateUserFavoritesMutation,
   useGetPhotographersQuery,

@@ -2,6 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import Auth0, { useAuth0 } from 'react-native-auth0';
 import Constants from 'expo-constants';
 import { saveAuthToken, clearAuthToken, getAuthToken, setTokenRefresher } from '../store/apis/customBaseQuery';
+import { store } from '../store';
+import { rootApi } from '../store/apis/rootApi';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -72,6 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await authorize({
         audience,
         scope: 'openid profile email offline_access',
+        additionalParameters: { prompt: 'login' },
       });
       await refreshToken();
     } catch (e) {
@@ -81,12 +84,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await clearSession();
+      // Clear push token before logging out
+      const authToken = await getAuthToken();
+      if (authToken) {
+        const apiBaseUrl = Constants.expoConfig?.extra?.apiBaseUrl ?? '';
+        fetch(`${apiBaseUrl}/user/clear-push-token`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+        }).catch(() => {}); // fire and forget
+      }
+
+      // Skip clearSession entirely — just clear local tokens
+      // clearSession opens a browser modal which we don't want
+    } catch (e) {
+      console.error('Logout failed:', e);
+    } finally {
+      // Always clear local state regardless of Auth0 session clear result
       await clearAuthToken();
       setToken(null);
       setIsAuthenticated(false);
-    } catch (e) {
-      console.error('Logout failed:', e);
+      // Reset all RTK Query caches so stale user data is gone
+      store.dispatch(rootApi.util.resetApiState());
     }
   }, [clearSession]);
 
