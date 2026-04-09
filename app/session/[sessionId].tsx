@@ -63,10 +63,12 @@ export default function SessionDetailScreen() {
   const [continuationToken, setContinuationToken] = useState('');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const seenMediaRef = useRef(new Set<string>());
+  const shouldReplaceRef = useRef(false);
 
-  // Photo viewer (lightbox)
+  // Photo viewer (lightbox) — windowed to avoid slow FlatList layout for large sessions
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [viewerWindowStart, setViewerWindowStart] = useState(0);
 
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
@@ -142,9 +144,12 @@ export default function SessionDetailScreen() {
       return true;
     });
     if (newMedia.length > 0) {
-      setSessionMedia((prev) =>
-        continuationToken === '' && activeGroupId ? newMedia : [...prev, ...newMedia]
-      );
+      if (shouldReplaceRef.current) {
+        setSessionMedia(newMedia);
+        shouldReplaceRef.current = false;
+      } else {
+        setSessionMedia((prev) => [...prev, ...newMedia]);
+      }
     }
     setContinuationToken(morePhotos?.results?.continuationToken ?? '');
   }, [morePhotos]);
@@ -152,6 +157,7 @@ export default function SessionDetailScreen() {
   // Group filter
   const handleGroupFilter = useCallback((groupId: string | null) => {
     seenMediaRef.current = new Set();
+    shouldReplaceRef.current = true;
     setSessionMedia([]);
     setContinuationToken('');
     setActiveGroupId(groupId);
@@ -362,7 +368,11 @@ export default function SessionDetailScreen() {
             if (inActionMode) {
               togglePhotoSelection(item.id);
             } else {
-              setViewerIndex(index);
+              // Window images around tapped photo to avoid slow layout
+              const WINDOW = 20;
+              const start = Math.max(0, index - WINDOW);
+              setViewerWindowStart(start);
+              setViewerIndex(index - start);
               setViewerVisible(true);
             }
           }}
@@ -572,17 +582,21 @@ export default function SessionDetailScreen() {
         )}
       </SafeAreaView>
 
-      {/* Photo lightbox viewer — shows watermarked preview */}
-      <ImageViewing
-        images={sessionMedia.map((m) => ({
-          uri: getWatermarkUrl(m.original_s3_key || toOriginalKey(m.thumbnail) || ''),
-        }))}
-        imageIndex={viewerIndex}
-        visible={viewerVisible}
-        onRequestClose={() => setViewerVisible(false)}
-        swipeToCloseEnabled
-        doubleTapToZoomEnabled
-      />
+      {/* Photo lightbox viewer — windowed to keep load times consistent */}
+      {viewerVisible && (
+        <ImageViewing
+          images={sessionMedia
+            .slice(viewerWindowStart, viewerWindowStart + 41)
+            .map((m) => ({
+              uri: getWatermarkUrl(m.original_s3_key || toOriginalKey(m.thumbnail) || ''),
+            }))}
+          imageIndex={viewerIndex}
+          visible
+          onRequestClose={() => setViewerVisible(false)}
+          swipeToCloseEnabled
+          doubleTapToZoomEnabled
+        />
+      )}
     </>
   );
 }

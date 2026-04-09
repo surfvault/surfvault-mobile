@@ -56,15 +56,46 @@ export default function MapScreen() {
   const searchInputRef = useRef<TextInput>(null);
   const markerRefs = useRef<Record<string, any>>({});
   const hasAnimatedToLocation = useRef(false);
+  const [locationGranted, setLocationGranted] = useState(false);
 
   // Device location from Redux (set by home screen)
   const deviceCoords = useSelector((state: any) => state.location.coordinates);
 
-  // Animate to user's location on first availability
+  // Request location permission when map tab is first visited
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status === 'undetermined') {
+        const result = await Location.requestForegroundPermissionsAsync();
+        status = result.status;
+      }
+      if (status === 'granted') {
+        setLocationGranted(true);
+        // If we don't have coords from Redux yet, fetch them now
+        if (!deviceCoords?.lat || !deviceCoords?.lon) {
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const lat = loc.coords.latitude;
+            const lon = loc.coords.longitude;
+            if (!hasAnimatedToLocation.current) {
+              hasAnimatedToLocation.current = true;
+              mapRef.current?.animateToRegion({
+                latitude: lat, longitude: lon,
+                latitudeDelta: 0.5, longitudeDelta: 0.5,
+              }, 800);
+            }
+          } catch {}
+        }
+      }
+    })();
+  }, []);
+
+  // Animate to user's location from Redux when available
   useEffect(() => {
     if (hasAnimatedToLocation.current) return;
     if (deviceCoords?.lat && deviceCoords?.lon) {
       hasAnimatedToLocation.current = true;
+      setLocationGranted(true);
       mapRef.current?.animateToRegion({
         latitude: deviceCoords.lat,
         longitude: deviceCoords.lon,
@@ -281,7 +312,7 @@ export default function MapScreen() {
         provider={PROVIDER_DEFAULT}
         customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
         userInterfaceStyle={isDark ? 'dark' : 'light'}
-        showsUserLocation
+        showsUserLocation={locationGranted}
         showsMyLocationButton={false}
         clusterColor={markerColor}
         clusterTextColor="#ffffff"
