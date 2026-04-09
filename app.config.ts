@@ -22,6 +22,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSPhotoLibraryUsageDescription: 'SurfVault needs access to your photo library to upload surf session photos.',
       NSPhotoLibraryAddUsageDescription: 'SurfVault needs permission to save photos to your camera roll.',
       NSCameraUsageDescription: 'SurfVault needs access to your camera to take surf photos.',
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {
@@ -82,7 +83,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
     environment: process.env.ENVIRONMENT ?? 'dev',
     eas: {
-      projectId: process.env.EAS_PROJECT_ID ?? '',
+      projectId: 'f0f75cbd-8e64-43a6-b251-438dcd684772',
     },
   },
 });

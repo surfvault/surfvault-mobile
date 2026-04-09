@@ -16,6 +16,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
+import { useSelector } from 'react-redux';
+import * as Location from 'expo-location';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
@@ -53,6 +55,24 @@ export default function MapScreen() {
   const mapRef = useRef<MapView>(null);
   const searchInputRef = useRef<TextInput>(null);
   const markerRefs = useRef<Record<string, any>>({});
+  const hasAnimatedToLocation = useRef(false);
+
+  // Device location from Redux (set by home screen)
+  const deviceCoords = useSelector((state: any) => state.location.coordinates);
+
+  // Animate to user's location on first availability
+  useEffect(() => {
+    if (hasAnimatedToLocation.current) return;
+    if (deviceCoords?.lat && deviceCoords?.lon) {
+      hasAnimatedToLocation.current = true;
+      mapRef.current?.animateToRegion({
+        latitude: deviceCoords.lat,
+        longitude: deviceCoords.lon,
+        latitudeDelta: 0.5,
+        longitudeDelta: 0.5,
+      }, 800);
+    }
+  }, [deviceCoords]);
 
   const [region, setRegion] = useState<Region>(INITIAL_REGION);
   const [filter, setFilter] = useState<FilterType>('all');
@@ -545,9 +565,26 @@ export default function MapScreen() {
       {/* My location button */}
       <Pressable
         onPress={async () => {
-          const camera = await mapRef.current?.getCamera();
-          if (camera) {
-            mapRef.current?.animateCamera({ ...camera, zoom: 10 }, { duration: 500 });
+          // Try Redux coords first, then fetch fresh location
+          let lat = deviceCoords?.lat;
+          let lon = deviceCoords?.lon;
+          if (!lat || !lon) {
+            try {
+              const { status } = await Location.getForegroundPermissionsAsync();
+              if (status === 'granted') {
+                const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                lat = loc.coords.latitude;
+                lon = loc.coords.longitude;
+              }
+            } catch {}
+          }
+          if (lat && lon) {
+            mapRef.current?.animateToRegion({
+              latitude: lat,
+              longitude: lon,
+              latitudeDelta: 0.15,
+              longitudeDelta: 0.15,
+            }, 500);
           }
         }}
         style={[styles.myLocationBtn, {

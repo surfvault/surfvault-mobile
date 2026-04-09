@@ -112,6 +112,8 @@ export {
   useUpdateUserFavoritesMutation,
   useUpdateUserHandleMutation,
   useUpdateUserMetaDataMutation,
+  useUpdateUserPushTokenMutation,
+  useClearUserPushTokenMutation,
   useUpdateUserRecentSearchesMutation,
   useUpdateUserTypeMutation,
 } from './apis/endpoints/user';

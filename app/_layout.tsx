@@ -1,5 +1,5 @@
 import '../global.css';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform, Alert } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -11,11 +11,12 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Auth0Provider } from 'react-native-auth0';
 import { Provider as ReduxProvider } from 'react-redux';
 import Constants from 'expo-constants';
-import { store, useGetSelfQuery } from '../src/store';
+import { store, useGetSelfQuery, useUpdateUserPushTokenMutation } from '../src/store';
 import { AuthProvider, useAuth } from '../src/context/AuthProvider';
 import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
+import { UploadProvider } from '../src/context/UploadContext';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -52,9 +53,66 @@ function AppShell() {
   // Set up Pusher when we have a user
   usePusher({ userId: user?.id });
 
-  // Request notification permissions on first launch
+  // Push token registration
+  const [updatePushToken] = useUpdateUserPushTokenMutation();
+  const pushTokenRegistered = useRef(false);
+
   useEffect(() => {
-    requestNotificationPermissions();
+    if (!user?.id || !Device.isDevice || pushTokenRegistered.current) return;
+
+    (async () => {
+      try {
+        await requestNotificationPermissions();
+        const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+        if (!projectId) return;
+
+        const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+        if (token) {
+          await updatePushToken({ expoPushToken: token });
+          pushTokenRegistered.current = true;
+        }
+      } catch (e) {
+        console.warn('Failed to register push token:', e);
+      }
+    })();
+  }, [user?.id]);
+
+  // Handle notification tap deep linking
+  useEffect(() => {
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data;
+      if (!data?.screen) return;
+
+      switch (data.screen) {
+        case 'notifications':
+          router.push('/notifications' as any);
+          break;
+        case 'messages':
+          router.push('/(tabs)/messages' as any);
+          break;
+        case 'conversation':
+          if (data.conversationId) router.push(`/conversation/${data.conversationId}` as any);
+          break;
+        case 'session':
+          if (data.sessionId) router.push(`/session/${data.sessionId}` as any);
+          break;
+        case 'user':
+          if (data.userId) router.push(`/user/${data.userId}` as any);
+          break;
+        case 'access':
+          if (data.requestId) router.push(`/access/${data.requestId}` as any);
+          break;
+      }
+    });
+
+    return () => subscription.remove();
+  }, [router]);
+
+  // Request notification permissions on first launch (non-authenticated)
+  // Delayed to avoid racing with location permission dialog on iOS
+  useEffect(() => {
+    const timer = setTimeout(() => requestNotificationPermissions(), 2000);
+    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -75,6 +133,11 @@ function AppShell() {
 
     // If authenticated + onboarded and still on auth screens, go to tabs
     if (isAuthenticated && isOnboarded && inAuthGroup) {
+      router.replace('/(tabs)');
+    }
+
+    // If not authenticated and not on tabs, go to home
+    if (!isAuthenticated && inAuthGroup) {
       router.replace('/(tabs)');
     }
   }, [isAuthenticated, isLoading, selfLoading, isOnboarded, segments]);
@@ -103,7 +166,9 @@ export default function RootLayout() {
         <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
           <ReduxProvider store={store}>
             <AuthProvider>
-              <AppShell />
+              <UploadProvider>
+                <AppShell />
+              </UploadProvider>
             </AuthProvider>
           </ReduxProvider>
         </Auth0Provider>

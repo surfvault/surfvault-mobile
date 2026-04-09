@@ -28,6 +28,7 @@ import {
   useCreateSurfSessionMutation,
   useSaveSurfMediaMutation,
 } from '../../src/store';
+import { useUpload } from '../../src/context/UploadContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PREVIEW_SIZE = (SCREEN_WIDTH - 48 - 8) / 4; // 4 columns with gaps
@@ -76,6 +77,7 @@ export default function CreateSessionScreen() {
   // Mutations
   const [createSession] = useCreateSurfSessionMutation();
   const [saveSurfMedia] = useSaveSurfMediaMutation();
+  const { startUpload } = useUpload();
 
   const handleBreakSearch = useCallback((text: string) => {
     setBreakSearch(text);
@@ -164,17 +166,15 @@ export default function CreateSessionScreen() {
       }).unwrap();
 
       const sessionId = sessionResult?.results?.sessionId ?? sessionResult?.results?.session?.id;
-      const presignedUrlMap = sessionResult?.results?.presignedUrlMap;
-      const uploadFileIdMap = sessionResult?.results?.uploadFileIdMap;
 
-      if (!sessionId || !presignedUrlMap) {
+      if (!sessionId) {
         throw new Error('Failed to create session');
       }
 
       // Get presigned URLs for upload
       const uploadResult = await saveSurfMedia({
         sessionId,
-        mediaFiles: files.map((f, i) => ({
+        mediaFiles: files.map((f) => ({
           name: f.name,
           size: f.size,
           type: f.type,
@@ -183,24 +183,45 @@ export default function CreateSessionScreen() {
         totalSizeInGB: totalSizeGB,
       }).unwrap();
 
-      Alert.alert(
-        'Session Created',
-        `"${sessionName}" has been created with ${files.length} photo${files.length > 1 ? 's' : ''}. Upload will continue in the background.`,
-        [{ text: 'OK', onPress: () => {
-          // Reset form
-          setSessionName('');
-          setSelectedBreak(null);
-          setFiles([]);
-          setHideLocation(false);
-          setSessionDate(new Date());
-        }}]
-      );
+      const presignedUrlMap = uploadResult?.results?.presignedUrlMap;
+      const uploadId = uploadResult?.results?.uploadId;
+      const uploadFileIds = uploadResult?.results?.uploadFileIds ?? [];
+
+      if (!presignedUrlMap || !uploadId) {
+        throw new Error('Failed to get upload URLs');
+      }
+
+      // Build file list for upload manager
+      const uploadFiles = files.map((f, i) => ({
+        name: f.name,
+        uri: f.uri,
+        type: f.type,
+        uploadFileId: uploadFileIds[i],
+        presignedUrl: presignedUrlMap[f.name],
+      })).filter((f) => f.presignedUrl && f.uploadFileId);
+
+      // Start background upload via context
+      startUpload({
+        uploadId,
+        sessionName: sessionName.trim(),
+        files: uploadFiles,
+      });
+
+      // Reset form
+      setSessionName('');
+      setSelectedBreak(null);
+      setFiles([]);
+      setHideLocation(false);
+      setSessionDate(new Date());
+
+      // Navigate to home
+      router.push('/(tabs)' as any);
     } catch (error: any) {
       Alert.alert('Error', error?.data?.message ?? 'Failed to create session. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
-  }, [canSubmit, requireAuth, user, files, selectedBreak, sessionName, sessionDate, hideLocation, createSession, saveSurfMedia]);
+  }, [canSubmit, requireAuth, user, files, selectedBreak, sessionName, sessionDate, hideLocation, createSession, saveSurfMedia, startUpload, router]);
 
   // Not logged in
   if (!isAuthenticated) {
@@ -219,7 +240,7 @@ export default function CreateSessionScreen() {
             </View>
           </View>
           <Text style={[styles.emptyTitle, { color: isDark ? '#fff' : '#111827' }]}>
-            Create a surf session
+            Upload your first session
           </Text>
           <Text style={[styles.emptySubtitle, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
             Upload photos, organize them into groups, tag surfers, and share your sessions with the community

@@ -12,21 +12,23 @@
         "AUTH0_CLIENT_ID": "N1ZZuwobgJpTBJyYX6gI8ewlZxj7puyh",
         "AUTH0_AUDIENCE": "https://dev-api.surfvault.com",
         "PUSHER_APP_KEY": "fcfd482ab10b784b287a",
-        "PUSHER_BEAMS_INSTANCE_ID": "65d23932-2edb-4652-9f63-3693b60951b4",
         "PUSHER_CLUSTER": "us2",
-        "ENVIRONMENT": "dev"
+        "ENVIRONMENT": "dev",
+        "EAS_PROJECT_ID": "f0f75cbd-8e64-43a6-b251-438dcd684772"
       }
     },
     "production": {
+      "node": "22.22.2",
       "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "API_BASE_URL": "https://api.surf-vault.com",
         "AUTH0_DOMAIN": "auth.surf-vault.com",
         "AUTH0_CLIENT_ID": "LbIRFqvSqLPZwNq45FgjfTTmm9ow847O",
         "AUTH0_AUDIENCE": "https://api.surfvault.com",
         "PUSHER_APP_KEY": "89b3531ed113c325a4a7",
-        "PUSHER_BEAMS_INSTANCE_ID": "705af361-9704-4035-a25b-96b408638b7e",
         "PUSHER_CLUSTER": "us2",
-        "ENVIRONMENT": "prod"
+        "ENVIRONMENT": "prod",
+        "EAS_PROJECT_ID": "f0f75cbd-8e64-43a6-b251-438dcd684772"
       }
     }
   },
