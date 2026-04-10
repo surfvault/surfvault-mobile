@@ -10,7 +10,6 @@ import {
   Alert,
   StyleSheet,
   Share,
-  ActionSheetIOS,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -33,6 +32,8 @@ import {
 } from '../../src/store';
 import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../src/components/UserAvatar';
+import ActionSheet from '../../src/components/ActionSheet';
+import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import { toOriginalKey, getWatermarkUrl } from '../../src/helpers/mediaUrl';
 import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../src/helpers/saveToPhotos';
 import { useUpload } from '../../src/context/UploadContext';
@@ -73,6 +74,7 @@ export default function SessionDetailScreen() {
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [sheetVisible, setSheetVisible] = useState(false);
 
   // Mutations
   const [requestAccessToPhotos] = useRequestAccessToSurfMediaMutation();
@@ -302,48 +304,35 @@ export default function SessionDetailScreen() {
   }, [session?.id, activeUpload?.isUploading, saveSurfMedia, startUpload]);
 
   // Ellipsis menu
-  const handleEllipsisMenu = useCallback(() => {
-    const favLabel = isFavorited ? 'Unfavorite Break' : 'Favorite Break';
-    const options: string[] = [favLabel, 'Share Session'];
+  const handleEllipsisMenu = useCallback(() => setSheetVisible(true), []);
 
-    if (isOwner) {
-      options.push('Upload Photos', 'Save Photos', 'Delete Photos');
-    }
-
-    options.push('Cancel');
-    const cancelIndex = options.length - 1;
-    const destructiveIndex = isOwner ? options.indexOf('Delete Photos') : -1;
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
+  const ellipsisSections: ActionSheetSection[] = [
+    {
+      options: [
         {
-          options,
-          cancelButtonIndex: cancelIndex,
-          destructiveButtonIndex: destructiveIndex,
+          label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
+          icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',
+          onPress: handleFavorite,
         },
-        (buttonIndex) => {
-          const selected = options[buttonIndex];
-          if (selected === favLabel) handleFavorite();
-          else if (selected === 'Share Session') handleShare();
-          else if (selected === 'Upload Photos') handleUploadPhotos();
-          else if (selected === 'Save Photos') handleStartAction('download');
-          else if (selected === 'Delete Photos') handleStartAction('delete');
-        }
-      );
-    } else {
-      // Android fallback
-      Alert.alert('Actions', undefined, [
-        { text: favLabel, onPress: handleFavorite },
-        { text: 'Share Session', onPress: handleShare },
-        ...(isOwner ? [
-          { text: 'Upload Photos', onPress: handleUploadPhotos },
-          { text: 'Save Photos', onPress: () => handleStartAction('download') },
-          { text: 'Delete Photos', onPress: () => handleStartAction('delete'), style: 'destructive' as const },
-        ] : []),
-        { text: 'Cancel', style: 'cancel' as const },
-      ]);
-    }
-  }, [isOwner, isFavorited, handleShare, handleStartAction, handleFavorite, handleUploadPhotos]);
+        {
+          label: 'Share Session',
+          icon: 'share-outline',
+          onPress: handleShare,
+        },
+      ],
+    },
+    ...(isOwner ? [{
+      options: [
+        { label: 'Upload Photos', icon: 'cloud-upload-outline' as const, onPress: handleUploadPhotos },
+        { label: 'Save Photos', icon: 'download-outline' as const, onPress: () => handleStartAction('download') },
+      ],
+    }] : []),
+    ...(isOwner ? [{
+      options: [
+        { label: 'Delete Photos', icon: 'trash-outline' as const, destructive: true, onPress: () => handleStartAction('delete') },
+      ],
+    }] : []),
+  ];
 
   // Action bar color config
   const actionColors = {
@@ -581,6 +570,12 @@ export default function SessionDetailScreen() {
           </View>
         )}
       </SafeAreaView>
+
+      <ActionSheet
+        visible={sheetVisible}
+        sections={ellipsisSections}
+        onClose={() => setSheetVisible(false)}
+      />
 
       {/* Photo lightbox viewer — windowed to keep load times consistent */}
       {viewerVisible && (

@@ -17,6 +17,7 @@ import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
+import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -174,9 +175,11 @@ export default function RootLayout() {
         <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
           <ReduxProvider store={store}>
             <AuthProvider>
-              <UploadProvider>
-                <AppShell />
-              </UploadProvider>
+              <ActionSheetProvider useCustomActionSheet>
+                <UploadProvider>
+                  <AppShell />
+                </UploadProvider>
+              </ActionSheetProvider>
             </AuthProvider>
           </ReduxProvider>
         </Auth0Provider>

@@ -16,8 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import * as Location from 'expo-location';
+import { setCoordinates } from '../../src/store/slices/location';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
@@ -52,13 +53,14 @@ export default function MapScreen() {
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
   const requireAuth = useRequireAuth();
+  const dispatch = useDispatch();
   const mapRef = useRef<MapView>(null);
   const searchInputRef = useRef<TextInput>(null);
   const markerRefs = useRef<Record<string, any>>({});
   const hasAnimatedToLocation = useRef(false);
   const [locationGranted, setLocationGranted] = useState(false);
 
-  // Device location from Redux (set by home screen)
+  // Device location from Redux
   const deviceCoords = useSelector((state: any) => state.location.coordinates);
 
   // Request location permission when map tab is first visited
@@ -71,12 +73,13 @@ export default function MapScreen() {
       }
       if (status === 'granted') {
         setLocationGranted(true);
-        // If we don't have coords from Redux yet, fetch them now
+        // If we don't have coords in Redux yet, fetch and store them
         if (!deviceCoords?.lat || !deviceCoords?.lon) {
           try {
             const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
             const lat = loc.coords.latitude;
             const lon = loc.coords.longitude;
+            dispatch(setCoordinates({ lat, lon }));
             if (!hasAnimatedToLocation.current) {
               hasAnimatedToLocation.current = true;
               mapRef.current?.animateToRegion({

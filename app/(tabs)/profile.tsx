@@ -9,9 +9,8 @@ import {
   Pressable,
   StyleSheet,
   useColorScheme,
-  ActionSheetIOS,
   Platform,
-  Alert,
+  Linking,
   ActivityIndicator,
   Keyboard,
   Dimensions,
@@ -37,6 +36,8 @@ import {
 import { useTabBar } from '../../src/context/TabBarContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
 import SessionCard from '../../src/components/SessionCard';
+import ActionSheet from '../../src/components/ActionSheet';
+import type { ActionSheetSection } from '../../src/components/ActionSheet';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -49,6 +50,7 @@ export default function ProfileScreen() {
   const { setTabBarVisible } = useTabBar();
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'favorites'>('grid');
+  const [menuVisible, setMenuVisible] = useState(false);
 
   // Fetch public profile data for follower/following counts
   const { data: publicProfileData } = useGetUserQuery(
@@ -186,44 +188,56 @@ export default function ProfileScreen() {
     await updateMeta({ metaData: { active: !user.active } });
   }, [user, updateMeta]);
 
-  const handleMenu = useCallback(() => {
-    const options = [
-      'Edit Profile',
-      'Share Profile',
-      'Manage Favorites',
-      'Plans & Billing',
-      'Settings',
-      'Sign Out',
-      'Cancel',
-    ];
-    const destructiveIndex = options.indexOf('Sign Out');
-    const cancelIndex = options.length - 1;
+  const handleMenu = useCallback(() => setMenuVisible(true), []);
 
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
-        (index) => {
-          if (options[index] === 'Edit Profile') trackedPush('/edit-profile');
-          else if (options[index] === 'Share Profile') {
+  const menuSections: ActionSheetSection[] = [
+    {
+      options: [
+        {
+          label: 'Edit Profile',
+          icon: 'create-outline',
+          onPress: () => trackedPush('/edit-profile'),
+        },
+        {
+          label: 'Share Profile',
+          icon: 'share-outline',
+          onPress: () => {
             const shareUrl = `https://app.surf-vault.com/${user?.handle}`;
             Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
-          }
-          else if (options[index] === 'Manage Favorites') trackedPush('/manage-favorites');
-          else if (options[index] === 'Sign Out') logout();
-        }
-      );
-    } else {
-      Alert.alert('Menu', undefined, [
-        { text: 'Edit Profile', onPress: () => trackedPush('/edit-profile') },
-        { text: 'Share Profile', onPress: () => Share.share({ message: `https://app.surf-vault.com/${user?.handle}` }) },
-        { text: 'Manage Favorites', onPress: () => trackedPush('/manage-favorites') },
-        { text: 'Plans & Billing' },
-        { text: 'Settings' },
-        { text: 'Sign Out', style: 'destructive', onPress: logout },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
-  }, [logout]);
+          },
+        },
+      ],
+    },
+    {
+      options: [
+        {
+          label: 'Manage Favorites',
+          icon: 'heart-outline',
+          onPress: () => trackedPush('/manage-favorites'),
+        },
+        {
+          label: 'Plans & Billing',
+          icon: 'card-outline',
+          onPress: () => {},
+        },
+        {
+          label: 'Settings',
+          icon: 'settings-outline',
+          onPress: () => Linking.openSettings(),
+        },
+      ],
+    },
+    {
+      options: [
+        {
+          label: 'Sign Out',
+          icon: 'log-out-outline',
+          destructive: true,
+          onPress: logout,
+        },
+      ],
+    },
+  ];
 
   // Not logged in
   if (!isAuthenticated) {
@@ -514,6 +528,12 @@ export default function ProfileScreen() {
           </View>
         </View>
       )}
+
+      <ActionSheet
+        visible={menuVisible}
+        sections={menuSections}
+        onClose={() => setMenuVisible(false)}
+      />
     </SafeAreaView>
   );
 }

@@ -16,9 +16,7 @@ import { useRouter } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import { useDispatch } from 'react-redux';
-import { setCoordinates } from '../../src/store/slices/location';
+import { useSelector } from 'react-redux';
 import {
   useGetLatestSessionsQuery,
   useGetNearbySurfBreaksQuery,
@@ -38,38 +36,13 @@ type SearchType = 'surf_break' | 'photographer';
 export default function HomeScreen() {
   const router = useRouter();
   const trackedPush = useTrackedPush();
-  const dispatch = useDispatch();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
   const { setTabBarVisible } = useTabBar();
 
-  // Location
-  const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
-
-  const locationRequestedRef = useRef(false);
-
-  useEffect(() => {
-    if (locationRequestedRef.current) return;
-    locationRequestedRef.current = true;
-
-    (async () => {
-      // Check current status first to avoid re-triggering the popup
-      let { status } = await Location.getForegroundPermissionsAsync();
-      if (status === 'undetermined') {
-        const result = await Location.requestForegroundPermissionsAsync();
-        status = result.status;
-      }
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        const newCoords = { lat: loc.coords.latitude, lon: loc.coords.longitude };
-        setCoords(newCoords);
-        dispatch(setCoordinates(newCoords));
-      }
-    })();
-  }, []);
+  // Location — read from Redux (set by map page when permission is granted)
+  const coords = useSelector((state: any) => state.location.coordinates);
 
   // ---- Viewability tracking ----
   const [viewableIds, setViewableIds] = useState<Set<string>>(new Set());

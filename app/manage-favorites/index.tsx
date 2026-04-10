@@ -5,9 +5,6 @@ import {
   Pressable,
   StyleSheet,
   useColorScheme,
-  Alert,
-  Platform,
-  ActionSheetIOS,
 } from 'react-native';
 import { Stack } from 'expo-router';
 import { useSmartBack } from '../../src/context/NavigationContext';
@@ -18,6 +15,7 @@ import {
   useUpdateUserFavoritesMutation,
 } from '../../src/store';
 import { useAuth } from '../../src/context/AuthProvider';
+import ActionSheet from '../../src/components/ActionSheet';
 
 export default function ManageFavoritesScreen() {
   const colorScheme = useColorScheme();
@@ -31,6 +29,7 @@ export default function ManageFavoritesScreen() {
 
   // Local ordering state for optimistic updates
   const [favoritesInOrder, setFavoritesInOrder] = useState<any[]>([]);
+  const [removeTarget, setRemoveTarget] = useState<any | null>(null);
 
   useEffect(() => {
     if (!favorites || favorites.length === 0) {
@@ -60,44 +59,22 @@ export default function ManageFavoritesScreen() {
     [updateFavorite]
   );
 
-  const handleRemove = useCallback(
-    (item: any) => {
-      const breakName = (item.surf_break_identifier ?? '').replaceAll('_', ' ');
+  const handleRemove = useCallback((item: any) => {
+    setRemoveTarget(item);
+  }, []);
 
-      const doRemove = async () => {
-        // Optimistic local removal
-        setFavoritesInOrder((prev) => prev.filter((f) => f.surf_break_id !== item.surf_break_id));
-        await updateFavorite({
-          surfBreakId: item.surf_break_id,
-          action: 'unfavorite',
-        });
-      };
+  const doRemove = useCallback(async () => {
+    if (!removeTarget) return;
+    setFavoritesInOrder((prev) => prev.filter((f) => f.surf_break_id !== removeTarget.surf_break_id));
+    await updateFavorite({
+      surfBreakId: removeTarget.surf_break_id,
+      action: 'unfavorite',
+    });
+  }, [removeTarget, updateFavorite]);
 
-      if (Platform.OS === 'ios') {
-        ActionSheetIOS.showActionSheetWithOptions(
-          {
-            title: `Remove ${breakName}?`,
-            options: ['Remove', 'Cancel'],
-            destructiveButtonIndex: 0,
-            cancelButtonIndex: 1,
-          },
-          (index) => {
-            if (index === 0) doRemove();
-          }
-        );
-      } else {
-        Alert.alert(
-          'Remove Favorite',
-          `Remove ${breakName} from your favorites?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Remove', style: 'destructive', onPress: doRemove },
-          ]
-        );
-      }
-    },
-    [updateFavorite]
-  );
+  const removeBreakName = removeTarget
+    ? (removeTarget.surf_break_identifier ?? '').replaceAll('_', ' ')
+    : '';
 
   const renderItem = useCallback(
     ({ item, drag, isActive }: RenderItemParams<any>) => {
@@ -194,6 +171,18 @@ export default function ManageFavoritesScreen() {
         }
         showsVerticalScrollIndicator={false}
         contentContainerStyle={favoritesInOrder.length === 0 ? { flex: 1 } : undefined}
+      />
+
+      <ActionSheet
+        visible={!!removeTarget}
+        title={`Remove ${removeBreakName}?`}
+        options={[{
+          label: 'Remove',
+          icon: 'trash-outline',
+          destructive: true,
+          onPress: doRemove,
+        }]}
+        onClose={() => setRemoveTarget(null)}
       />
     </View>
   );
