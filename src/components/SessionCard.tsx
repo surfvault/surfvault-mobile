@@ -11,6 +11,12 @@ import { useRequireAuth } from '../hooks/useRequireAuth';
 import { useTrackedPush } from '../context/NavigationContext';
 import { useFollowUserMutation, useUpdateUserFavoritesMutation } from '../store';
 
+const formatCount = (n: number): string => {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '')}k`;
+  return String(n);
+};
+
 interface TaggedUser {
   id?: string;
   handle?: string;
@@ -292,21 +298,24 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             </View>
           )}
 
-          {/* View count — bottom left (self only) */}
-          {showViewCount && session.view_count != null && (
-            <View style={styles.viewCountWrap}>
-              <View style={styles.viewCountBadge}>
-                <Ionicons name="eye-outline" size={13} color="#fff" />
-                <Text style={styles.viewCountText}>{(session.view_count ?? 0).toLocaleString()}</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Photo count — top right */}
-          {session.photo_count != null && session.photo_count > 0 && (
-            <View style={styles.photoCountBadge}>
-              <Text style={styles.photoCountText}>{session.photo_count}</Text>
-              <Ionicons name="images-outline" size={11} color="#fff" />
+          {/* Stats badge — bottom left */}
+          {(session.photo_count > 0 || (showViewCount && session.view_count != null)) && (
+            <View style={styles.statsBadge}>
+              {showViewCount && session.view_count != null && (
+                <>
+                  <Ionicons name="eye-outline" size={11} color="#fff" />
+                  <Text style={styles.statsText}>{formatCount(session.view_count ?? 0)}</Text>
+                </>
+              )}
+              {showViewCount && session.view_count != null && session.photo_count > 0 && (
+                <Text style={styles.statsText}> · </Text>
+              )}
+              {session.photo_count > 0 && (
+                <>
+                  <Ionicons name="images-outline" size={11} color="#fff" />
+                  <Text style={styles.statsText}>{formatCount(session.photo_count)}</Text>
+                </>
+              )}
             </View>
           )}
         </View>
@@ -320,6 +329,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
           subtitle: [
             handle && session.session_name ? `@${handle}` : undefined,
             showLocation ? session.surf_break_name : undefined,
+            session.session_date ? formatDate(session.session_date) : undefined,
           ].filter(Boolean).join(' · ') || undefined,
           imageUri: session.thumbnail,
         }}
@@ -406,35 +416,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  viewCountWrap: {
+  statsBadge: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 10,
-    paddingBottom: 8,
-    paddingTop: 24,
-    backgroundColor: 'transparent',
-  },
-  viewCountBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
-  },
-  viewCountText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  photoCountBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
+    bottom: 10,
+    left: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
@@ -443,7 +428,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
-  photoCountText: {
+  statsText: {
     fontSize: 11,
     fontWeight: '600',
     color: '#fff',

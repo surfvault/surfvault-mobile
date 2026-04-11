@@ -39,6 +39,12 @@ import SessionCard from '../../src/components/SessionCard';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 
+const formatCount = (n: number): string => {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '')}k`;
+  return String(n);
+};
+
 export default function ProfileScreen() {
   const router = useRouter();
   const trackedPush = useTrackedPush();
@@ -378,10 +384,23 @@ export default function ProfileScreen() {
                     <Ionicons name="image-outline" size={24} color={isDark ? '#374151' : '#d1d5db'} />
                   </View>
                 )}
-                {item.view_count != null && (
+                {(item.view_count != null || item.photo_count > 0) && (
                   <View style={s.gridViewCount}>
-                    <Ionicons name="eye-outline" size={10} color="#fff" />
-                    <Text style={s.gridViewCountText}>{(item.view_count ?? 0).toLocaleString()}</Text>
+                    {item.view_count != null && (
+                      <>
+                        <Ionicons name="eye-outline" size={10} color="#fff" />
+                        <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
+                      </>
+                    )}
+                    {item.view_count != null && item.photo_count > 0 && (
+                      <Text style={s.gridViewCountText}> · </Text>
+                    )}
+                    {item.photo_count > 0 && (
+                      <>
+                        <Ionicons name="images-outline" size={10} color="#fff" />
+                        <Text style={s.gridViewCountText}>{formatCount(item.photo_count)}</Text>
+                      </>
+                    )}
                   </View>
                 )}
                 {(item.session_date || item.surf_break_name) && (

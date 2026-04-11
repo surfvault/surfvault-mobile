@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 15.0.0"
+    "version": ">= 15.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -18,6 +19,7 @@
       }
     },
     "production": {
+      "autoIncrement": true,
       "node": "22.22.2",
       "env": {
         "NPM_CONFIG_LEGACY_PEER_DEPS": "true",

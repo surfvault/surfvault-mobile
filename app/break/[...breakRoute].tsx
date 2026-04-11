@@ -28,7 +28,7 @@ const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 const formatDateParam = (date: Date): string =>
-  date.toISOString().split('T')[0];
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 export default function SurfBreakDetailScreen() {
   const { breakRoute } = useLocalSearchParams<{ breakRoute: string[] | string }>();
@@ -49,12 +49,15 @@ export default function SurfBreakDetailScreen() {
   const [sessions, setSessions] = useState<any[]>([]);
   const seenIdsRef = useRef(new Set<string>());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [pickerDate, setPickerDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const dateStr = selectedDate ? formatDateParam(selectedDate) : '';
 
   const { data: initialData, isLoading } = useGetSurfBreakWithLatestSessionsQuery({
     userId: user?.id, country, region, surfBreak,
-    date: selectedDate ? formatDateParam(selectedDate) : undefined,
-  });
+    date: dateStr || undefined,
+  }, { refetchOnMountOrArgChange: true });
 
   const breakData = initialData?.results?.surfBreak;
   const initialSessions = initialData?.results?.sessions ?? [];
@@ -108,9 +111,22 @@ export default function SurfBreakDetailScreen() {
   }, [country, region, surfBreak]);
 
   const handleDateChange = useCallback((_event: any, date?: Date) => {
-    if (Platform.OS === 'android') setShowDatePicker(false);
-    if (date) { setSelectedDate(date); setSessions([]); seenIdsRef.current = new Set(); setContinuationToken(''); }
+    if (Platform.OS === 'android') {
+      setShowDatePicker(false);
+      if (date) { setSelectedDate(date); setSessions([]); seenIdsRef.current = new Set(); setContinuationToken(''); }
+    } else {
+      // iOS spinner — just update picker state, apply on Done
+      if (date) setPickerDate(date);
+    }
   }, []);
+
+  const handleDateDone = useCallback(() => {
+    setShowDatePicker(false);
+    setSelectedDate(pickerDate);
+    setSessions([]);
+    seenIdsRef.current = new Set();
+    setContinuationToken('');
+  }, [pickerDate]);
 
   const clearDate = useCallback(() => {
     setSelectedDate(null); setSessions([]); seenIdsRef.current = new Set(); setContinuationToken('');
@@ -133,11 +149,11 @@ export default function SurfBreakDetailScreen() {
           </Pressable>
         ),
         headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingRight: 4 }}>
-            <Pressable onPress={handleFavorite} hitSlop={8}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, paddingRight: 8 }}>
+            <Pressable onPress={handleFavorite} hitSlop={12} style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
               <Ionicons name={isFavorited ? 'heart' : 'heart-outline'} size={22} color={isFavorited ? '#ef4444' : (isDark ? '#e5e7eb' : '#374151')} />
             </Pressable>
-            <Pressable onPress={handleShare} hitSlop={8}>
+            <Pressable onPress={handleShare} hitSlop={12} style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
               <Ionicons name="share-outline" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
             </Pressable>
           </View>
@@ -158,7 +174,7 @@ export default function SurfBreakDetailScreen() {
                   {regionDisplay}{regionDisplay && countryDisplay ? ' · ' : ''}{countryDisplay}
                 </Text>
                 <View style={styles.dateRow}>
-                  <Pressable onPress={() => setShowDatePicker(true)} style={[styles.dateBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                  <Pressable onPress={() => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); }} style={[styles.dateBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
                     <Ionicons name="calendar-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
                     <Text style={[styles.dateBtnText, { color: isDark ? '#d1d5db' : '#374151' }]}>
                       {selectedDate ? formatDateLabel(selectedDate) : 'Any date'}
@@ -187,11 +203,11 @@ export default function SurfBreakDetailScreen() {
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDatePicker(false)} />
             <View style={[styles.sheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
               <View style={styles.sheetHeader}>
-                <Pressable onPress={() => setShowDatePicker(false)}>
+                <Pressable onPress={handleDateDone}>
                   <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
                 </Pressable>
               </View>
-              <DateTimePicker value={selectedDate ?? new Date()} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} style={{ height: 200 }} />
+              <DateTimePicker value={pickerDate} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} style={{ height: 200 }} />
             </View>
           </View>
         )}

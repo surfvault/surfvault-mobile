@@ -8,6 +8,7 @@ import {
   useColorScheme,
   Animated,
   Dimensions,
+  PanResponder,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -89,6 +90,29 @@ export default function ActionSheet({ visible, options, sections, title, header,
     });
   }, [onClose, slideAnim, backdropAnim]);
 
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 8,
+      onPanResponderMove: (_, g) => {
+        if (g.dy > 0) slideAnim.setValue(g.dy);
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > 80 || g.vy > 0.5) {
+          handleClose();
+        } else {
+          Animated.spring(slideAnim, {
+            toValue: 0,
+            damping: 28,
+            stiffness: 300,
+            mass: 0.8,
+            useNativeDriver: true,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
   const resolvedSections = useMemo(() => {
     if (sections && sections.length > 0) return sections;
     if (options && options.length > 0) return [{ options }];
@@ -131,6 +155,7 @@ export default function ActionSheet({ visible, options, sections, title, header,
         </Animated.View>
 
         <Animated.View
+          {...panResponder.panHandlers}
           style={[
             styles.sheet,
             {
