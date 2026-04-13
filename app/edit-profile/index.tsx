@@ -22,6 +22,7 @@ let ImageManipulator: any = null;
 try { ImageManipulator = require('expo-image-manipulator'); } catch {}
 import { useUser } from '../../src/context/UserProvider';
 import { useSmartBack } from '../../src/context/NavigationContext';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import {
   useUpdateUserMetaDataMutation,
   useUpdateUserHandleMutation,
@@ -184,27 +185,23 @@ export default function EditProfileScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: 'Edit Profile',
-          headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
-          headerShadowVisible: false,
-          headerLeft: () => (
-            <Pressable onPress={smartBack} hitSlop={8}>
-              <Text style={{ fontSize: 16, color: '#007AFF' }}>Cancel</Text>
-            </Pressable>
-          ),
-          headerRight: () => (
-            <Pressable onPress={handleSave} disabled={saving} hitSlop={8}>
-              {saving ? (
-                <ActivityIndicator size="small" color="#0ea5e9" />
-              ) : (
-                <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Save</Text>
-              )}
-            </Pressable>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        title="Edit Profile"
+        left={
+          <Pressable onPress={smartBack} hitSlop={8}>
+            <Text style={{ fontSize: 16, color: '#007AFF' }}>Cancel</Text>
+          </Pressable>
+        }
+        right={
+          <Pressable onPress={handleSave} disabled={saving} hitSlop={8}>
+            {saving ? (
+              <ActivityIndicator size="small" color="#0ea5e9" />
+            ) : (
+              <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Save</Text>
+            )}
+          </Pressable>
+        }
       />
       <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={[]}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>

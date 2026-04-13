@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import ScreenHeader from '../../../../src/components/ScreenHeader';
 import * as ImagePicker from 'expo-image-picker';
 import { useUser } from '../../../../src/context/UserProvider';
 import { useRequireAuth } from '../../../../src/hooks/useRequireAuth';
@@ -46,7 +47,7 @@ const PHOTO_WIDTH = (SCREEN_WIDTH - GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS;
 
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
+  const d = new Date(dateStr.split('T')[0] + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
@@ -435,23 +436,18 @@ export default function SessionDetailScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: '',
-          headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
-          headerShadowVisible: false,
-          headerLeft: () => (
-            <Pressable onPress={() => router.back()} hitSlop={8} style={styles.headerBtn}>
-              <Ionicons name="chevron-back" size={24} color="#007AFF" />
-            </Pressable>
-          ),
-          headerRight: () => (
-            <Pressable onPress={handleEllipsisMenu} hitSlop={12} style={styles.headerBtn}>
-              <Ionicons name="ellipsis-horizontal" size={20} color={isDark ? '#e5e7eb' : '#374151'} />
-            </Pressable>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        left={
+          <Pressable onPress={() => router.back()} hitSlop={8}>
+            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+          </Pressable>
+        }
+        right={
+          <Pressable onPress={handleEllipsisMenu} hitSlop={12}>
+            <Ionicons name="ellipsis-horizontal" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
+          </Pressable>
+        }
       />
       <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={[]}>
         {isLoading ? (
@@ -623,10 +619,6 @@ export default function SessionDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  headerBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center',
-  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   headerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 },
   sessionName: { fontSize: 20, fontWeight: '700', marginBottom: 10 },

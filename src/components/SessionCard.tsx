@@ -57,7 +57,7 @@ const MAX_VISIBLE_TAGS = 3;
 
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
+  const d = new Date(dateStr.split('T')[0] + 'T00:00:00');
   const isCurrentYear = d.getFullYear() === new Date().getFullYear();
   return d.toLocaleDateString('en-US', {
     month: 'short',

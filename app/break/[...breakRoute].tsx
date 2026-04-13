@@ -23,6 +23,7 @@ import {
   useUpdateUserFavoritesMutation,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
+import ScreenHeader from '../../src/components/ScreenHeader';
 
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -106,7 +107,7 @@ export default function SurfBreakDetailScreen() {
   }, [requireAuth, breakData, isFavorited, favoriteSurfBreak]);
 
   const handleShare = useCallback(async () => {
-    const shareUrl = `https://app.surf-vault.com/${country}/${region}/${surfBreak}`;
+    const shareUrl = `https://share.surf-vault.com/${country}/${region}/${surfBreak}`;
     await Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
   }, [country, region, surfBreak]);
 
@@ -138,18 +139,15 @@ export default function SurfBreakDetailScreen() {
 
   return (
     <>
-      <Stack.Screen options={{
-        headerShown: true, headerTitle: '', headerBackTitle: '',
-        headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' }, headerShadowVisible: false,
-        headerLeft: () => (
-          <Pressable onPress={() => {
-            smartBack();
-          }} hitSlop={8}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        left={
+          <Pressable onPress={smartBack} hitSlop={8}>
             <Ionicons name="chevron-back" size={28} color="#007AFF" />
           </Pressable>
-        ),
-        headerRight: () => (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20, paddingRight: 8 }}>
+        }
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
             <Pressable onPress={handleFavorite} hitSlop={12} style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
               <Ionicons name={isFavorited ? 'heart' : 'heart-outline'} size={22} color={isFavorited ? '#ef4444' : (isDark ? '#e5e7eb' : '#374151')} />
             </Pressable>
@@ -157,8 +155,8 @@ export default function SurfBreakDetailScreen() {
               <Ionicons name="share-outline" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
             </Pressable>
           </View>
-        ),
-      }} />
+        }
+      />
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>

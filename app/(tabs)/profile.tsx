@@ -413,7 +413,7 @@ export default function ProfileScreen() {
                     )}
                     {item.session_date && (
                       <Text style={[s.gridDateText, { opacity: 0.75 }]}>
-                        {new Date(item.session_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        {new Date(item.session_date.split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                       </Text>
                     )}
                   </View>

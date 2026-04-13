@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
 
@@ -10,6 +11,25 @@ interface UserAvatarProps {
   hasStatusNote?: boolean;
 }
 
+function InitialPlaceholder({ initial, size }: { initial: string; size: number }) {
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: '#0ea5e9',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Text style={{ fontSize: size * 0.4, color: '#fff', fontWeight: '700' }}>
+        {initial}
+      </Text>
+    </View>
+  );
+}
+
 export default function UserAvatar({
   uri,
   name,
@@ -19,8 +39,10 @@ export default function UserAvatar({
   hasStatusNote = false,
 }: UserAvatarProps) {
   const initial = name?.[0]?.toUpperCase() ?? '?';
+  const [imgError, setImgError] = useState(false);
   const borderWidth = active ? 3 : hasStatusNote ? 2 : 0;
   const borderColor = active ? '#22c55e' : hasStatusNote ? '#38bdf8' : 'transparent';
+  const showImage = !!uri && !imgError;
 
   return (
     <View
@@ -39,7 +61,7 @@ export default function UserAvatar({
         elevation: 4,
       }}
     >
-      {uri ? (
+      {showImage ? (
         <Image
           source={{ uri }}
           style={{
@@ -49,23 +71,10 @@ export default function UserAvatar({
           }}
           contentFit="cover"
           transition={200}
+          onError={() => setImgError(true)}
         />
       ) : (
-        <View
-          className="bg-sky-500 items-center justify-center"
-          style={{
-            width: size,
-            height: size,
-            borderRadius: size / 2,
-          }}
-        >
-          <Text
-            className="text-white font-bold"
-            style={{ fontSize: size * 0.4 }}
-          >
-            {initial}
-          </Text>
-        </View>
+        <InitialPlaceholder initial={initial} size={size} />
       )}
       {verified && (
         <View

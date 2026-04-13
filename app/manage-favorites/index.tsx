@@ -10,6 +10,7 @@ import { Stack } from 'expo-router';
 import { useSmartBack } from '../../src/context/NavigationContext';
 import DraggableFlatList, { ScaleDecorator, RenderItemParams } from 'react-native-draggable-flatlist';
 import { Ionicons } from '@expo/vector-icons';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import {
   useGetUserFavoritesQuery,
   useUpdateUserFavoritesMutation,
@@ -133,18 +134,14 @@ export default function ManageFavoritesScreen() {
 
   return (
     <View style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]}>
-      <Stack.Screen
-        options={{
-          title: 'Manage Favorites',
-          headerStyle: { backgroundColor: isDark ? '#030712' : '#fff' },
-          headerTintColor: isDark ? '#fff' : '#111827',
-          headerShadowVisible: false,
-          headerLeft: () => (
-            <Pressable onPress={goBack} hitSlop={8}>
-              <Ionicons name="chevron-back" size={24} color={isDark ? '#fff' : '#111827'} />
-            </Pressable>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        title="Manage Favorites"
+        left={
+          <Pressable onPress={goBack} hitSlop={8}>
+            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+          </Pressable>
+        }
       />
 
       {favoritesInOrder.length > 0 && (

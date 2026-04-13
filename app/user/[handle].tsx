@@ -25,6 +25,7 @@ import {
   useFollowUserMutation,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
+import ScreenHeader from '../../src/components/ScreenHeader';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -142,17 +143,14 @@ export default function UserProfileScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: '',
-          headerLeft: () => (
-            <Pressable onPress={smartBack} style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Ionicons name="chevron-back" size={28} color="#007AFF" />
-              <Text style={{ fontSize: 17, color: '#007AFF' }}>{profile?.handle ?? handle}</Text>
-            </Pressable>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        left={
+          <Pressable onPress={smartBack} style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+            <Text style={{ fontSize: 17, color: '#007AFF' }}>{profile?.handle ?? handle}</Text>
+          </Pressable>
+        }
       />
       <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
@@ -189,7 +187,7 @@ export default function UserProfileScreen() {
                         )}
                         {item.session_date && (
                           <Text style={[styles.gridDateText, { opacity: 0.75 }]}>
-                            {new Date(item.session_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {new Date(item.session_date.split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                           </Text>
                         )}
                       </View>

@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import ScreenHeader from '../../../../src/components/ScreenHeader';
 import { useUser } from '../../../../src/context/UserProvider';
 import { useRequireAuth } from '../../../../src/hooks/useRequireAuth';
 import {
@@ -248,17 +249,14 @@ export default function UserProfileScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: '',
-          headerLeft: () => (
-            <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Ionicons name="chevron-back" size={28} color="#007AFF" />
-              <Text style={{ fontSize: 17, color: '#007AFF' }}>{profile?.handle ?? handle}</Text>
-            </Pressable>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        left={
+          <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+            <Text style={{ fontSize: 17, color: '#007AFF' }}>{profile?.handle ?? handle}</Text>
+          </Pressable>
+        }
       />
       <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
         {isLoading ? (

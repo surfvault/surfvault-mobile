@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ImageViewing from 'react-native-image-viewing';
 import { useUser } from '../../src/context/UserProvider';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import {
   useGetSurfMediaAccessRequestQuery,
   useGrantSurfMediaAccessMutation,
@@ -34,7 +35,7 @@ const PHOTO_WIDTH = (SCREEN_WIDTH - GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS;
 
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  return new Date(dateStr.split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
 export default function AccessRequestScreen() {
@@ -294,19 +295,14 @@ export default function AccessRequestScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: 'Photo Request',
-          headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
-          headerTintColor: isDark ? '#fff' : '#111827',
-          headerShadowVisible: false,
-          headerLeft: () => (
-            <Pressable onPress={smartBack} hitSlop={8}>
-              <Ionicons name="chevron-back" size={24} color={isDark ? '#fff' : '#111827'} />
-            </Pressable>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        title="Photo Request"
+        left={
+          <Pressable onPress={smartBack} hitSlop={8}>
+            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+          </Pressable>
+        }
       />
       <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={[]}>
         {isLoading && !photos.length ? (

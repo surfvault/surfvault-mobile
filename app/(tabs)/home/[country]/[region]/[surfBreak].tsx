@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import ScreenHeader from '../../../../../src/components/ScreenHeader';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../../../../src/context/UserProvider';
 import { useRequireAuth } from '../../../../../src/hooks/useRequireAuth';
@@ -172,26 +173,27 @@ export default function SurfBreakDetailScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: '',
-          headerBackTitle: '',
-          headerRight: () => (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, paddingRight: 4 }}>
-              <Pressable onPress={handleFavorite} hitSlop={8}>
-                <Ionicons
-                  name={isFavorited ? 'heart' : 'heart-outline'}
-                  size={22}
-                  color={isFavorited ? '#ef4444' : (isDark ? '#e5e7eb' : '#374151')}
-                />
-              </Pressable>
-              <Pressable onPress={handleShare} hitSlop={8}>
-                <Ionicons name="share-outline" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
-              </Pressable>
-            </View>
-          ),
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        left={
+          <Pressable onPress={() => router.back()} hitSlop={8}>
+            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+          </Pressable>
+        }
+        right={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <Pressable onPress={handleFavorite} hitSlop={8}>
+              <Ionicons
+                name={isFavorited ? 'heart' : 'heart-outline'}
+                size={22}
+                color={isFavorited ? '#ef4444' : (isDark ? '#e5e7eb' : '#374151')}
+              />
+            </Pressable>
+            <Pressable onPress={handleShare} hitSlop={8}>
+              <Ionicons name="share-outline" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
+            </Pressable>
+          </View>
+        }
       />
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
         {isLoading ? (

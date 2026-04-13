@@ -11,9 +11,10 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { Linking } from 'react-native';
 import { useUser } from '../../src/context/UserProvider';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
@@ -123,6 +124,7 @@ export default function ConversationDetailScreen() {
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
   const { user } = useUser();
   const flatListRef = useRef<FlatList>(null);
 
@@ -239,34 +241,12 @@ export default function ConversationDetailScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
-          headerShadowVisible: false,
-          headerLeft: () => (
-            <Pressable onPress={smartBack} hitSlop={8}>
-              <Ionicons name="chevron-back" size={28} color="#007AFF" />
-            </Pressable>
-          ),
-          headerTitle: () => otherUser ? (
-            <Pressable onPress={() => trackedPush(`/user/${otherUser.handle}` as any)} style={styles.headerCenter}>
-              <UserAvatar uri={otherUser.picture} name={otherUser.name ?? otherUser.handle} size={44} verified={otherUser.verified} />
-              <Text style={[styles.headerHandle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                {otherUser.handle}
-              </Text>
-            </Pressable>
-          ) : (
-            <ActivityIndicator size="small" />
-          ),
-          headerTitleAlign: 'center',
-        }}
-      />
-      <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={[]}>
+      <Stack.Screen options={{ headerShown: false }} />
+      <View style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]}>
         <KeyboardAvoidingView
           style={styles.container}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           {isLoading ? (
             <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
@@ -276,14 +256,38 @@ export default function ConversationDetailScreen() {
               data={displayItems}
               keyExtractor={(item) => item.key}
               renderItem={renderItem}
-              contentContainerStyle={styles.messagesList}
+              contentContainerStyle={[styles.messagesList, { paddingTop: insets.top + 70 }]}
               showsVerticalScrollIndicator={false}
               inverted={false}
             />
           )}
 
+          {/* Floating header — iMessage style with blur */}
+          <BlurView intensity={60} tint={isDark ? 'dark' : 'light'} style={[styles.floatingHeader, { paddingTop: insets.top }]}>
+            <Pressable onPress={smartBack} hitSlop={8} style={[styles.headerPill, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)' }]}>
+              <Ionicons name="chevron-back" size={20} color="#007AFF" />
+            </Pressable>
+            {otherUser ? (
+              <View style={styles.headerCenter}>
+                <UserAvatar uri={otherUser.picture} name={otherUser.name ?? otherUser.handle} size={36} verified={otherUser.verified} />
+                <Pressable onPress={() => trackedPush(`/user/${otherUser.handle}` as any)} style={[styles.headerNamePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)' }]}>
+                  <Text style={[styles.headerHandle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                    {otherUser.name ?? otherUser.handle}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={12} color={isDark ? '#6b7280' : '#9ca3af'} />
+                </Pressable>
+              </View>
+            ) : null}
+          </BlurView>
+          {/* Soft fade below header */}
+          <View style={[styles.headerFade, { top: insets.top + 68 }]} pointerEvents="none">
+            <View style={{ height: 6, backgroundColor: isDark ? 'rgba(3,7,18,0.4)' : 'rgba(255,255,255,0.5)' }} />
+            <View style={{ height: 6, backgroundColor: isDark ? 'rgba(3,7,18,0.2)' : 'rgba(255,255,255,0.3)' }} />
+            <View style={{ height: 6, backgroundColor: isDark ? 'rgba(3,7,18,0.05)' : 'rgba(255,255,255,0.1)' }} />
+          </View>
+
           {/* Composer */}
-          <View style={[styles.composer, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb', backgroundColor: isDark ? '#030712' : '#fff' }]}>
+          <View style={[styles.composer, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb', backgroundColor: isDark ? '#030712' : '#fff', paddingBottom: Math.max(insets.bottom, 8) }]}>
             <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
               <TextInput
                 value={message}
@@ -304,7 +308,7 @@ export default function ConversationDetailScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+      </View>
     </>
   );
 }
@@ -312,8 +316,41 @@ export default function ConversationDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  headerCenter: { alignItems: 'center', gap: 2 },
-  headerHandle: { fontSize: 14, fontWeight: '600' },
+  floatingHeader: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingBottom: 10,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+  },
+  headerPill: {
+    position: 'absolute',
+    left: 12,
+    bottom: 28,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCenter: { alignItems: 'center', gap: 4 },
+  headerNamePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 14,
+  },
+  headerHandle: { fontSize: 13, fontWeight: '600' },
   messagesList: { padding: 16, paddingBottom: 8 },
   dateSeparator: { alignItems: 'center', paddingVertical: 12 },
   dateSeparatorText: { fontSize: 12, fontWeight: '500', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, overflow: 'hidden' },

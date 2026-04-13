@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
+import ScreenHeader from '../../src/components/ScreenHeader';
 import { Ionicons } from '@expo/vector-icons';
 import {
   useGetNotificationsQuery,
@@ -173,25 +174,21 @@ export default function NotificationsScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: 'Notifications',
-          headerStyle: { backgroundColor: isDark ? '#030712' : '#ffffff' },
-          headerShadowVisible: false,
-          headerLeft: () => (
-            <Pressable onPress={smartBack} hitSlop={8}>
-              <Ionicons name="chevron-back" size={28} color="#007AFF" />
-            </Pressable>
-          ),
-          headerRight: () => unread.length > 0 ? (
-            <Pressable onPress={markAllRead} disabled={marking} hitSlop={8}>
-              <Text style={{ fontSize: 15, color: '#0ea5e9', fontWeight: '600' }}>
-                {marking ? 'Marking...' : 'Read All'}
-              </Text>
-            </Pressable>
-          ) : null,
-        }}
+      <Stack.Screen options={{ headerShown: false }} />
+      <ScreenHeader
+        title="Notifications"
+        left={
+          <Pressable onPress={smartBack} hitSlop={8}>
+            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+          </Pressable>
+        }
+        right={unread.length > 0 ? (
+          <Pressable onPress={markAllRead} disabled={marking} hitSlop={8}>
+            <Text style={{ fontSize: 15, color: '#0ea5e9', fontWeight: '600' }}>
+              {marking ? 'Marking...' : 'Read All'}
+            </Text>
+          </Pressable>
+        ) : undefined}
       />
       <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={[]}>
         {isLoading ? (
