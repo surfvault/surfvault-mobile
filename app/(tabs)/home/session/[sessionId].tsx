@@ -10,7 +10,6 @@ import {
   Alert,
   StyleSheet,
   Share,
-  ActionSheetIOS,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,9 +28,12 @@ import {
   useDeleteSurfMediaMutation,
   useUpdateUserFavoritesMutation,
   useSaveSurfMediaMutation,
+  useUpdateSessionThumbnailMutation,
 } from '../../../../src/store';
 import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../../../src/components/UserAvatar';
+import ActionSheet from '../../../../src/components/ActionSheet';
+import type { ActionSheetSection } from '../../../../src/components/ActionSheet';
 import { toOriginalKey, getWatermarkUrl } from '../../../../src/helpers/mediaUrl';
 import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../../../src/helpers/saveToPhotos';
 import { useUpload } from '../../../../src/context/UploadContext';
@@ -68,6 +70,7 @@ export default function SessionDetailScreen() {
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [sheetVisible, setSheetVisible] = useState(false);
 
   // Mutations
   const [requestAccessToPhotos] = useRequestAccessToSurfMediaMutation();
@@ -75,7 +78,11 @@ export default function SessionDetailScreen() {
   const [deleteSurfMedia] = useDeleteSurfMediaMutation();
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
   const [saveSurfMedia] = useSaveSurfMediaMutation();
+  const [updateSessionThumbnail] = useUpdateSessionThumbnailMutation();
   const { startUpload, upload: activeUpload } = useUpload();
+
+  // Thumbnail tracking
+  const [thumbnailPhotoId, setThumbnailPhotoId] = useState<string | null>(null);
 
   // Session data
   const { data: sessionData, isLoading } = useGetSessionQuery({
@@ -90,6 +97,13 @@ export default function SessionDetailScreen() {
   const sessionHandle = session?.handle ?? session?.user_handle;
   const isOwner = !!user?.handle && user.handle === sessionHandle;
   const isFavorited = session?.surf_break_is_favorited;
+
+  // Sync thumbnail from session data
+  useEffect(() => {
+    if (session?.thumbnail_photo_id !== undefined) {
+      setThumbnailPhotoId(session.thumbnail_photo_id ?? null);
+    }
+  }, [session?.thumbnail_photo_id]);
 
   // Groups
   const { data: groupsData } = useGetSessionGroupsQuery(
@@ -292,48 +306,35 @@ export default function SessionDetailScreen() {
   }, [session?.id, activeUpload?.isUploading, saveSurfMedia, startUpload]);
 
   // Ellipsis menu
-  const handleEllipsisMenu = useCallback(() => {
-    const favLabel = isFavorited ? 'Unfavorite Break' : 'Favorite Break';
-    const options: string[] = [favLabel, 'Share Session'];
+  const handleEllipsisMenu = useCallback(() => setSheetVisible(true), []);
 
-    if (isOwner) {
-      options.push('Upload Photos', 'Save Photos', 'Delete Photos');
-    }
-
-    options.push('Cancel');
-    const cancelIndex = options.length - 1;
-    const destructiveIndex = isOwner ? options.indexOf('Delete Photos') : -1;
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
+  const ellipsisSections: ActionSheetSection[] = [
+    {
+      options: [
         {
-          options,
-          cancelButtonIndex: cancelIndex,
-          destructiveButtonIndex: destructiveIndex,
+          label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
+          icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',
+          onPress: handleFavorite,
         },
-        (buttonIndex) => {
-          const selected = options[buttonIndex];
-          if (selected === favLabel) handleFavorite();
-          else if (selected === 'Share Session') handleShare();
-          else if (selected === 'Upload Photos') handleUploadPhotos();
-          else if (selected === 'Save Photos') handleStartAction('download');
-          else if (selected === 'Delete Photos') handleStartAction('delete');
-        }
-      );
-    } else {
-      // Android fallback
-      Alert.alert('Actions', undefined, [
-        { text: favLabel, onPress: handleFavorite },
-        { text: 'Share Session', onPress: handleShare },
-        ...(isOwner ? [
-          { text: 'Upload Photos', onPress: handleUploadPhotos },
-          { text: 'Save Photos', onPress: () => handleStartAction('download') },
-          { text: 'Delete Photos', onPress: () => handleStartAction('delete'), style: 'destructive' as const },
-        ] : []),
-        { text: 'Cancel', style: 'cancel' as const },
-      ]);
-    }
-  }, [isOwner, isFavorited, handleShare, handleStartAction, handleFavorite, handleUploadPhotos]);
+        {
+          label: 'Share Session',
+          icon: 'share-outline',
+          onPress: handleShare,
+        },
+      ],
+    },
+    ...(isOwner ? [{
+      options: [
+        { label: 'Upload Photos', icon: 'cloud-upload-outline' as const, onPress: handleUploadPhotos },
+        { label: 'Save Photos', icon: 'download-outline' as const, onPress: () => handleStartAction('download') },
+      ],
+    }] : []),
+    ...(isOwner ? [{
+      options: [
+        { label: 'Delete Photos', icon: 'trash-outline' as const, destructive: true, onPress: () => handleStartAction('delete') },
+      ],
+    }] : []),
+  ];
 
   // Action bar color config
   const actionColors = {
@@ -343,6 +344,32 @@ export default function SessionDetailScreen() {
   };
   const ac = actionColors[sessionAction as keyof typeof actionColors] ?? actionColors.request;
 
+  // Set thumbnail via long-press
+  const handleSetThumbnail = useCallback((photoId: string) => {
+    if (!session?.id) return;
+    if (photoId === thumbnailPhotoId) return;
+    setThumbnailPhotoId(photoId);
+    updateSessionThumbnail({ sessionId: session.id, photoId });
+  }, [session?.id, thumbnailPhotoId, updateSessionThumbnail]);
+
+  const handlePhotoLongPress = useCallback((item: any) => {
+    if (!isOwner || !!sessionAction) return;
+    const isThumbnail = item.id === thumbnailPhotoId;
+    Alert.alert(
+      'Photo Options',
+      undefined,
+      [
+        {
+          text: isThumbnail ? 'Current Thumbnail' : 'Set as Thumbnail',
+          onPress: isThumbnail ? undefined : () => handleSetThumbnail(item.id),
+          style: isThumbnail ? 'default' : 'default',
+          isPreferred: !isThumbnail,
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }, [isOwner, sessionAction, thumbnailPhotoId, handleSetThumbnail]);
+
   // Location display
   const showLocation = !session?.hide_location && session?.surf_break_name;
 
@@ -351,6 +378,7 @@ export default function SessionDetailScreen() {
       const photoGroups: any[] = item.groups ?? [];
       const isSelected = selectedPhotoIds.includes(item.id);
       const inActionMode = !!sessionAction;
+      const isThumbnail = isOwner && item.id === thumbnailPhotoId;
 
       return (
         <Pressable
@@ -362,7 +390,7 @@ export default function SessionDetailScreen() {
               setViewerVisible(true);
             }
           }}
-          onLongPress={() => {}}
+          onLongPress={() => handlePhotoLongPress(item)}
           style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
         >
           <View style={{ position: 'relative' }}>
@@ -381,6 +409,11 @@ export default function SessionDetailScreen() {
                 {isSelected && <Ionicons name="checkmark" size={12} color="#ffffff" />}
               </View>
             )}
+            {!inActionMode && isThumbnail && (
+              <View style={styles.thumbnailBadge}>
+                <Ionicons name="image-outline" size={12} color="#ffffff" />
+              </View>
+            )}
             {!inActionMode && photoGroups.length > 0 && (
               <View style={styles.groupDots}>
                 {photoGroups.map((g: any) => (
@@ -392,7 +425,7 @@ export default function SessionDetailScreen() {
         </Pressable>
       );
     },
-    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn]
+    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress]
   );
 
   // Header subtitle
@@ -568,6 +601,12 @@ export default function SessionDetailScreen() {
         )}
       </SafeAreaView>
 
+      <ActionSheet
+        visible={sheetVisible}
+        sections={ellipsisSections}
+        onClose={() => setSheetVisible(false)}
+      />
+
       {/* Photo lightbox viewer — shows watermarked preview */}
       <ImageViewing
         images={sessionMedia.map((m) => ({
@@ -607,6 +646,10 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 6, left: 6, width: 22, height: 22, borderRadius: 11,
     borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: 'rgba(0,0,0,0.3)',
     alignItems: 'center', justifyContent: 'center',
+  },
+  thumbnailBadge: {
+    position: 'absolute', top: 6, left: 6, width: 24, height: 24, borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center',
   },
   requestFab: {
     position: 'absolute', bottom: 24, right: 16,

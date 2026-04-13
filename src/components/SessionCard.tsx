@@ -1,13 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, ActionSheetIOS, Platform, Alert, Share } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
+import ActionSheet from './ActionSheet';
+import type { ActionSheetOption, ActionSheetSection, ActionSheetHeader } from './ActionSheet';
 import { useUser } from '../context/UserProvider';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import { useTrackedPush } from '../context/NavigationContext';
 import { useFollowUserMutation, useUpdateUserFavoritesMutation } from '../store';
+
+const formatCount = (n: number): string => {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '')}k`;
+  return String(n);
+};
 
 interface TaggedUser {
   id?: string;
@@ -97,14 +105,23 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
   const requireAuth = useRequireAuth();
   const [followUser] = useFollowUserMutation();
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
+  const [sheetVisible, setSheetVisible] = useState(false);
 
   const sessionId = session.session_id ?? session.id;
   const handle = session.user_handle ?? session.handle;
   const taggedUsers = session.tagged_users ?? [];
-  const isFollowing = (session as any).is_following;
-  const isFavorited = (session as any).surf_break_is_favorited;
   const surfBreakId = (session as any).surf_break_id;
   const showLocation = (!session.hide_location || showHiddenLocations) && session.surf_break_name;
+
+  // Optimistic local state for follow/favorite — initialized from server data
+  const serverFollowing = !!(session as any).is_following;
+  const serverFavorited = !!(session as any).surf_break_is_favorited;
+  const [isFollowing, setIsFollowing] = useState(serverFollowing);
+  const [isFavorited, setIsFavorited] = useState(serverFavorited);
+
+  // Sync from server when prop data changes (cache refetch)
+  useEffect(() => { setIsFollowing(serverFollowing); }, [serverFollowing]);
+  useEffect(() => { setIsFavorited(serverFavorited); }, [serverFavorited]);
 
   const handlePress = () => {
     if (customOnPress) {
@@ -118,79 +135,74 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
     if (handle) trackedPush(`/user/${handle}`);
   };
 
-  const handleEllipsis = () => {
-    const options: string[] = [];
+  const sheetSections: ActionSheetSection[] = [];
 
-    // Follow/unfollow
-    if (handle && handle !== user?.handle) {
-      options.push(isFollowing ? 'Unfollow' : 'Follow');
-    }
+  // Section 1: User/break actions
+  const primaryOptions: ActionSheetOption[] = [];
 
-    // Favorite break
-    if (showLocation && surfBreakId) {
-      options.push(isFavorited ? 'Unfavorite Break' : 'Favorite Break');
-    }
-
-    // View break
-    if (showLocation && session.surf_break_identifier) {
-      options.push('View Break');
-    }
-
-    options.push('Share');
-    options.push('Report');
-    options.push('Cancel');
-
-    const cancelIndex = options.length - 1;
-    const destructiveIndex = options.indexOf('Report');
-
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
-        (index) => {
-          const selected = options[index];
-          if (selected === 'Follow' || selected === 'Unfollow') {
-            if (!requireAuth()) return;
-            const userId = (session as any).user_id;
-            if (userId) followUser({ userId, action: selected.toLowerCase() });
-          } else if (selected === 'Favorite Break' || selected === 'Unfavorite Break') {
-            if (!requireAuth()) return;
-            favoriteSurfBreak({ surfBreakId, action: isFavorited ? 'unfavorite' : 'favorite' });
-          } else if (selected === 'View Break') {
-            const id = session.surf_break_identifier!;
-            const country = (session as any).surf_break_country ?? (session as any).country_code ?? '';
-            const region = (session as any).surf_break_region ?? (session as any).region ?? '0';
-            trackedPush(`/break/${country}/${region}/${id}`);
-          } else if (selected === 'Share') {
-            const shareUrl = `https://share.surf-vault.com/s/${sessionId}`;
-            Share.share({ url: shareUrl });
-          } else if (selected === 'Report') {
-            Alert.alert('Report', 'This session has been reported. Thank you.');
-          }
+  if (handle && handle !== user?.handle) {
+    primaryOptions.push({
+      label: isFollowing ? 'Unfollow' : 'Follow',
+      icon: isFollowing ? 'person-remove-outline' : 'person-add-outline',
+      onPress: () => {
+        if (!requireAuth()) return;
+        const userId = (session as any).user_id;
+        if (userId) {
+          setIsFollowing(!isFollowing);
+          followUser({ userId, action: isFollowing ? 'unfollow' : 'follow' });
         }
-      );
-    } else {
-      Alert.alert('Actions', undefined, [
-        ...(handle && handle !== user?.handle ? [{ text: isFollowing ? 'Unfollow' : 'Follow', onPress: () => {
-          if (!requireAuth()) return;
-          const userId = (session as any).user_id;
-          if (userId) followUser({ userId, action: isFollowing ? 'unfollow' : 'follow' });
-        }}] : []),
-        ...(showLocation && surfBreakId ? [{ text: isFavorited ? 'Unfavorite Break' : 'Favorite Break', onPress: () => {
-          if (!requireAuth()) return;
-          favoriteSurfBreak({ surfBreakId, action: isFavorited ? 'unfavorite' : 'favorite' });
-        }}] : []),
-        ...(showLocation && session.surf_break_identifier ? [{ text: 'View Break', onPress: () => {
-          const id = session.surf_break_identifier!;
-          const country = (session as any).surf_break_country ?? (session as any).country_code ?? '';
-          const region = (session as any).surf_break_region ?? (session as any).region ?? '0';
-          router.push(`/break/${country}/${region}/${id}` as any);
-        }}] : []),
-        { text: 'Share', onPress: () => Share.share({ message: `https://share.surf-vault.com/s/${sessionId}` }) },
-        { text: 'Report', style: 'destructive', onPress: () => Alert.alert('Report', 'This session has been reported. Thank you.') },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
-  };
+      },
+    });
+  }
+
+  if (showLocation && surfBreakId) {
+    primaryOptions.push({
+      label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
+      icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',
+      onPress: () => {
+        if (!requireAuth()) return;
+        setIsFavorited(!isFavorited);
+        favoriteSurfBreak({ surfBreakId, action: isFavorited ? 'unfavorite' : 'favorite' });
+      },
+    });
+  }
+
+  if (showLocation && session.surf_break_identifier) {
+    primaryOptions.push({
+      label: 'View Break',
+      icon: 'location-outline',
+      onPress: () => {
+        const id = session.surf_break_identifier!;
+        const country = (session as any).surf_break_country ?? (session as any).country_code ?? '';
+        const region = (session as any).surf_break_region ?? (session as any).region ?? '0';
+        trackedPush(`/break/${country}/${region}/${id}`);
+      },
+    });
+  }
+
+  if (primaryOptions.length > 0) sheetSections.push({ options: primaryOptions });
+
+  // Section 2: Share
+  sheetSections.push({
+    options: [{
+      label: 'Share',
+      icon: 'share-outline',
+      onPress: () => {
+        const shareUrl = `https://share.surf-vault.com/s/${sessionId}`;
+        Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+      },
+    }],
+  });
+
+  // Section 3: Report (destructive)
+  sheetSections.push({
+    options: [{
+      label: 'Report',
+      icon: 'flag-outline',
+      destructive: true,
+      onPress: () => Alert.alert('Report', 'This session has been reported. Thank you.'),
+    }],
+  });
 
   return (
     <View style={styles.card}>
@@ -246,7 +258,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             </View>
           </View>
         )}
-        <Pressable onPress={handleEllipsis} hitSlop={8}>
+        <Pressable onPress={() => setSheetVisible(true)} hitSlop={8}>
           <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
         </Pressable>
       </View>
@@ -286,25 +298,43 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             </View>
           )}
 
-          {/* View count — bottom left (self only) */}
-          {showViewCount && session.view_count != null && (
-            <View style={styles.viewCountWrap}>
-              <View style={styles.viewCountBadge}>
-                <Ionicons name="eye-outline" size={13} color="#fff" />
-                <Text style={styles.viewCountText}>{(session.view_count ?? 0).toLocaleString()}</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Photo count — top right */}
-          {session.photo_count != null && session.photo_count > 0 && (
-            <View style={styles.photoCountBadge}>
-              <Text style={styles.photoCountText}>{session.photo_count}</Text>
-              <Ionicons name="images-outline" size={11} color="#fff" />
+          {/* Stats badge — bottom left */}
+          {(session.photo_count > 0 || (showViewCount && session.view_count != null)) && (
+            <View style={styles.statsBadge}>
+              {showViewCount && session.view_count != null && (
+                <>
+                  <Ionicons name="eye-outline" size={11} color="#fff" />
+                  <Text style={styles.statsText}>{formatCount(session.view_count ?? 0)}</Text>
+                </>
+              )}
+              {showViewCount && session.view_count != null && session.photo_count > 0 && (
+                <Text style={styles.statsText}> · </Text>
+              )}
+              {session.photo_count > 0 && (
+                <>
+                  <Ionicons name="images-outline" size={11} color="#fff" />
+                  <Text style={styles.statsText}>{formatCount(session.photo_count)}</Text>
+                </>
+              )}
             </View>
           )}
         </View>
       </Pressable>
+
+      <ActionSheet
+        visible={sheetVisible}
+        sections={sheetSections}
+        header={{
+          title: session.session_name || handle || 'Session',
+          subtitle: [
+            handle && session.session_name ? `@${handle}` : undefined,
+            showLocation ? session.surf_break_name : undefined,
+            session.session_date ? formatDate(session.session_date) : undefined,
+          ].filter(Boolean).join(' · ') || undefined,
+          imageUri: session.thumbnail,
+        }}
+        onClose={() => setSheetVisible(false)}
+      />
     </View>
   );
 }
@@ -386,35 +416,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  viewCountWrap: {
+  statsBadge: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 10,
-    paddingBottom: 8,
-    paddingTop: 24,
-    backgroundColor: 'transparent',
-  },
-  viewCountBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    alignSelf: 'flex-start',
-  },
-  viewCountText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  photoCountBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
+    bottom: 10,
+    left: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
@@ -423,7 +428,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
   },
-  photoCountText: {
+  statsText: {
     fontSize: 11,
     fontWeight: '600',
     color: '#fff',

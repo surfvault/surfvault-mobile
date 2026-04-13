@@ -9,9 +9,8 @@ import {
   Pressable,
   StyleSheet,
   useColorScheme,
-  ActionSheetIOS,
   Platform,
-  Alert,
+  Linking,
   ActivityIndicator,
   Keyboard,
   Dimensions,
@@ -37,6 +36,14 @@ import {
 import { useTabBar } from '../../src/context/TabBarContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
 import SessionCard from '../../src/components/SessionCard';
+import ActionSheet from '../../src/components/ActionSheet';
+import type { ActionSheetSection } from '../../src/components/ActionSheet';
+
+const formatCount = (n: number): string => {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '')}k`;
+  return String(n);
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -49,6 +56,7 @@ export default function ProfileScreen() {
   const { setTabBarVisible } = useTabBar();
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'favorites'>('grid');
+  const [menuVisible, setMenuVisible] = useState(false);
 
   // Fetch public profile data for follower/following counts
   const { data: publicProfileData } = useGetUserQuery(
@@ -186,44 +194,56 @@ export default function ProfileScreen() {
     await updateMeta({ metaData: { active: !user.active } });
   }, [user, updateMeta]);
 
-  const handleMenu = useCallback(() => {
-    const options = [
-      'Edit Profile',
-      'Share Profile',
-      'Manage Favorites',
-      'Plans & Billing',
-      'Settings',
-      'Sign Out',
-      'Cancel',
-    ];
-    const destructiveIndex = options.indexOf('Sign Out');
-    const cancelIndex = options.length - 1;
+  const handleMenu = useCallback(() => setMenuVisible(true), []);
 
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options, cancelButtonIndex: cancelIndex, destructiveButtonIndex: destructiveIndex },
-        (index) => {
-          if (options[index] === 'Edit Profile') trackedPush('/edit-profile');
-          else if (options[index] === 'Share Profile') {
+  const menuSections: ActionSheetSection[] = [
+    {
+      options: [
+        {
+          label: 'Edit Profile',
+          icon: 'create-outline',
+          onPress: () => trackedPush('/edit-profile'),
+        },
+        {
+          label: 'Share Profile',
+          icon: 'share-outline',
+          onPress: () => {
             const shareUrl = `https://app.surf-vault.com/${user?.handle}`;
             Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
-          }
-          else if (options[index] === 'Manage Favorites') trackedPush('/manage-favorites');
-          else if (options[index] === 'Sign Out') logout();
-        }
-      );
-    } else {
-      Alert.alert('Menu', undefined, [
-        { text: 'Edit Profile', onPress: () => trackedPush('/edit-profile') },
-        { text: 'Share Profile', onPress: () => Share.share({ message: `https://app.surf-vault.com/${user?.handle}` }) },
-        { text: 'Manage Favorites', onPress: () => trackedPush('/manage-favorites') },
-        { text: 'Plans & Billing' },
-        { text: 'Settings' },
-        { text: 'Sign Out', style: 'destructive', onPress: logout },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-    }
-  }, [logout]);
+          },
+        },
+      ],
+    },
+    {
+      options: [
+        {
+          label: 'Manage Favorites',
+          icon: 'heart-outline',
+          onPress: () => trackedPush('/manage-favorites'),
+        },
+        {
+          label: 'Plans & Billing',
+          icon: 'card-outline',
+          onPress: () => {},
+        },
+        {
+          label: 'Settings',
+          icon: 'settings-outline',
+          onPress: () => Linking.openSettings(),
+        },
+      ],
+    },
+    {
+      options: [
+        {
+          label: 'Sign Out',
+          icon: 'log-out-outline',
+          destructive: true,
+          onPress: logout,
+        },
+      ],
+    },
+  ];
 
   // Not logged in
   if (!isAuthenticated) {
@@ -364,10 +384,23 @@ export default function ProfileScreen() {
                     <Ionicons name="image-outline" size={24} color={isDark ? '#374151' : '#d1d5db'} />
                   </View>
                 )}
-                {item.view_count != null && (
+                {(item.view_count != null || item.photo_count > 0) && (
                   <View style={s.gridViewCount}>
-                    <Ionicons name="eye-outline" size={10} color="#fff" />
-                    <Text style={s.gridViewCountText}>{(item.view_count ?? 0).toLocaleString()}</Text>
+                    {item.view_count != null && (
+                      <>
+                        <Ionicons name="eye-outline" size={10} color="#fff" />
+                        <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
+                      </>
+                    )}
+                    {item.view_count != null && item.photo_count > 0 && (
+                      <Text style={s.gridViewCountText}> · </Text>
+                    )}
+                    {item.photo_count > 0 && (
+                      <>
+                        <Ionicons name="images-outline" size={10} color="#fff" />
+                        <Text style={s.gridViewCountText}>{formatCount(item.photo_count)}</Text>
+                      </>
+                    )}
                   </View>
                 )}
                 {(item.session_date || item.surf_break_name) && (
@@ -514,6 +547,12 @@ export default function ProfileScreen() {
           </View>
         </View>
       )}
+
+      <ActionSheet
+        visible={menuVisible}
+        sections={menuSections}
+        onClose={() => setMenuVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -536,7 +575,7 @@ const s = StyleSheet.create({
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80, paddingHorizontal: 32 },
   emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' },
   emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center', paddingHorizontal: 40 },
   signInBtn: { marginTop: 16, backgroundColor: '#0ea5e9', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 },
   signInText: { color: '#fff', fontSize: 16, fontWeight: '600' },

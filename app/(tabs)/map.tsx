@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Keyboard,
+  InteractionManager,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
@@ -16,15 +17,64 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import * as Location from 'expo-location';
+import { setCoordinates } from '../../src/store/slices/location';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
 import { FlatList } from 'react-native';
+import React from 'react';
 
 type FilterType = 'all' | 'favorites' | 'mine';
+
+// Memoized marker component — prevents clustering library from re-diffing on every render
+const SurfBreakMarker = React.memo(({
+  sb,
+  markerColor,
+  isDark,
+  onMarkerPress,
+  onCalloutPress,
+  markerRefSetter,
+}: {
+  sb: any;
+  markerColor: string;
+  isDark: boolean;
+  onMarkerPress: (sb: any) => void;
+  onCalloutPress: (sb: any) => void;
+  markerRefSetter: (id: string, ref: any) => void;
+}) => {
+  const handlePress = useCallback(() => onMarkerPress(sb), [sb, onMarkerPress]);
+  const handleCalloutPress = useCallback(() => onCalloutPress(sb), [sb, onCalloutPress]);
+  const handleRef = useCallback((ref: any) => markerRefSetter(sb.id, ref), [sb.id, markerRefSetter]);
+
+  return (
+    <Marker
+      key={sb.id}
+      ref={handleRef}
+      coordinate={{
+        latitude: parseFloat(sb.coordinates?.lat) || 0,
+        longitude: parseFloat(sb.coordinates?.lon) || 0,
+      }}
+      tracksViewChanges={false}
+      onPress={handlePress}
+    >
+      <View style={[styles.marker, { backgroundColor: markerColor }]} />
+      <Callout tooltip onPress={handleCalloutPress}>
+        <View style={[styles.callout, { backgroundColor: isDark ? '#1f2937' : '#ffffff' }]}>
+          <Text style={[styles.calloutName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+            {sb.name}
+          </Text>
+          <Text style={[styles.calloutSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+            {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
+          </Text>
+          <Text style={styles.calloutAction}>View Sessions →</Text>
+        </View>
+      </Callout>
+    </Marker>
+  );
+});
 
 const DARK_MAP_STYLE = [
   { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
@@ -52,19 +102,52 @@ export default function MapScreen() {
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
   const requireAuth = useRequireAuth();
+  const dispatch = useDispatch();
   const mapRef = useRef<MapView>(null);
   const searchInputRef = useRef<TextInput>(null);
   const markerRefs = useRef<Record<string, any>>({});
   const hasAnimatedToLocation = useRef(false);
+  const [locationGranted, setLocationGranted] = useState(false);
 
-  // Device location from Redux (set by home screen)
+  // Device location from Redux
   const deviceCoords = useSelector((state: any) => state.location.coordinates);
 
-  // Animate to user's location on first availability
+  // Request location permission when map tab is first visited
+  useEffect(() => {
+    (async () => {
+      let { status } = await Location.getForegroundPermissionsAsync();
+      if (status === 'undetermined') {
+        const result = await Location.requestForegroundPermissionsAsync();
+        status = result.status;
+      }
+      if (status === 'granted') {
+        setLocationGranted(true);
+        // If we don't have coords in Redux yet, fetch and store them
+        if (!deviceCoords?.lat || !deviceCoords?.lon) {
+          try {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            const lat = loc.coords.latitude;
+            const lon = loc.coords.longitude;
+            dispatch(setCoordinates({ lat, lon }));
+            if (!hasAnimatedToLocation.current) {
+              hasAnimatedToLocation.current = true;
+              mapRef.current?.animateToRegion({
+                latitude: lat, longitude: lon,
+                latitudeDelta: 0.5, longitudeDelta: 0.5,
+              }, 800);
+            }
+          } catch {}
+        }
+      }
+    })();
+  }, []);
+
+  // Animate to user's location from Redux when available
   useEffect(() => {
     if (hasAnimatedToLocation.current) return;
     if (deviceCoords?.lat && deviceCoords?.lon) {
       hasAnimatedToLocation.current = true;
+      setLocationGranted(true);
       mapRef.current?.animateToRegion({
         latitude: deviceCoords.lat,
         longitude: deviceCoords.lon,
@@ -82,11 +165,17 @@ export default function MapScreen() {
   const [selectedBreak, setSelectedBreak] = useState<any>(null);
   const pendingCalloutRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [regionStable, setRegionStable] = useState(true);
+  // Track committed markers separately so clustering library never sees mid-gesture updates
+  const [committedBreaks, setCommittedBreaks] = useState<any[]>([]);
 
-  const minLat = region.latitude - region.latitudeDelta / 2;
-  const maxLat = region.latitude + region.latitudeDelta / 2;
-  const minLon = region.longitude - region.longitudeDelta / 2;
-  const maxLon = region.longitude + region.longitudeDelta / 2;
+  // Round bounds based on zoom level — coarser when zoomed out, precise when zoomed in
+  const precision = region.latitudeDelta > 10 ? 10 : region.latitudeDelta > 1 ? 100 : 1000;
+  const minLat = Math.floor((region.latitude - region.latitudeDelta / 2) * precision) / precision;
+  const maxLat = Math.ceil((region.latitude + region.latitudeDelta / 2) * precision) / precision;
+  const minLon = Math.floor((region.longitude - region.longitudeDelta / 2) * precision) / precision;
+  const maxLon = Math.ceil((region.longitude + region.longitudeDelta / 2) * precision) / precision;
 
   const getContinent = (lat: number, lon: number): string => {
     if (lat < -60) return 'an';
@@ -99,6 +188,9 @@ export default function MapScreen() {
     return 'na';
   };
 
+  // Skip fetching when zoomed too far out — clustering too many markers causes crashes
+  const isZoomedTooFarOut = region.latitudeDelta > 40;
+
   const { data, isFetching } = useGetMapSurfBreaksQuery(
     {
       viewerId: user?.id ?? '',
@@ -107,27 +199,65 @@ export default function MapScreen() {
       favorites: filter === 'favorites',
       mine: filter === 'mine',
     },
-    { refetchOnMountOrArgChange: true }
+    { skip: isZoomedTooFarOut }
   );
 
-  const surfBreaks = data?.results?.breaks ?? data?.results?.surfBreaks ?? [];
+  const latestBreaks = useMemo(
+    () => data?.results?.breaks ?? data?.results?.surfBreaks ?? [],
+    [data]
+  );
+
+  // Only commit new markers when region is stable AND all animations are done
+  useEffect(() => {
+    if (isZoomedTooFarOut) {
+      setCommittedBreaks([]);
+      return;
+    }
+    if (!regionStable) return;
+    const handle = InteractionManager.runAfterInteractions(() => {
+      if (regionStable) {
+        setCommittedBreaks(latestBreaks);
+      }
+    });
+    return () => handle.cancel();
+  }, [latestBreaks, regionStable, isZoomedTooFarOut]);
+
+  // Cap markers to prevent clustering library from crashing with too many
+  const surfBreaks = committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks;
 
   // Show pending callout once the marker renders after data loads
   useEffect(() => {
     if (!pendingCalloutRef.current) return;
     const id = pendingCalloutRef.current;
-    // Poll briefly for the marker ref to appear after data loads
     let attempts = 0;
-    const interval = setInterval(() => {
-      if (markerRefs.current[id]) {
-        markerRefs.current[id].showCallout?.();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tryShow = () => {
+      if (cancelled || attempts++ > 10) {
         pendingCalloutRef.current = null;
-        clearInterval(interval);
+        return;
       }
-      if (++attempts > 20) clearInterval(interval);
-    }, 200);
-    return () => clearInterval(interval);
+      try {
+        const ref = markerRefs.current[id];
+        if (ref && typeof ref.showCallout === 'function') {
+          ref.showCallout();
+          pendingCalloutRef.current = null;
+          return;
+        }
+      } catch {}
+      timer = setTimeout(tryShow, 250);
+    };
+    timer = setTimeout(tryShow, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [data]);
+
+  // Clean up stale marker refs
+  useEffect(() => {
+    const currentIds = new Set(surfBreaks.map((sb: any) => sb.id));
+    for (const id of Object.keys(markerRefs.current)) {
+      if (!currentIds.has(id)) delete markerRefs.current[id];
+    }
+  }, [surfBreaks]);
 
   const { data: searchData, isFetching: searchLoading } = useGetSurfBreaksQuery(
     { search: debouncedTerm, limit: 8, continuationToken: '' },
@@ -198,8 +328,21 @@ export default function MapScreen() {
     Keyboard.dismiss();
   }, []);
 
+  const isAnimatingRef = useRef(false);
+
   const handleRegionChange = useCallback((newRegion: Region) => {
-    setRegion(newRegion);
+    if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
+    // If programmatic animation, just update region directly without skipping query
+    if (isAnimatingRef.current) {
+      isAnimatingRef.current = false;
+      setRegion(newRegion);
+      return;
+    }
+    setRegionStable(false);
+    regionDebounceRef.current = setTimeout(() => {
+      setRegion(newRegion);
+      setRegionStable(true);
+    }, 800);
   }, []);
 
   const handleFilterPress = useCallback((newFilter: FilterType) => {
@@ -215,14 +358,18 @@ export default function MapScreen() {
       const region = sb.region && sb.region !== '0' ? sb.region : '0';
       trackedPush(`/break/${country}/${region}/${id}` as any);
     }
-  }, [router]);
+  }, [trackedPush]);
 
   const handleMarkerPress = useCallback((sb: any) => {
     setSelectedBreak(sb);
-    // Show callout after a tick
     setTimeout(() => {
-      markerRefs.current[sb.id]?.showCallout?.();
+      try { markerRefs.current[sb.id]?.showCallout?.(); } catch {}
     }, 100);
+  }, []);
+
+  const markerRefSetter = useCallback((id: string, ref: any) => {
+    if (ref) markerRefs.current[id] = ref;
+    else delete markerRefs.current[id];
   }, []);
 
   const handleSearchInput = useCallback((text: string) => {
@@ -250,6 +397,9 @@ export default function MapScreen() {
     const lat = parseFloat(sb.coordinates?.lat);
     const lon = parseFloat(sb.coordinates?.lon);
     if (!isNaN(lat) && !isNaN(lon)) {
+      if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
+      isAnimatingRef.current = true;
+      setRegionStable(true);
       mapRef.current?.animateToRegion({
         latitude: lat,
         longitude: lon,
@@ -271,6 +421,46 @@ export default function MapScreen() {
 
   const markerColor = filter === 'favorites' ? '#ef4444' : filter === 'mine' ? '#8b5cf6' : '#0ea5e9';
 
+  const markers = useMemo(() => surfBreaks.map((sb: any) => (
+    <SurfBreakMarker
+      key={sb.id}
+      sb={sb}
+      markerColor={markerColor}
+      isDark={isDark}
+      onMarkerPress={handleMarkerPress}
+      onCalloutPress={navigateToBreakPage}
+      markerRefSetter={markerRefSetter}
+    />
+  )), [surfBreaks, markerColor, isDark, handleMarkerPress, navigateToBreakPage, markerRefSetter]);
+
+  const renderCluster = useCallback((cluster: any) => {
+    const { id, geometry, onPress, properties } = cluster;
+    const count = properties?.point_count ?? 0;
+    return (
+      <Marker
+        key={`cluster-${id}`}
+        coordinate={{
+          latitude: geometry.coordinates[1],
+          longitude: geometry.coordinates[0],
+        }}
+        onPress={onPress}
+        tracksViewChanges={false}
+      >
+        <View style={[styles.cluster, { backgroundColor: markerColor }]}>
+          <Text style={styles.clusterText}>{count}</Text>
+        </View>
+      </Marker>
+    );
+  }, [markerColor]);
+
+  const handleMapPress = useCallback(() => {
+    if (searchOpen && !searchTerm) {
+      setSearchOpen(false);
+      Keyboard.dismiss();
+    }
+    dismissSelection();
+  }, [searchOpen, searchTerm, dismissSelection]);
+
   return (
     <View style={styles.container}>
       <ClusteredMapView
@@ -281,71 +471,19 @@ export default function MapScreen() {
         provider={PROVIDER_DEFAULT}
         customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
         userInterfaceStyle={isDark ? 'dark' : 'light'}
-        showsUserLocation
+        showsUserLocation={locationGranted}
         showsMyLocationButton={false}
         clusterColor={markerColor}
         clusterTextColor="#ffffff"
         radius={50}
+        minPoints={2}
         minZoomLevel={2}
-        maxZoomLevel={15}
+        maxZoomLevel={18}
         animationEnabled={false}
-        onPress={() => {
-          if (searchOpen && !searchTerm) {
-            setSearchOpen(false);
-            Keyboard.dismiss();
-          }
-          dismissSelection();
-        }}
-        renderCluster={(cluster: any) => {
-          const { id, geometry, onPress, properties } = cluster;
-          const count = properties?.point_count ?? 0;
-          return (
-            <Marker
-              key={`cluster-${id}`}
-              coordinate={{
-                latitude: geometry.coordinates[1],
-                longitude: geometry.coordinates[0],
-              }}
-              onPress={onPress}
-            >
-              <View style={[styles.cluster, { backgroundColor: markerColor }]}>
-                <Text style={styles.clusterText}>{count}</Text>
-              </View>
-            </Marker>
-          );
-        }}
+        onPress={handleMapPress}
+        renderCluster={renderCluster}
       >
-        {surfBreaks.map((sb: any) => (
-          <Marker
-            key={sb.id}
-            ref={(ref) => { if (ref) markerRefs.current[sb.id] = ref; }}
-            coordinate={{
-              latitude: parseFloat(sb.coordinates?.lat) || 0,
-              longitude: parseFloat(sb.coordinates?.lon) || 0,
-            }}
-            onPress={() => handleMarkerPress(sb)}
-          >
-            <View style={[
-              styles.marker,
-              { backgroundColor: markerColor },
-              selectedBreak?.id === sb.id && styles.markerSelected,
-            ]} />
-            <Callout
-              tooltip
-              onPress={() => navigateToBreakPage(sb)}
-            >
-              <View style={[styles.callout, { backgroundColor: isDark ? '#1f2937' : '#ffffff' }]}>
-                <Text style={[styles.calloutName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                  {sb.name}
-                </Text>
-                <Text style={[styles.calloutSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-                  {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
-                </Text>
-                <Text style={styles.calloutAction}>View Sessions →</Text>
-              </View>
-            </Callout>
-          </Marker>
-        ))}
+        {markers}
       </ClusteredMapView>
 
       {/* Loading */}
@@ -579,6 +717,9 @@ export default function MapScreen() {
             } catch {}
           }
           if (lat && lon) {
+            if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
+            isAnimatingRef.current = true;
+            setRegionStable(true);
             mapRef.current?.animateToRegion({
               latitude: lat,
               longitude: lon,

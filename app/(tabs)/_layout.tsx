@@ -100,7 +100,6 @@ function TabsInner() {
         name="messages"
         options={{
           title: 'Messages',
-          href: isAuthenticated ? '/(tabs)/messages' : null,
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'chatbubble' : 'chatbubble-outline'} size={size} color={color} />
           ),

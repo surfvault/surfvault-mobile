@@ -74,9 +74,6 @@ export default function MessagesScreen() {
   if (!isAuthenticated) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
-        <View style={styles.header}>
-          <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>Messages</Text>
-        </View>
         <View style={styles.emptyWrap}>
           <View style={styles.emptyIconRow}>
             <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#eff6ff' }]}>
@@ -200,7 +197,7 @@ const styles = StyleSheet.create({
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80, paddingHorizontal: 32 },
   emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
-  emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 0, textAlign: 'center' },
+  emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' },
   emptySubtitle: { fontSize: 14, marginTop: 6, textAlign: 'center' },
   signInBtn: { marginTop: 16, backgroundColor: '#0ea5e9', paddingHorizontal: 32, paddingVertical: 12, borderRadius: 12 },
   signInText: { color: '#fff', fontSize: 16, fontWeight: '600' },

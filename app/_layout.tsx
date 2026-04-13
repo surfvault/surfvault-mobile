@@ -17,6 +17,7 @@ import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
+import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -29,10 +30,15 @@ Notifications.setNotificationHandler({
 });
 
 async function requestNotificationPermissions() {
-  if (!Device.isDevice) return; // Skip on simulator
+  if (!Device.isDevice) {
+    console.log('[Notifications] Skipping — not a physical device');
+    return;
+  }
   const { status: existing } = await Notifications.getPermissionsAsync();
+  console.log('[Notifications] Current permission status:', existing);
   if (existing === 'granted') return;
-  await Notifications.requestPermissionsAsync();
+  const { status } = await Notifications.requestPermissionsAsync();
+  console.log('[Notifications] Permission request result:', status);
 }
 
 SplashScreen.preventAutoHideAsync();
@@ -108,12 +114,15 @@ function AppShell() {
     return () => subscription.remove();
   }, [router]);
 
-  // Request notification permissions on first launch (non-authenticated)
-  // Delayed to avoid racing with location permission dialog on iOS
+  // Request notification permissions after splash screen hides and location dialog settles
+  const notifRequested = useRef(false);
   useEffect(() => {
-    const timer = setTimeout(() => requestNotificationPermissions(), 2000);
+    if (isLoading) return; // Wait until auth state is resolved (splash still showing)
+    if (notifRequested.current) return;
+    notifRequested.current = true;
+    const timer = setTimeout(() => requestNotificationPermissions(), 3000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [isLoading]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -166,9 +175,11 @@ export default function RootLayout() {
         <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
           <ReduxProvider store={store}>
             <AuthProvider>
-              <UploadProvider>
-                <AppShell />
-              </UploadProvider>
+              <ActionSheetProvider useCustomActionSheet>
+                <UploadProvider>
+                  <AppShell />
+                </UploadProvider>
+              </ActionSheetProvider>
             </AuthProvider>
           </ReduxProvider>
         </Auth0Provider>

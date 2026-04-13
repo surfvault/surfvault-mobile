@@ -128,7 +128,7 @@ const userApi = rootApi.injectEndpoints({
       }),
     }),
     followUser: builder.mutation({
-      invalidatesTags: [ApiTag.Follow],
+      invalidatesTags: [ApiTag.Follow, ApiTag.SurfBreak],
       query: ({ userId, action }: { userId: string; action: string }) => ({
         url: `/user/${action}`,
         method: 'PATCH',
