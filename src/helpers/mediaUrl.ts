@@ -24,7 +24,7 @@ export function getWatermarkUrl(originalS3Key: string): string {
 
 /**
  * Build a direct S3 URL to the cached watermarked photo.
- * Watermark keys mirror the preview key with .jpg extension.
+ * Preview/watermark keys always use .jpg extension regardless of original format.
  */
 export function getDirectWatermarkUrl(originalS3Key: string): string {
   if (!originalS3Key) return '';

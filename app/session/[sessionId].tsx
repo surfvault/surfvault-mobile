@@ -93,58 +93,106 @@ export default function SessionDetailScreen() {
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerWindowStart, setViewerWindowStart] = useState(0);
 
-  // Watermark URL resolution: S3 first, Lambda fallback
+  // Watermark URL resolution — mirrors web: S3 probe → Lambda generate → poll S3
   const wmCacheRef = useRef(new Map<string, string>());
-  const wmInflightRef = useRef(new Set<string>());
+  const wmInflightRef = useRef(new Map<string, Promise<string>>());
+  const wmActiveRef = useRef(0);
+  const wmQueueRef = useRef<string[]>([]);
+  const WM_CONCURRENCY = 4;
   const [, wmForceRender] = useState(0);
 
+  // Derive key from thumbnail URL (like web) — thumbnails/previews/watermarks always use .jpg
+  // Do NOT use original_s3_key here — it may have .jpeg which doesn't match preview/watermark keys
   const getPhotoKey = useCallback((m: any) => {
-    return m.original_s3_key || toOriginalKey(m.thumbnail) || '';
+    return toOriginalKey(m.thumbnail) || m.original_s3_key?.replace(/\.[^.]+$/, '.jpg') || '';
   }, []);
 
-  const resolveWatermark = useCallback((key: string) => {
-    if (!key || wmCacheRef.current.has(key) || wmInflightRef.current.has(key)) return;
-    wmInflightRef.current.add(key);
+  const probeImage = (url: string, timeoutMs = 4000): Promise<boolean> =>
+    new Promise((resolve) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => { controller.abort(); resolve(false); }, timeoutMs);
+      fetch(url, { method: 'HEAD', signal: controller.signal })
+        .then((res) => { clearTimeout(timer); resolve(res.ok); })
+        .catch(() => { clearTimeout(timer); resolve(false); });
+    });
 
-    const directUrl = getDirectWatermarkUrl(key);
-    // 1. Check if watermark already exists in S3
-    fetch(directUrl, { method: 'HEAD' })
-      .then((res) => {
-        if (res.ok) {
-          // Cached in S3 — use direct URL
-          wmCacheRef.current.set(key, directUrl);
-          wmInflightRef.current.delete(key);
-          wmForceRender((x) => x + 1);
-        } else {
-          // 2. Not cached — call Lambda to generate it, then use S3 URL
-          fetch(getWatermarkUrl(key), { redirect: 'follow' })
-            .then(() => {
-              wmCacheRef.current.set(key, directUrl);
-            })
-            .catch(() => {
-              wmCacheRef.current.set(key, directUrl);
-            })
-            .finally(() => {
-              wmInflightRef.current.delete(key);
-              wmForceRender((x) => x + 1);
-            });
+  const processWmQueue = useCallback(() => {
+    while (wmActiveRef.current < WM_CONCURRENCY && wmQueueRef.current.length > 0) {
+      const key = wmQueueRef.current.shift()!;
+      if (wmCacheRef.current.has(key) || wmInflightRef.current.has(key)) continue;
+      wmActiveRef.current++;
+
+      const directUrl = getDirectWatermarkUrl(key);
+
+      const p = (async () => {
+        // 1) Probe S3 — watermark likely pre-generated on upload
+        if (await probeImage(`${directUrl}?v=${Date.now()}`)) {
+          return directUrl;
         }
-      })
-      .catch(() => {
-        // HEAD failed — try Lambda anyway
-        fetch(getWatermarkUrl(key), { redirect: 'follow' })
-          .finally(() => {
-            wmCacheRef.current.set(key, directUrl);
-            wmInflightRef.current.delete(key);
-            wmForceRender((x) => x + 1);
-          });
-      });
+
+        // 2) Trigger Lambda to generate watermark
+        try {
+          await fetch(getWatermarkUrl(key), { redirect: 'follow' });
+        } catch {}
+
+        // 3) Poll S3 until watermark appears (650ms intervals, 15s timeout)
+        const start = Date.now();
+        while (Date.now() - start < 15000) {
+          await new Promise((r) => setTimeout(r, 650));
+          if (await probeImage(`${directUrl}?v=${Date.now()}`)) {
+            return directUrl;
+          }
+        }
+
+        // 4) Final fallback
+        return directUrl;
+      })();
+
+      const finish = (url: string) => {
+        wmCacheRef.current.set(key, url);
+        wmInflightRef.current.delete(key);
+        wmActiveRef.current--;
+        wmForceRender((x) => x + 1);
+        processWmQueue();
+      };
+
+      wmInflightRef.current.set(key, p);
+      p.then(finish);
+    }
   }, []);
+
+  // Returns a promise that resolves to the watermark URL (cached or newly resolved)
+  const ensurePreview = useCallback((key: string): Promise<string> => {
+    if (!key) return Promise.resolve('');
+    const cached = wmCacheRef.current.get(key);
+    if (cached) return Promise.resolve(cached);
+    const inflight = wmInflightRef.current.get(key);
+    if (inflight) return inflight;
+    wmQueueRef.current.push(key);
+    processWmQueue();
+    // Return the promise that was just created by processWmQueue
+    return wmInflightRef.current.get(key) ?? Promise.resolve('');
+  }, [processWmQueue]);
+
+  // Prefetch watermarks around a given index (called on lightbox open + swipe)
+  const prefetchAroundIndex = useCallback((centerIdx: number, radius = 5) => {
+    const priorityKeys: string[] = [];
+    for (let i = Math.max(0, centerIdx - radius); i <= Math.min(sessionMedia.length - 1, centerIdx + radius); i++) {
+      const key = getPhotoKey(sessionMedia[i]);
+      if (key && !wmCacheRef.current.has(key) && !wmInflightRef.current.has(key)) {
+        priorityKeys.push(key);
+      }
+    }
+    if (priorityKeys.length > 0) {
+      wmQueueRef.current = [...priorityKeys, ...wmQueueRef.current.filter((k) => !priorityKeys.includes(k))];
+      processWmQueue();
+    }
+  }, [sessionMedia, getPhotoKey, processWmQueue]);
 
   // Pre-resolve watermark URLs as media loads
   useEffect(() => {
-    sessionMedia.forEach((m) => resolveWatermark(getPhotoKey(m)));
-  }, [sessionMedia, resolveWatermark, getPhotoKey]);
+    sessionMedia.forEach((m) => ensurePreview(getPhotoKey(m)));
+  }, [sessionMedia, ensurePreview, getPhotoKey]);
 
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
@@ -638,13 +686,15 @@ export default function SessionDetailScreen() {
 
       return (
         <Pressable
-          onPress={() => {
+          onPress={async () => {
             if (inActionMode) {
               togglePhotoSelection(item.id);
             } else {
-              // Window images around tapped photo to avoid slow layout
               const WINDOW = 20;
               const start = Math.max(0, index - WINDOW);
+              const key = getPhotoKey(item);
+              prefetchAroundIndex(index, 5);
+              await ensurePreview(key);
               setViewerWindowStart(start);
               setViewerIndex(index - start);
               setViewerVisible(true);
@@ -685,7 +735,7 @@ export default function SessionDetailScreen() {
         </Pressable>
       );
     },
-    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress]
+    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress, prefetchAroundIndex, ensurePreview, getPhotoKey]
   );
 
   // Header subtitle
@@ -1103,11 +1153,14 @@ export default function SessionDetailScreen() {
             .slice(viewerWindowStart, viewerWindowStart + 41)
             .map((m) => {
               const key = getPhotoKey(m);
-              return { uri: wmCacheRef.current.get(key) || getWatermarkUrl(key) };
+              const cached = wmCacheRef.current.get(key);
+              return { uri: cached || getDirectWatermarkUrl(key) };
             })}
+          keyExtractor={(src, idx) => `${viewerWindowStart + idx}-${src?.uri?.slice(-40) ?? idx}`}
           imageIndex={viewerIndex}
           visible
           onRequestClose={() => setViewerVisible(false)}
+          onImageIndexChange={(idx) => prefetchAroundIndex(viewerWindowStart + idx, 5)}
           swipeToCloseEnabled
           doubleTapToZoomEnabled
         />

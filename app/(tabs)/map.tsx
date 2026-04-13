@@ -25,8 +25,56 @@ import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
 import { FlatList } from 'react-native';
+import React from 'react';
 
 type FilterType = 'all' | 'favorites' | 'mine';
+
+// Memoized marker component — prevents clustering library from re-diffing on every render
+const SurfBreakMarker = React.memo(({
+  sb,
+  markerColor,
+  isDark,
+  onMarkerPress,
+  onCalloutPress,
+  markerRefSetter,
+}: {
+  sb: any;
+  markerColor: string;
+  isDark: boolean;
+  onMarkerPress: (sb: any) => void;
+  onCalloutPress: (sb: any) => void;
+  markerRefSetter: (id: string, ref: any) => void;
+}) => {
+  const handlePress = useCallback(() => onMarkerPress(sb), [sb, onMarkerPress]);
+  const handleCalloutPress = useCallback(() => onCalloutPress(sb), [sb, onCalloutPress]);
+  const handleRef = useCallback((ref: any) => markerRefSetter(sb.id, ref), [sb.id, markerRefSetter]);
+
+  return (
+    <Marker
+      key={sb.id}
+      ref={handleRef}
+      coordinate={{
+        latitude: parseFloat(sb.coordinates?.lat) || 0,
+        longitude: parseFloat(sb.coordinates?.lon) || 0,
+      }}
+      tracksViewChanges={false}
+      onPress={handlePress}
+    >
+      <View style={[styles.marker, { backgroundColor: markerColor }]} />
+      <Callout tooltip onPress={handleCalloutPress}>
+        <View style={[styles.callout, { backgroundColor: isDark ? '#1f2937' : '#ffffff' }]}>
+          <Text style={[styles.calloutName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+            {sb.name}
+          </Text>
+          <Text style={[styles.calloutSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+            {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
+          </Text>
+          <Text style={styles.calloutAction}>View Sessions →</Text>
+        </View>
+      </Callout>
+    </Marker>
+  );
+});
 
 const DARK_MAP_STYLE = [
   { elementType: 'geometry', stylers: [{ color: '#1d2c4d' }] },
@@ -141,7 +189,7 @@ export default function MapScreen() {
   };
 
   // Skip fetching when zoomed too far out — clustering too many markers causes crashes
-  const isZoomedTooFarOut = region.latitudeDelta > 60;
+  const isZoomedTooFarOut = region.latitudeDelta > 40;
 
   const { data, isFetching } = useGetMapSurfBreaksQuery(
     {
@@ -174,25 +222,33 @@ export default function MapScreen() {
     return () => handle.cancel();
   }, [latestBreaks, regionStable, isZoomedTooFarOut]);
 
-  const surfBreaks = committedBreaks;
+  // Cap markers to prevent clustering library from crashing with too many
+  const surfBreaks = committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks;
 
   // Show pending callout once the marker renders after data loads
   useEffect(() => {
     if (!pendingCalloutRef.current) return;
     const id = pendingCalloutRef.current;
-    // Poll briefly for the marker ref to appear after data loads
     let attempts = 0;
-    const interval = setInterval(() => {
-      try {
-        if (markerRefs.current[id]) {
-          markerRefs.current[id].showCallout?.();
-          pendingCalloutRef.current = null;
-          clearInterval(interval);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tryShow = () => {
+      if (cancelled || attempts++ > 10) {
+        pendingCalloutRef.current = null;
+        return;
       }
+      try {
+        const ref = markerRefs.current[id];
+        if (ref && typeof ref.showCallout === 'function') {
+          ref.showCallout();
+          pendingCalloutRef.current = null;
+          return;
+        }
       } catch {}
-      if (++attempts > 20) clearInterval(interval);
-    }, 200);
-    return () => clearInterval(interval);
+      timer = setTimeout(tryShow, 250);
+    };
+    timer = setTimeout(tryShow, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [data]);
 
   // Clean up stale marker refs
@@ -302,13 +358,18 @@ export default function MapScreen() {
       const region = sb.region && sb.region !== '0' ? sb.region : '0';
       trackedPush(`/break/${country}/${region}/${id}` as any);
     }
-  }, [router]);
+  }, [trackedPush]);
 
   const handleMarkerPress = useCallback((sb: any) => {
     setSelectedBreak(sb);
     setTimeout(() => {
       try { markerRefs.current[sb.id]?.showCallout?.(); } catch {}
     }, 100);
+  }, []);
+
+  const markerRefSetter = useCallback((id: string, ref: any) => {
+    if (ref) markerRefs.current[id] = ref;
+    else delete markerRefs.current[id];
   }, []);
 
   const handleSearchInput = useCallback((text: string) => {
@@ -361,37 +422,16 @@ export default function MapScreen() {
   const markerColor = filter === 'favorites' ? '#ef4444' : filter === 'mine' ? '#8b5cf6' : '#0ea5e9';
 
   const markers = useMemo(() => surfBreaks.map((sb: any) => (
-    <Marker
+    <SurfBreakMarker
       key={sb.id}
-      ref={(ref: any) => { if (ref) markerRefs.current[sb.id] = ref; }}
-      coordinate={{
-        latitude: parseFloat(sb.coordinates?.lat) || 0,
-        longitude: parseFloat(sb.coordinates?.lon) || 0,
-      }}
-      tracksViewChanges={false}
-      onPress={() => handleMarkerPress(sb)}
-    >
-      <View style={[
-        styles.marker,
-        { backgroundColor: markerColor },
-        selectedBreak?.id === sb.id && styles.markerSelected,
-      ]} />
-      <Callout
-        tooltip
-        onPress={() => navigateToBreakPage(sb)}
-      >
-        <View style={[styles.callout, { backgroundColor: isDark ? '#1f2937' : '#ffffff' }]}>
-          <Text style={[styles.calloutName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-            {sb.name}
-          </Text>
-          <Text style={[styles.calloutSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-            {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
-          </Text>
-          <Text style={styles.calloutAction}>View Sessions →</Text>
-        </View>
-      </Callout>
-    </Marker>
-  )), [surfBreaks, markerColor, selectedBreak?.id, isDark, handleMarkerPress, navigateToBreakPage]);
+      sb={sb}
+      markerColor={markerColor}
+      isDark={isDark}
+      onMarkerPress={handleMarkerPress}
+      onCalloutPress={navigateToBreakPage}
+      markerRefSetter={markerRefSetter}
+    />
+  )), [surfBreaks, markerColor, isDark, handleMarkerPress, navigateToBreakPage, markerRefSetter]);
 
   const renderCluster = useCallback((cluster: any) => {
     const { id, geometry, onPress, properties } = cluster;
