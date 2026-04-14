@@ -38,6 +38,7 @@ import type { ActionSheetSection } from '../../../../src/components/ActionSheet'
 import { toOriginalKey, getWatermarkUrl } from '../../../../src/helpers/mediaUrl';
 import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../../../src/helpers/saveToPhotos';
 import { useUpload } from '../../../../src/context/UploadContext';
+import { generateUUID } from '../../../../src/helpers/uuid';
 
 const FETCH_AMOUNT = 30;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -258,41 +259,44 @@ export default function SessionDetailScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
-      quality: 1,
+      quality: 0.95,
     });
 
     if (result.canceled || result.assets.length === 0) return;
 
     try {
-      const pickedFiles = result.assets.map((asset) => ({
+      const filesMapped = result.assets.map((asset) => ({
+        uuid: generateUUID(),
         uri: asset.uri,
         name: asset.fileName ?? `photo_${Date.now()}.jpg`,
         size: asset.fileSize ?? 0,
         type: asset.mimeType ?? 'image/jpeg',
+        lastModified: Date.now(),
       }));
 
-      const totalSizeInGB = pickedFiles.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
+      const totalSizeInGB = filesMapped.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
 
       const uploadResult = await saveSurfMedia({
         sessionId: session.id,
-        mediaFiles: pickedFiles.map((f) => ({ name: f.name, size: f.size, type: f.type, source: 'device' })),
+        mediaFiles: filesMapped.map((f) => ({ uuid: f.uuid, name: f.name, size: f.size, type: f.type, lastModified: f.lastModified, source: 'device' })),
         totalSizeInGB,
       }).unwrap();
 
       const presignedUrlMap = uploadResult?.results?.presignedUrlMap;
-      const uploadId = uploadResult?.results?.uploadId;
-      const uploadFileIds = uploadResult?.results?.uploadFileIds ?? [];
+      const uploadFileIdMap = uploadResult?.results?.uploadFileIdMap;
+      const uploadSession = uploadResult?.results?.uploadSession;
+      const uploadId = uploadResult?.results?.uploadId ?? uploadSession?.split('#').pop();
 
       if (!presignedUrlMap || !uploadId) {
         throw new Error('Failed to get upload URLs');
       }
 
-      const uploadFiles = pickedFiles.map((f, i) => ({
+      const uploadFiles = filesMapped.map((f) => ({
         name: f.name,
         uri: f.uri,
         type: f.type,
-        uploadFileId: uploadFileIds[i],
-        presignedUrl: presignedUrlMap[f.name],
+        uploadFileId: uploadFileIdMap?.[f.uuid] ?? '',
+        presignedUrl: presignedUrlMap[f.uuid] ?? '',
       })).filter((f) => f.presignedUrl && f.uploadFileId);
 
       startUpload({
@@ -395,10 +399,13 @@ export default function SessionDetailScreen() {
           style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
         >
           <View style={{ position: 'relative' }}>
+            <View style={{ width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }}>
+              <Ionicons name="image-outline" size={28} color={isDark ? '#374151' : '#d1d5db'} />
+            </View>
             <Image
               source={{ uri: item.thumbnail ?? item.url }}
               style={[
-                { width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6 },
+                { width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6, position: 'absolute', top: 0, left: 0 },
                 inActionMode && isSelected && { borderWidth: 3, borderColor: ac.btn },
               ]}
               contentFit="cover"

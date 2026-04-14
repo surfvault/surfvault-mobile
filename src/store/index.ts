@@ -94,6 +94,7 @@ export {
   useUpdateSessionMutation,
   useUpdateSessionsTaggedUsersMutation,
   useUpdateSessionThumbnailMutation,
+  useDeleteSessionMutation,
 } from './apis/endpoints/surf';
 
 export {

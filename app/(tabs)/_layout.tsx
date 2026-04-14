@@ -163,10 +163,7 @@ function TabsInner() {
 export default function TabLayout() {
   return (
     <TabBarProvider>
-      <View style={{ flex: 1 }}>
-        <TabsInner />
-        <UploadProgressPill />
-      </View>
+      <TabsInner />
     </TabBarProvider>
   );
 }

@@ -280,6 +280,13 @@ const surfApi = rootApi.injectEndpoints({
         body: { sessionName, hideLocation },
       }),
     }),
+    deleteSession: builder.mutation({
+      invalidatesTags: [ApiTag.SurfBreak, ApiTag.Session, ApiTag.User],
+      query: ({ sessionId }: { sessionId: string }) => ({
+        url: `/surf-sessions/${sessionId}`,
+        method: 'DELETE',
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -303,6 +310,7 @@ export const {
   useUpdateSessionGroupMutation,
   useDeleteSessionGroupMutation,
   useUpdateGroupPhotosMutation,
+  useDeleteSessionMutation,
 } = surfApi;
 
 export { surfApi };

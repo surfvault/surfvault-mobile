@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, useColorScheme } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -29,6 +29,7 @@ interface SessionCardProps {
   showViewCount?: boolean;
   showHiddenLocations?: boolean;
   onPress?: () => void;
+  onDelete?: () => void;
   isViewable?: boolean;
   session: {
     id?: string;
@@ -98,9 +99,11 @@ function FadingSubtitle({ items, visible = true }: { items: string[]; visible?: 
   );
 }
 
-export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, onPress: customOnPress, isViewable = true }: SessionCardProps) {
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
   const router = useRouter();
   const trackedPush = useTrackedPush();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
   const { user } = useUser();
   const requireAuth = useRequireAuth();
   const [followUser] = useFollowUserMutation();
@@ -180,9 +183,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
     });
   }
 
-  if (primaryOptions.length > 0) sheetSections.push({ options: primaryOptions });
-
-  // Section 2: Share
+  // Section 1: Share always first
   sheetSections.push({
     options: [{
       label: 'Share',
@@ -194,15 +195,29 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
     }],
   });
 
-  // Section 3: Report (destructive)
-  sheetSections.push({
-    options: [{
-      label: 'Report',
-      icon: 'flag-outline',
-      destructive: true,
-      onPress: () => Alert.alert('Report', 'This session has been reported. Thank you.'),
-    }],
-  });
+  // Section 2: User/break actions
+  if (primaryOptions.length > 0) sheetSections.push({ options: primaryOptions });
+
+  // Section 3: Delete (owner) or Report (non-owner)
+  if (onDelete) {
+    sheetSections.push({
+      options: [{
+        label: 'Delete Session',
+        icon: 'trash-outline',
+        destructive: true,
+        onPress: onDelete,
+      }],
+    });
+  } else {
+    sheetSections.push({
+      options: [{
+        label: 'Report',
+        icon: 'flag-outline',
+        destructive: true,
+        onPress: () => Alert.alert('Report', 'This session has been reported. Thank you.'),
+      }],
+    });
+  }
 
   return (
     <View style={styles.card}>
@@ -266,17 +281,16 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
       {/* Thumbnail — edge to edge */}
       <Pressable onPress={handlePress}>
         <View>
-          {session.thumbnail ? (
+          <View style={[styles.thumbnail, styles.emptyThumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+            <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
+          </View>
+          {session.thumbnail && (
             <Image
               source={{ uri: session.thumbnail }}
-              style={styles.thumbnail}
+              style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
               contentFit="cover"
               transition={200}
             />
-          ) : (
-            <View style={[styles.thumbnail, styles.emptyThumb]}>
-              <Text style={{ color: '#9ca3af', fontSize: 14 }}>No photos yet</Text>
-            </View>
           )}
 
           {/* Tagged users — bottom right overlay */}

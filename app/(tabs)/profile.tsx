@@ -16,6 +16,7 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Share,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -24,6 +25,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
+import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 import {
   useGetUserQuery,
   useGetUserSessionsQuery,
@@ -32,6 +34,7 @@ import {
   useUpdateUserMetaDataMutation,
   useUpdateUserFavoritesMutation,
   useGetNotificationsQuery,
+  useDeleteSessionMutation,
 } from '../../src/store';
 import { useTabBar } from '../../src/context/TabBarContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
@@ -50,6 +53,7 @@ export default function ProfileScreen() {
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
   const { user } = useUser();
   const { isAuthenticated, login, logout } = useAuth();
   const [updateMeta] = useUpdateUserMetaDataMutation();
@@ -57,6 +61,11 @@ export default function ProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
+
+  // Session long-press action sheet
+  const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
+  const [sessionSheetItem, setSessionSheetItem] = useState<any>(null);
+  const [deleteSession] = useDeleteSessionMutation();
 
   // Fetch public profile data for follower/following counts
   const { data: publicProfileData } = useGetUserQuery(
@@ -273,6 +282,82 @@ export default function ProfileScreen() {
     );
   }
 
+  const handleSessionLongPress = useCallback((item: any) => {
+    setSessionSheetItem(item);
+    setSessionSheetVisible(true);
+  }, []);
+
+  const sessionSheetSections: ActionSheetSection[] = sessionSheetItem ? [
+    {
+      options: [
+        {
+          label: 'Share',
+          icon: 'share-outline' as const,
+          onPress: () => {
+            const sid = sessionSheetItem.session_id ?? sessionSheetItem.id;
+            Share.share(Platform.OS === 'ios' ? { url: `https://share.surf-vault.com/s/${sid}` } : { message: `https://share.surf-vault.com/s/${sid}` });
+          },
+        },
+        ...(sessionSheetItem.surf_break_is_favorited != null ? [{
+          label: (sessionSheetItem.surf_break_is_favorited ? 'Unfavorite Break' : 'Favorite Break') as const,
+          icon: (sessionSheetItem.surf_break_is_favorited ? 'heart-dislike-outline' : 'heart-outline') as const,
+          onPress: () => {
+            if (sessionSheetItem.surf_break_id) {
+              favoriteSurfBreak({ surfBreakId: sessionSheetItem.surf_break_id, action: sessionSheetItem.surf_break_is_favorited ? 'unfavorite' : 'favorite' });
+            }
+          },
+        }] : []),
+        ...(sessionSheetItem.surf_break_identifier ? [{
+          label: 'View Break' as const,
+          icon: 'location-outline' as const,
+          onPress: () => {
+            const country = sessionSheetItem.country_code ?? '';
+            const reg = sessionSheetItem.region && sessionSheetItem.region !== '0' ? sessionSheetItem.region : '0';
+            trackedPush(`/break/${country}/${reg}/${sessionSheetItem.surf_break_identifier}` as any);
+          },
+        }] : []),
+      ],
+    },
+    {
+      options: [
+        {
+          label: 'Delete Session',
+          icon: 'trash-outline' as const,
+          destructive: true,
+          onPress: () => {
+            const sid = sessionSheetItem.session_id ?? sessionSheetItem.id;
+            const name = sessionSheetItem.session_name ?? 'this session';
+            Alert.alert(
+              'Delete Session',
+              `This will permanently delete "${name}" and everything associated with it:\n\n` +
+                    `• All photos${sessionSheetItem.photo_count ? ` (${sessionSheetItem.photo_count})` : ''} and their originals from storage\n` +
+                    `• All photo groups and assignments\n` +
+                    `• All tagged users\n` +
+                    `• All access requests\n` +
+                    `• All related notifications\n\n` +
+                    `This cannot be undone.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await deleteSession({ sessionId: sid }).unwrap();
+                      Alert.alert('Deleted', 'Session deleted successfully.');
+                    } catch {
+                      Alert.alert('Error', 'Failed to delete session.');
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    },
+  ] : [];
+
   const listHeader = (
     <>
       <ProfileHeader
@@ -375,6 +460,7 @@ export default function ProfileScreen() {
                   const sid = item.session_id ?? item.id;
                   if (sid) trackedPush(`/session/${sid}` as any);
                 }}
+                onLongPress={() => handleSessionLongPress(item)}
                 style={{ width: GRID_SIZE, height: GRID_SIZE * 1.3, margin: GRID_GAP / 2 }}
               >
                 {item.thumbnail ? (
@@ -430,6 +516,35 @@ export default function ProfileScreen() {
               onPress={() => {
                 const sid = item.session_id ?? item.id;
                 if (sid) trackedPush(`/session/${sid}` as any);
+              }}
+              onDelete={() => {
+                const sid = item.session_id ?? item.id;
+                const name = item.session_name ?? 'this session';
+                Alert.alert(
+                  'Delete Session',
+                  `This will permanently delete "${name}" and everything associated with it:\n\n` +
+                    `• All photos${item.photo_count ? ` (${item.photo_count})` : ''} and their originals from storage\n` +
+                    `• All photo groups and assignments\n` +
+                    `• All tagged users\n` +
+                    `• All access requests\n` +
+                    `• All related notifications\n\n` +
+                    `This cannot be undone.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Delete',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          await deleteSession({ sessionId: sid }).unwrap();
+                          Alert.alert('Deleted', 'Session deleted successfully.');
+                        } catch {
+                          Alert.alert('Error', 'Failed to delete session.');
+                        }
+                      },
+                    },
+                  ],
+                );
               }}
             />
           );
@@ -501,7 +616,7 @@ export default function ProfileScreen() {
       {showBreakSearch && (
         <View style={[s.sheetOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowBreakSearch(false); setTabBarVisible(true); setBreakSearch(''); setDebouncedBreakSearch(''); Keyboard.dismiss(); }} />
-          <View style={[s.breakSheet, { backgroundColor: isDark ? '#111827' : '#fff' }]}>
+          <View style={[s.breakSheet, { backgroundColor: isDark ? '#111827' : '#fff' }, kbVisible && { paddingBottom: kbHeight }]}>
             <View style={s.sheetHandle}>
               <View style={[s.sheetHandleBar, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
             </View>
@@ -552,6 +667,20 @@ export default function ProfileScreen() {
         visible={menuVisible}
         sections={menuSections}
         onClose={() => setMenuVisible(false)}
+      />
+
+      <ActionSheet
+        visible={sessionSheetVisible}
+        sections={sessionSheetSections}
+        onClose={() => { setSessionSheetVisible(false); setSessionSheetItem(null); }}
+        header={sessionSheetItem ? {
+          title: sessionSheetItem.session_name ?? 'Session',
+          subtitle: [
+            sessionSheetItem.surf_break_name,
+            sessionSheetItem.session_date ? new Date(sessionSheetItem.session_date.split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : undefined,
+          ].filter(Boolean).join(' · ') || undefined,
+          imageUri: sessionSheetItem.thumbnail,
+        } : undefined}
       />
     </SafeAreaView>
   );
