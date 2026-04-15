@@ -35,7 +35,7 @@ import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../../../src/components/UserAvatar';
 import ActionSheet from '../../../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../../../src/components/ActionSheet';
-import { toOriginalKey, getWatermarkUrl } from '../../../../src/helpers/mediaUrl';
+import { toOriginalKey, getDirectWatermarkUrl } from '../../../../src/helpers/mediaUrl';
 import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../../../src/helpers/saveToPhotos';
 import { useUpload } from '../../../../src/context/UploadContext';
 import { generateUUID } from '../../../../src/helpers/uuid';
@@ -613,7 +613,7 @@ export default function SessionDetailScreen() {
       {/* Photo lightbox viewer — shows watermarked preview */}
       <ImageViewing
         images={sessionMedia.map((m) => ({
-          uri: getWatermarkUrl(m.original_s3_key || toOriginalKey(m.thumbnail) || ''),
+          uri: getDirectWatermarkUrl(m.original_s3_key || toOriginalKey(m.thumbnail) || ''),
         }))}
         imageIndex={viewerIndex}
         visible={viewerVisible}

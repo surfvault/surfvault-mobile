@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   useColorScheme,
   Alert,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack } from 'expo-router';
@@ -24,7 +25,7 @@ import {
   useSaveSurfMediaAccessRequestToVaultMutation,
 } from '../../src/store';
 import { getWatermarkUrl, toOriginalKey } from '../../src/helpers/mediaUrl';
-import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../src/helpers/saveToPhotos';
+import { savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
 import UserAvatar from '../../src/components/UserAvatar';
 
 const FETCH_AMOUNT = 30;
@@ -54,14 +55,26 @@ export default function AccessRequestScreen() {
   // Lightbox
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [savingPhoto, setSavingPhoto] = useState(false);
   const [savingAll, setSavingAll] = useState(false);
 
   // API
-  const { data, isLoading, isFetching } = useGetSurfMediaAccessRequestQuery(
+  const { data, isLoading, isFetching, refetch } = useGetSurfMediaAccessRequestQuery(
     { requestId: requestId ?? '', limit: FETCH_AMOUNT, continuationToken },
     { skip: !requestId }
   );
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    if (!requestId) return;
+    setRefreshing(true);
+    try {
+      // Reset paging back to the first page and refetch from server
+      setContinuationToken('');
+      seenIdsRef.current = new Set();
+      await refetch();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [requestId, refetch]);
 
   const accessRequest = data?.results?.accessRequest ?? data?.results;
   const incomingPhotos = accessRequest?.photoDetails ?? [];
@@ -78,8 +91,20 @@ export default function AccessRequestScreen() {
   const [grantAccess, { isLoading: granting }] = useGrantSurfMediaAccessMutation();
   const [saveToVault, { isLoading: savingToVault }] = useSaveSurfMediaAccessRequestToVaultMutation();
 
-  // Hydrate photos
+  // Reset local state when the request changes (fires first)
+  const loadedForRequestRef = useRef<string | null>(null);
   useEffect(() => {
+    if (loadedForRequestRef.current !== requestId) {
+      setPhotos([]);
+      setContinuationToken('');
+      seenIdsRef.current = new Set();
+      loadedForRequestRef.current = requestId ?? null;
+    }
+  }, [requestId]);
+
+  // Hydrate photos as data arrives (append on pagination, replace on first page)
+  useEffect(() => {
+    if (loadedForRequestRef.current !== requestId) return; // wait for reset to land
     if (!incomingPhotos?.length) return;
     const newPhotos = incomingPhotos.filter((p: any) => {
       const key = p.id ?? p.url;
@@ -88,16 +113,9 @@ export default function AccessRequestScreen() {
       return true;
     });
     if (newPhotos.length > 0) {
-      setPhotos((prev) => continuationToken === '' ? newPhotos : [...prev, ...newPhotos]);
+      setPhotos((prev) => (continuationToken === '' ? newPhotos : [...prev, ...newPhotos]));
     }
-  }, [data]);
-
-  // Reset on requestId change
-  useEffect(() => {
-    setPhotos([]);
-    setContinuationToken('');
-    seenIdsRef.current = new Set();
-  }, [requestId]);
+  }, [data, requestId]);
 
   const hasMore = Boolean(data?.results?.continuationToken);
 
@@ -130,6 +148,8 @@ export default function AccessRequestScreen() {
   const handleSaveAllToPhotos = useCallback(async () => {
     const photoIds = photos.map((p) => p.id).filter(Boolean);
     if (!photoIds.length) return;
+    const granted = await checkMediaLibraryPermission();
+    if (!granted) return;
     setSavingAll(true);
     const result = await savePhotosToCameraRoll(photoIds);
     setSavingAll(false);
@@ -142,9 +162,21 @@ export default function AccessRequestScreen() {
     }
   }, [photos]);
 
-  // Status colors
-  const statusColor = status === 'approved' || isApproved ? '#22c55e' : status === 'pending' ? '#f59e0b' : '#ef4444';
-  const statusLabel = isApproved ? 'Approved' : status === 'pending' ? 'Pending' : status === 'denied' ? 'Denied' : status ?? 'Unknown';
+  // Status colors — Pending (orange) or Granted (green). Denied falls back to red.
+  const statusColor = isApproved ? '#22c55e' : status === 'denied' ? '#ef4444' : '#f59e0b';
+  const statusLabel = isApproved ? 'Granted' : status === 'denied' ? 'Denied' : 'Pending';
+
+  // Memoize lightbox images so swiping (which updates viewerIndex) doesn't
+  // rebuild the array and cause ImageViewing to re-initialize → flash/reopen.
+  const lightboxImages = useMemo(
+    () =>
+      photos.map((p) => ({
+        uri:
+          p.watermark_url ||
+          getWatermarkUrl(p.original_s3_key || toOriginalKey(p.url) || ''),
+      })),
+    [photos]
+  );
 
   const renderPhoto = useCallback(
     ({ item, index }: { item: any; index: number }) => (
@@ -157,7 +189,7 @@ export default function AccessRequestScreen() {
         style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
       >
         <Image
-          source={{ uri: item.url ?? item }}
+          source={{ uri: item.preview_url ?? item.url ?? item }}
           style={{ width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6 }}
           contentFit="cover"
           transition={200}
@@ -226,10 +258,21 @@ export default function AccessRequestScreen() {
           }
           style={s.metaRow}
         >
-          <Ionicons name="location-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
+          <Ionicons
+            name={session?.hide_location ? 'eye-off-outline' : 'location-outline'}
+            size={16}
+            color={isDark ? '#9ca3af' : '#6b7280'}
+          />
           <View style={{ marginLeft: 8 }}>
             <Text style={[s.metaLabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Surf break</Text>
-            <Text style={[s.metaValue, { color: '#0ea5e9' }]}>{surfBreak.name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Text style={[s.metaValue, { color: '#0ea5e9' }]}>{surfBreak.name}</Text>
+              {session?.hide_location && (
+                <Text style={[s.metaLabel, { color: isDark ? '#6b7280' : '#9ca3af', fontStyle: 'italic', marginLeft: 6 }]}>
+                  (hidden from requester)
+                </Text>
+              )}
+            </View>
             {(surfBreak.region || surfBreak.country_code) && (
               <Text style={[s.metaLabel, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
                 {[surfBreak.region?.replaceAll('_', ' '), surfBreak.country_code?.toUpperCase()].filter(Boolean).join(', ')}
@@ -260,9 +303,27 @@ export default function AccessRequestScreen() {
 
         {!isOwner && isApproved && (
           <>
-            <Pressable onPress={handleSaveToVault} disabled={savingToVault} style={[s.actionBtn, { backgroundColor: '#0ea5e9' }]}>
-              <Ionicons name="cloud-upload-outline" size={18} color="#fff" />
-              <Text style={s.actionBtnText}>{savingToVault ? 'Saving...' : 'Save to Vault'}</Text>
+            <Pressable
+              onPress={handleSaveToVault}
+              disabled={savingToVault || Boolean(accessRequest?.saved_to_vault_at)}
+              style={[
+                s.actionBtn,
+                { backgroundColor: accessRequest?.saved_to_vault_at ? '#64748b' : '#0ea5e9' },
+                accessRequest?.saved_to_vault_at && { opacity: 0.7 },
+              ]}
+            >
+              <Ionicons
+                name={accessRequest?.saved_to_vault_at ? 'checkmark-circle' : 'cloud-upload-outline'}
+                size={18}
+                color="#fff"
+              />
+              <Text style={s.actionBtnText}>
+                {savingToVault
+                  ? 'Saving...'
+                  : accessRequest?.saved_to_vault_at
+                    ? 'Saved to Vault'
+                    : 'Save to Vault'}
+              </Text>
             </Pressable>
             <Pressable onPress={handleSaveAllToPhotos} disabled={savingAll} style={[s.actionBtn, { backgroundColor: '#38bdf8' }]}>
               {savingAll ? (
@@ -335,50 +396,25 @@ export default function AccessRequestScreen() {
               ) : null
             }
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={isDark ? '#9ca3af' : '#6b7280'}
+              />
+            }
           />
         )}
       </SafeAreaView>
 
       {/* Photo lightbox — watermarked previews */}
       <ImageViewing
-        images={photos.map((p) => ({
-          uri: getWatermarkUrl(p.original_s3_key || toOriginalKey(p.url) || ''),
-        }))}
+        images={lightboxImages}
         imageIndex={viewerIndex}
         visible={viewerVisible}
         onRequestClose={() => setViewerVisible(false)}
         swipeToCloseEnabled
         doubleTapToZoomEnabled
-        onImageIndexChange={setViewerIndex}
-        FooterComponent={({ imageIndex }) => (
-          <View style={s.viewerFooter}>
-            <Pressable
-              onPress={async () => {
-                const photo = photos[imageIndex];
-                if (!photo?.id || savingPhoto) return;
-                setSavingPhoto(true);
-                const result = await savePhotoToCameraRoll(photo.id);
-                setSavingPhoto(false);
-                if (result.success) {
-                  Alert.alert('Saved', 'Photo saved to your camera roll.');
-                } else {
-                  Alert.alert('Error', result.error ?? 'Failed to save photo.');
-                }
-              }}
-              disabled={savingPhoto}
-              style={s.viewerSaveBtn}
-            >
-              {savingPhoto ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Ionicons name="download-outline" size={22} color="#ffffff" />
-              )}
-              <Text style={s.viewerSaveText}>
-                {savingPhoto ? 'Saving...' : 'Save to Photos'}
-              </Text>
-            </Pressable>
-          </View>
-        )}
       />
     </>
   );
@@ -422,13 +458,4 @@ const s = StyleSheet.create({
     marginVertical: 16,
   },
   loadMoreText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  viewerFooter: {
-    alignItems: 'center', paddingBottom: 50, paddingTop: 12,
-  },
-  viewerSaveBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 20, paddingVertical: 12,
-    borderRadius: 999,
-  },
-  viewerSaveText: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
 });

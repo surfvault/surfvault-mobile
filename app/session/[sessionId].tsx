@@ -49,8 +49,8 @@ import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
-import { toOriginalKey, getWatermarkUrl, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl';
-import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../src/helpers/saveToPhotos';
+import { toOriginalKey, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl';
+import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
 import { useUpload } from '../../src/context/UploadContext';
 import { generateUUID } from '../../src/helpers/uuid';
 import ScreenHeader from '../../src/components/ScreenHeader';
@@ -98,45 +98,17 @@ export default function SessionDetailScreen() {
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerWindowStart, setViewerWindowStart] = useState(0);
 
-  // Watermark URL helpers
+  // Watermark URL — always use direct S3 URL (backend pre-generates via SQS)
   const getPhotoKey = useCallback((m: any) => {
     return m.original_s3_key || toOriginalKey(m.thumbnail) || '';
-  }, []);
-
-  // Simple cache: S3 URL if available, Lambda URL as fallback
-  const wmCacheRef = useRef(new Map<string, string>());
-  const wmCheckedRef = useRef(new Set<string>());
-
-  // On tap: check S3 for cached watermark, if missing trigger Lambda to generate, then use S3 URL
-  const resolveWatermarkUrl = useCallback(async (key: string): Promise<string> => {
-    if (!key) return '';
-    if (wmCacheRef.current.has(key)) return wmCacheRef.current.get(key)!;
-
-    const directUrl = getDirectWatermarkUrl(key);
-
-    // 1. Check if watermark already exists in S3
-    try {
-      const res = await fetch(directUrl, { method: 'HEAD' });
-      if (res.ok) {
-        wmCacheRef.current.set(key, directUrl);
-        return directUrl;
-      }
-    } catch {}
-
-    // 2. Not in S3 — call Lambda to generate it (Lambda stores result in S3)
-    try {
-      await fetch(getWatermarkUrl(key), { redirect: 'follow' });
-    } catch {}
-
-    // 3. Now use the direct S3 URL — Lambda just created it
-    wmCacheRef.current.set(key, directUrl);
-    return directUrl;
   }, []);
 
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+  const [isStartingUpload, setIsStartingUpload] = useState(false);
 
   // Tag management state
   const [tagSheetVisible, setTagSheetVisible] = useState(false);
@@ -339,16 +311,50 @@ export default function SessionDetailScreen() {
   }, []);
 
   // Start action modes
-  const handleStartAction = useCallback((action: string) => {
+  const handleStartAction = useCallback(async (action: string) => {
     if (!requireAuth()) return;
+    if (action === 'download') {
+      const granted = await checkMediaLibraryPermission();
+      if (!granted) return;
+    }
     setSessionAction(action);
     setSelectedPhotoIds([]);
   }, [requireAuth]);
 
   // Confirm action
   const handleConfirmAction = useCallback(async () => {
-    if (!selectedPhotoIds.length || !session?.id) return;
+    if (!selectedPhotoIds.length || !session?.id || isProcessingAction) return;
 
+    // Delete goes through an Alert confirmation — only set loading once user confirms
+    if (sessionAction === 'delete') {
+      const count = selectedPhotoIds.length;
+      Alert.alert(
+        'Delete Photos',
+        `${count} photo${count !== 1 ? 's' : ''} will be permanently deleted from all storage. This cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              setIsProcessingAction(true);
+              try {
+                await deleteSurfMedia({ sessionId: session.id, photos: selectedPhotoIds as any }).unwrap();
+                Alert.alert('Deleted', `Deleted ${count} photo${count > 1 ? 's' : ''}.`);
+                cancelAction();
+              } catch {
+                Alert.alert('Error', 'Failed to delete photos.');
+              } finally {
+                setIsProcessingAction(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    setIsProcessingAction(true);
     try {
       switch (sessionAction) {
         case 'request':
@@ -372,38 +378,14 @@ export default function SessionDetailScreen() {
           }
           break;
         }
-        case 'delete': {
-          const count = selectedPhotoIds.length;
-          return new Promise<void>((resolve) => {
-            Alert.alert(
-              'Delete Photos',
-              `${count} photo${count !== 1 ? 's' : ''} will be permanently deleted from all storage. This cannot be undone.`,
-              [
-                { text: 'Cancel', style: 'cancel', onPress: resolve },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await deleteSurfMedia({ sessionId: session.id, photos: selectedPhotoIds as any }).unwrap();
-                      Alert.alert('Deleted', `Deleted ${count} photo${count > 1 ? 's' : ''}.`);
-                      cancelAction();
-                    } catch {
-                      Alert.alert('Error', 'Failed to delete photos.');
-                    }
-                    resolve();
-                  },
-                },
-              ],
-            );
-          });
-        }
       }
       cancelAction();
     } catch {
       Alert.alert('Error', 'Action failed. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
     }
-  }, [sessionAction, selectedPhotoIds, session, sessionHandle, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction]);
+  }, [sessionAction, selectedPhotoIds, session, sessionHandle, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction, isProcessingAction]);
 
   // Group photo assignment
   const handleGroupPhotoAction = useCallback(async (groupId: string) => {
@@ -453,7 +435,7 @@ export default function SessionDetailScreen() {
 
   // Upload photos to existing session
   const handleUploadPhotos = useCallback(async () => {
-    if (!session?.id || activeUpload?.isUploading) return;
+    if (!session?.id || activeUpload?.isUploading || isStartingUpload) return;
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -469,6 +451,7 @@ export default function SessionDetailScreen() {
 
     if (result.canceled || result.assets.length === 0) return;
 
+    setIsStartingUpload(true);
     try {
       const filesMapped = result.assets.map((asset) => ({
         uuid: generateUUID(),
@@ -512,8 +495,10 @@ export default function SessionDetailScreen() {
     } catch (error: any) {
       console.error('Upload error:', error);
       Alert.alert('Upload Failed', error?.data?.message ?? 'Please try again.');
+    } finally {
+      setIsStartingUpload(false);
     }
-  }, [session?.id, activeUpload?.isUploading, saveSurfMedia, startUpload]);
+  }, [session?.id, activeUpload?.isUploading, isStartingUpload, saveSurfMedia, startUpload]);
 
   // Ellipsis menu
   const handleEllipsisMenu = useCallback(() => setSheetVisible(true), []);
@@ -662,12 +647,9 @@ export default function SessionDetailScreen() {
             } else {
               const WINDOW = 20;
               const start = Math.max(0, index - WINDOW);
-              // Resolve tapped photo's watermark URL, then open
-              resolveWatermarkUrl(getPhotoKey(item)).then(() => {
-                setViewerWindowStart(start);
-                setViewerIndex(index - start);
-                setViewerVisible(true);
-              });
+              setViewerWindowStart(start);
+              setViewerIndex(index - start);
+              setViewerVisible(true);
             }
           }}
           onLongPress={() => handlePhotoLongPress(item)}
@@ -896,14 +878,19 @@ export default function SessionDetailScreen() {
             ) : (
               <Pressable
                 onPress={handleConfirmAction}
-                disabled={selectedPhotoIds.length === 0}
+                disabled={selectedPhotoIds.length === 0 || isProcessingAction}
                 style={[styles.confirmBtn, {
-                  backgroundColor: selectedPhotoIds.length > 0 ? ac.btn : (isDark ? '#374151' : '#d1d5db'),
+                  backgroundColor: selectedPhotoIds.length > 0 && !isProcessingAction ? ac.btn : (isDark ? '#374151' : '#d1d5db'),
+                  opacity: isProcessingAction ? 0.7 : 1,
                 }]}
               >
-                <Text style={[styles.confirmBtnText, {
-                  color: selectedPhotoIds.length > 0 ? '#ffffff' : '#9ca3af',
-                }]}>Confirm</Text>
+                {isProcessingAction ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={[styles.confirmBtnText, {
+                    color: selectedPhotoIds.length > 0 ? '#ffffff' : '#9ca3af',
+                  }]}>Confirm</Text>
+                )}
               </Pressable>
             )}
           </View>
@@ -1136,13 +1123,12 @@ export default function SessionDetailScreen() {
             .slice(viewerWindowStart, viewerWindowStart + 41)
             .map((m) => {
               const key = getPhotoKey(m);
-              return { uri: wmCacheRef.current.get(key) || getDirectWatermarkUrl(key) };
+              return { uri: getDirectWatermarkUrl(key) };
             })}
           keyExtractor={(src, idx) => `${viewerWindowStart + idx}-${src?.uri?.slice(-40) ?? idx}`}
           imageIndex={viewerIndex}
           visible
           onRequestClose={() => setViewerVisible(false)}
-          onImageIndexChange={() => {}}
           swipeToCloseEnabled
           doubleTapToZoomEnabled
         />

@@ -93,6 +93,7 @@ const mediaApi = rootApi.injectEndpoints({
         url: `/media/access/${requestId}/save`,
         method: 'PATCH',
       }),
+      invalidatesTags: [ApiTag.AccessRequest],
     }),
     downloadSurfMediaAccessRequestPhotos: builder.mutation({
       query: ({ requestId }: { requestId: string }) => ({

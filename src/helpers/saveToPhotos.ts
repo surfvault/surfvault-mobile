@@ -1,4 +1,4 @@
-import { Paths, File as ExpoFile, downloadAsync } from 'expo-file-system';
+import { Paths, File as ExpoFile } from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
 import Constants from 'expo-constants';
 import { getAuthToken } from '../store/apis/customBaseQuery';
@@ -12,6 +12,15 @@ const API_BASE_URL = Constants.expoConfig?.extra?.apiBaseUrl ?? '';
 async function ensurePermissions(): Promise<boolean> {
   const { status } = await MediaLibrary.requestPermissionsAsync();
   return status === 'granted';
+}
+
+/**
+ * Check (and prompt if needed) for media library permission.
+ * Call before entering photo selection mode so users don't
+ * select photos only to be denied at save time.
+ */
+export async function checkMediaLibraryPermission(): Promise<boolean> {
+  return ensurePermissions();
 }
 
 /**
@@ -55,19 +64,20 @@ export async function savePhotoToCameraRoll(photoId: string): Promise<{ success:
       return { success: false, error: 'No download URL returned' };
     }
 
-    // Download to temp file
-    const tempFile = new ExpoFile(Paths.cache, `surfvault_${photoId}_${Date.now()}.jpg`);
-    const download = await downloadAsync(presignedUrl, tempFile.uri);
+    // Download to temp file — File.downloadFileAsync is the static method in
+    // expo-file-system v19. Returns a new File pointing to the downloaded file.
+    const destination = new ExpoFile(Paths.cache, `surfvault_${photoId}_${Date.now()}.jpg`);
+    const downloaded = await ExpoFile.downloadFileAsync(presignedUrl, destination);
 
-    if (download.status !== 200) {
-      return { success: false, error: `Download failed (${download.status})` };
+    if (!downloaded?.uri) {
+      return { success: false, error: 'Download failed' };
     }
 
     // Save to camera roll
-    await MediaLibrary.saveToLibraryAsync(download.uri);
+    await MediaLibrary.saveToLibraryAsync(downloaded.uri);
 
     // Clean up temp file
-    try { tempFile.delete(); } catch {}
+    try { downloaded.delete(); } catch {}
 
     return { success: true };
   } catch (error: any) {

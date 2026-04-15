@@ -160,12 +160,14 @@ export default function ProfileScreen() {
     { read: false, filter: '', limit: 0, continuationToken: '' },
     { skip: !isAuthenticated }
   );
-  const unreadNotifCount = notifData?.results?.notifications?.length ?? 0;
+  const unreadNotifCount = isAuthenticated
+    ? (notifData?.results?.notifications?.length ?? 0)
+    : 0;
 
   // Favorites
   const { data: favoritesData } = useGetUserFavoritesQuery({} as any, { skip: !isAuthenticated });
   const [updateFavorite] = useUpdateUserFavoritesMutation();
-  const favorites = favoritesData?.results?.favorites ?? [];
+  const favorites = isAuthenticated ? (favoritesData?.results?.favorites ?? []) : [];
 
   // Sessions
   const [sessions, setSessions] = useState<any[]>([]);
@@ -184,19 +186,26 @@ export default function ProfileScreen() {
     setRefreshing(false);
   }, [refetchSessions]);
 
+  // Reset sessions list when the current user changes (logout/login/switch user)
   useEffect(() => {
+    seenIdsRef.current = new Set();
+    setSessions([]);
+  }, [user?.id]);
+
+  useEffect(() => {
+    // Only sync once the query has real data (or has confirmed empty) for this user.
+    // Skip while fetching to avoid flashing stale results from a prior user.
+    if (!sessionsData || isFetching) return;
     const list = sessionsData?.results?.sessions ?? [];
-    if (list.length > 0) {
-      seenIdsRef.current = new Set();
-      const unique = list.filter((s: any) => {
-        const key = s.session_id ?? s.id;
-        if (seenIdsRef.current.has(key)) return false;
-        seenIdsRef.current.add(key);
-        return true;
-      });
-      setSessions(unique);
-    }
-  }, [sessionsData]);
+    seenIdsRef.current = new Set();
+    const unique = list.filter((s: any) => {
+      const key = s.session_id ?? s.id;
+      if (seenIdsRef.current.has(key)) return false;
+      seenIdsRef.current.add(key);
+      return true;
+    });
+    setSessions(unique);
+  }, [sessionsData, isFetching]);
 
   const handleToggleActive = useCallback(async () => {
     if (!user) return;
@@ -254,6 +263,11 @@ export default function ProfileScreen() {
     },
   ];
 
+  const handleSessionLongPress = useCallback((item: any) => {
+    setSessionSheetItem(item);
+    setSessionSheetVisible(true);
+  }, []);
+
   // Not logged in
   if (!isAuthenticated) {
     return (
@@ -281,11 +295,6 @@ export default function ProfileScreen() {
       </SafeAreaView>
     );
   }
-
-  const handleSessionLongPress = useCallback((item: any) => {
-    setSessionSheetItem(item);
-    setSessionSheetVisible(true);
-  }, []);
 
   const sessionSheetSections: ActionSheetSection[] = sessionSheetItem ? [
     {
