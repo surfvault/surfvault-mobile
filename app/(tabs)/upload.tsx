@@ -45,6 +45,7 @@ interface SelectedFile {
 const formatDateParam = (date: Date): string => date.toISOString().split('T')[0];
 
 import { generateUUID } from '../../src/helpers/uuid';
+import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -149,13 +150,13 @@ export default function CreateSessionScreen() {
     if (!requireAuth()) return;
 
     // Storage check
-    const totalSizeGB = files.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
-    const currentStorage = user?.current_storage ?? 0;
-    const storageLimit = user?.storage_limit ?? 15;
-    if ((totalSizeGB + currentStorage) > storageLimit) {
-      Alert.alert('Storage Limit', 'You don\'t have enough storage for this upload. Please upgrade your plan.');
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    const storageCheck = checkStorageCapacity(user, totalBytes);
+    if (!storageCheck.hasSpace) {
+      showStorageLimitAlert(storageCheck);
       return;
     }
+    const totalSizeGB = storageCheck.totalSizeGB;
 
     setIsSubmitting(true);
 

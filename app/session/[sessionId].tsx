@@ -18,6 +18,7 @@ import {
   Animated,
   PanResponder,
   RefreshControl,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -43,6 +44,8 @@ import {
   useUpdateSessionGroupMutation,
   useDeleteSessionGroupMutation,
   useUpdateGroupPhotosMutation,
+  useUpdateSessionMutation,
+  useCreateSurfSessionViewReportMutation,
 } from '../../src/store';
 import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../src/components/UserAvatar';
@@ -53,10 +56,15 @@ import { toOriginalKey, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl
 import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
 import { useUpload } from '../../src/context/UploadContext';
 import { generateUUID } from '../../src/helpers/uuid';
+import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
+import { getViewerHash } from '../../src/helpers/viewerHash';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 
 const FETCH_AMOUNT = 30;
+
+// Module-level gate: one view-report per session id per app launch
+const viewedSessionIds = new Set<string>();
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const NUM_COLUMNS = 2;
 const GAP = 4;
@@ -122,9 +130,16 @@ export default function SessionDetailScreen() {
   const [editGroupName, setEditGroupName] = useState('');
   const [editGroupColor, setEditGroupColor] = useState('');
 
+  // Edit session state
+  const [editSheetVisible, setEditSheetVisible] = useState(false);
+  const [editSessionName, setEditSessionName] = useState('');
+  const [editHideLocation, setEditHideLocation] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+
   // Swipeable modal helpers
   const tagSlide = useRef(new Animated.Value(0)).current;
   const groupSlide = useRef(new Animated.Value(0)).current;
+  const editSlide = useRef(new Animated.Value(0)).current;
 
   const makeModalPanResponder = (slideAnim: Animated.Value, onClose: () => void) =>
     PanResponder.create({
@@ -145,6 +160,7 @@ export default function SessionDetailScreen() {
 
   const tagPanResponder = useRef(makeModalPanResponder(tagSlide, () => setTagSheetVisible(false))).current;
   const groupPanResponder = useRef(makeModalPanResponder(groupSlide, () => setGroupSheetVisible(false))).current;
+  const editPanResponder = useRef(makeModalPanResponder(editSlide, () => setEditSheetVisible(false))).current;
 
   // Mutations
   const [requestAccessToPhotos] = useRequestAccessToSurfMediaMutation();
@@ -153,11 +169,13 @@ export default function SessionDetailScreen() {
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
   const [saveSurfMedia] = useSaveSurfMediaMutation();
   const [updateSessionThumbnail] = useUpdateSessionThumbnailMutation();
+  const [reportSessionView] = useCreateSurfSessionViewReportMutation();
   const [updateTaggedUsers] = useUpdateSessionsTaggedUsersMutation();
   const [createGroup] = useCreateSessionGroupMutation();
   const [updateGroup] = useUpdateSessionGroupMutation();
   const [deleteGroup] = useDeleteSessionGroupMutation();
   const [updateGroupPhotos] = useUpdateGroupPhotosMutation();
+  const [updateSession] = useUpdateSessionMutation();
   const { startUpload, upload: activeUpload } = useUpload();
 
   // Thumbnail tracking
@@ -190,6 +208,27 @@ export default function SessionDetailScreen() {
       setThumbnailPhotoId(session.thumbnail_photo_id ?? null);
     }
   }, [session?.thumbnail_photo_id]);
+
+  // Record session view (debounced 3s, once per app session per session id, skip self-views)
+  useEffect(() => {
+    const sid = session?.id;
+    if (!sid) return;
+    if (isOwner) return;
+    if (viewedSessionIds.has(sid)) return;
+
+    const timer = setTimeout(async () => {
+      if (viewedSessionIds.has(sid)) return;
+      try {
+        const viewerHash = await getViewerHash(user?.id);
+        await reportSessionView({ sessionId: sid, viewerHash }).unwrap();
+        viewedSessionIds.add(sid);
+      } catch {
+        // Silent — view tracking is best-effort
+      }
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [session?.id, user?.id, isOwner, reportSessionView]);
 
   // Groups
   const { data: groupsData } = useGetSessionGroupsQuery(
@@ -451,6 +490,14 @@ export default function SessionDetailScreen() {
 
     if (result.canceled || result.assets.length === 0) return;
 
+    // Storage check
+    const totalBytes = result.assets.reduce((sum, a) => sum + (a.fileSize ?? 0), 0);
+    const storageCheck = checkStorageCapacity(user, totalBytes);
+    if (!storageCheck.hasSpace) {
+      showStorageLimitAlert(storageCheck);
+      return;
+    }
+
     setIsStartingUpload(true);
     try {
       const filesMapped = result.assets.map((asset) => ({
@@ -462,7 +509,7 @@ export default function SessionDetailScreen() {
         lastModified: Date.now(),
       }));
 
-      const totalSizeInGB = filesMapped.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
+      const totalSizeInGB = storageCheck.totalSizeGB;
 
       const uploadResult = await saveSurfMedia({
         sessionId: session.id,
@@ -498,10 +545,42 @@ export default function SessionDetailScreen() {
     } finally {
       setIsStartingUpload(false);
     }
-  }, [session?.id, activeUpload?.isUploading, isStartingUpload, saveSurfMedia, startUpload]);
+  }, [session?.id, session?.session_name, activeUpload?.isUploading, isStartingUpload, saveSurfMedia, startUpload, user]);
 
   // Ellipsis menu
   const handleEllipsisMenu = useCallback(() => setSheetVisible(true), []);
+
+  // Edit session
+  const hideLocationLocked = Boolean(session?.source_access_request_id) && session?.hide_location === true;
+
+  const openEditSession = useCallback(() => {
+    setEditSessionName(session?.session_name ?? '');
+    setEditHideLocation(Boolean(session?.hide_location));
+    setEditSheetVisible(true);
+  }, [session?.session_name, session?.hide_location]);
+
+  const handleSaveEdit = useCallback(async () => {
+    if (!session?.id) return;
+    const trimmed = editSessionName.trim();
+    if (!trimmed) {
+      Alert.alert('Name required', 'Please enter a session name.');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await updateSession({
+        sessionId: session.id,
+        sessionName: trimmed,
+        hideLocation: hideLocationLocked ? true : editHideLocation,
+      }).unwrap();
+      setEditSheetVisible(false);
+      try { await refetch(); } catch {}
+    } catch (err: any) {
+      Alert.alert('Error', err?.data?.message ?? 'Failed to update session.');
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [session?.id, editSessionName, editHideLocation, hideLocationLocked, updateSession]);
 
   const ellipsisSections: ActionSheetSection[] = [
     {
@@ -511,6 +590,11 @@ export default function SessionDetailScreen() {
           icon: 'share-outline',
           onPress: handleShare,
         },
+        ...(isOwner ? [{ label: 'Edit Session', icon: 'create-outline' as const, onPress: openEditSession }] : []),
+      ],
+    },
+    {
+      options: [
         {
           label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
           icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',
@@ -543,10 +627,6 @@ export default function SessionDetailScreen() {
       options: [
         { label: 'Upload Photos', icon: 'cloud-upload-outline' as const, onPress: handleUploadPhotos },
         { label: 'Save Photos', icon: 'download-outline' as const, onPress: () => handleStartAction('download') },
-      ],
-    }] : []),
-    ...(isOwner ? [{
-      options: [
         { label: 'Delete Photos', icon: 'trash-outline' as const, destructive: true, onPress: () => handleStartAction('delete') },
       ],
     }] : []),
@@ -1112,6 +1192,85 @@ export default function SessionDetailScreen() {
                 <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 13 }}>Create</Text>
               </Pressable>
             </View>
+          </Animated.View>
+        </Pressable>
+      </Modal>
+
+      {/* Edit Session Modal */}
+      <Modal visible={editSheetVisible} transparent animationType="slide" onRequestClose={() => setEditSheetVisible(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setEditSheetVisible(false)}>
+          <Animated.View style={[styles.modalCard, { backgroundColor: isDark ? '#111827' : '#ffffff', transform: [{ translateY: editSlide }] }, kbVisible && { paddingBottom: kbHeight }]}>
+            <View {...editPanResponder.panHandlers}>
+              <Pressable onPress={(e) => e.stopPropagation()}>
+                <View style={[styles.modalHandle, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
+              </Pressable>
+            </View>
+            <Pressable onPress={(e) => e.stopPropagation()}>
+              <Text style={[styles.modalTitle, { color: isDark ? '#ffffff' : '#111827' }]}>Edit Session</Text>
+              <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#9ca3af' : '#6b7280', marginBottom: 6 }}>SESSION NAME</Text>
+                <TextInput
+                  value={editSessionName}
+                  onChangeText={setEditSessionName}
+                  placeholder="Session name"
+                  placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+                  style={{
+                    color: isDark ? '#ffffff' : '#111827',
+                    borderColor: isDark ? '#374151' : '#d1d5db',
+                    backgroundColor: isDark ? '#1f2937' : '#f9fafb',
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    fontSize: 15,
+                    marginBottom: 20,
+                  }}
+                />
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <View style={{ flex: 1, paddingRight: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={{ fontSize: 15, fontWeight: '500', color: isDark ? '#ffffff' : '#111827' }}>Hide Location</Text>
+                      {hideLocationLocked && (
+                        <Ionicons name="lock-closed" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
+                      )}
+                    </View>
+                    <Text style={{ fontSize: 12, color: isDark ? '#9ca3af' : '#6b7280', marginTop: 2 }}>
+                      {hideLocationLocked
+                        ? "This session was saved from a photographer's hidden session, so the location stays hidden."
+                        : 'Hide the surf break on this session. Share via direct link only.'}
+                    </Text>
+                  </View>
+                  <View style={{ opacity: hideLocationLocked ? 0.6 : 1 }}>
+                    <Switch
+                      value={hideLocationLocked ? true : editHideLocation}
+                      onValueChange={setEditHideLocation}
+                      disabled={hideLocationLocked}
+                    />
+                  </View>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+                  <Pressable
+                    onPress={() => setEditSheetVisible(false)}
+                    style={{ flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: isDark ? '#374151' : '#d1d5db', alignItems: 'center' }}
+                  >
+                    <Text style={{ color: isDark ? '#e5e7eb' : '#374151', fontWeight: '600', fontSize: 14 }}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={handleSaveEdit}
+                    disabled={savingEdit}
+                    style={{ flex: 1, paddingVertical: 12, borderRadius: 8, backgroundColor: '#3b82f6', alignItems: 'center', opacity: savingEdit ? 0.6 : 1 }}
+                  >
+                    {savingEdit ? (
+                      <ActivityIndicator color="#ffffff" />
+                    ) : (
+                      <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 14 }}>Save</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            </Pressable>
           </Animated.View>
         </Pressable>
       </Modal>
