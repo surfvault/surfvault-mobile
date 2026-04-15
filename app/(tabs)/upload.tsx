@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Platform,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
+import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useTabBar } from '../../src/context/TabBarContext';
 import {
@@ -41,6 +43,8 @@ interface SelectedFile {
 }
 
 const formatDateParam = (date: Date): string => date.toISOString().split('T')[0];
+
+import { generateUUID } from '../../src/helpers/uuid';
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -48,6 +52,7 @@ export default function CreateSessionScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
   const { user } = useUser();
   const { isAuthenticated, login } = useAuth();
   const requireAuth = useRequireAuth();
@@ -109,7 +114,7 @@ export default function CreateSessionScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
-      quality: 1,
+      quality: 0.95,
     });
 
     if (!result.canceled && result.assets.length > 0) {
@@ -155,49 +160,42 @@ export default function CreateSessionScreen() {
     setIsSubmitting(true);
 
     try {
-      // Create session
+      // Create session — returns presigned URLs + upload file IDs in one call
+      const filesMapped = files.map((f) => ({
+        uuid: generateUUID(),
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        lastModified: Date.now(),
+        source: 'device',
+      }));
+
       const sessionResult = await createSession({
         surfBreakId: selectedBreak.id,
         sessionName: sessionName.trim(),
         sessionDate: formatDateParam(sessionDate),
         hideLocation,
-        files: files.map((f) => ({ name: f.name, size: f.size, type: f.type })),
+        files: filesMapped,
         totalSizeInGB: totalSizeGB,
       }).unwrap();
 
-      const sessionId = sessionResult?.results?.sessionId ?? sessionResult?.results?.session?.id;
+      const presignedUrlMap = sessionResult?.results?.presignedUrlMap;
+      const uploadFileIdMap = sessionResult?.results?.uploadFileIdMap;
+      const uploadSession = sessionResult?.results?.uploadSession; // "country#region#break#uploadId"
+      const uploadId = uploadSession?.split('#').pop();
 
-      if (!sessionId) {
+      if (!presignedUrlMap || !uploadId) {
         throw new Error('Failed to create session');
       }
 
-      // Get presigned URLs for upload
-      const uploadResult = await saveSurfMedia({
-        sessionId,
-        mediaFiles: files.map((f) => ({
-          name: f.name,
-          size: f.size,
-          type: f.type,
-          source: 'device',
-        })),
-        totalSizeInGB: totalSizeGB,
-      }).unwrap();
-
-      const presignedUrlMap = uploadResult?.results?.presignedUrlMap;
-      const uploadId = uploadResult?.results?.uploadId;
-      const uploadFileIds = uploadResult?.results?.uploadFileIds ?? [];
-
-      if (!presignedUrlMap || !uploadId) {
-        throw new Error('Failed to get upload URLs');
-      }
-
       // Build file list for upload manager
-      const uploadFiles = files.map((f, i) => ({
+      // presignedUrlMap is keyed by file UUID, uploadFileIdMap maps UUID -> DB row ID
+      const uploadFiles = filesMapped.map((f) => ({
         name: f.name,
-        uri: f.uri,
+        uri: files.find((orig) => orig.name === f.name)!.uri,
         type: f.type,
-        uploadFileId: uploadFileIds[i],
-        presignedUrl: presignedUrlMap[f.name],
+        uploadFileId: uploadFileIdMap?.[f.uuid] ?? '',
+        presignedUrl: presignedUrlMap[f.uuid] ?? '',
       })).filter((f) => f.presignedUrl && f.uploadFileId);
 
       // Start background upload via context
@@ -396,7 +394,7 @@ export default function CreateSessionScreen() {
       {showBreakSearch && (
         <View style={[styles.sheetOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => { setShowBreakSearch(false); setTabBarVisible(true); setBreakSearch(''); setDebouncedSearch(''); }} />
-          <View style={[styles.breakSheet, { backgroundColor: isDark ? '#111827' : '#fff' }]}>
+          <View style={[styles.breakSheet, { backgroundColor: isDark ? '#111827' : '#fff' }, kbVisible && { paddingBottom: kbHeight }]}>
             {/* Handle bar */}
             <View style={styles.sheetHandle}>
               <View style={[styles.sheetHandleBar, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />

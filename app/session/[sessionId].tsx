@@ -17,6 +17,7 @@ import {
   KeyboardAvoidingView,
   Animated,
   PanResponder,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -48,10 +49,12 @@ import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
-import { toOriginalKey, getWatermarkUrl, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl';
-import { savePhotoToCameraRoll, savePhotosToCameraRoll } from '../../src/helpers/saveToPhotos';
+import { toOriginalKey, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl';
+import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
 import { useUpload } from '../../src/context/UploadContext';
+import { generateUUID } from '../../src/helpers/uuid';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 
 const FETCH_AMOUNT = 30;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -79,6 +82,7 @@ export default function SessionDetailScreen() {
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
   const requireAuth = useRequireAuth();
 
   const [sessionMedia, setSessionMedia] = useState<any[]>([]);
@@ -94,111 +98,17 @@ export default function SessionDetailScreen() {
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerWindowStart, setViewerWindowStart] = useState(0);
 
-  // Watermark URL resolution — mirrors web: S3 probe → Lambda generate → poll S3
-  const wmCacheRef = useRef(new Map<string, string>());
-  const wmInflightRef = useRef(new Map<string, Promise<string>>());
-  const wmActiveRef = useRef(0);
-  const wmQueueRef = useRef<string[]>([]);
-  const WM_CONCURRENCY = 4;
-  const [, wmForceRender] = useState(0);
-
-  // Derive key from thumbnail URL (like web) — thumbnails/previews/watermarks always use .jpg
-  // Do NOT use original_s3_key here — it may have .jpeg which doesn't match preview/watermark keys
+  // Watermark URL — always use direct S3 URL (backend pre-generates via SQS)
   const getPhotoKey = useCallback((m: any) => {
-    return toOriginalKey(m.thumbnail) || m.original_s3_key?.replace(/\.[^.]+$/, '.jpg') || '';
+    return m.original_s3_key || toOriginalKey(m.thumbnail) || '';
   }, []);
-
-  const probeImage = (url: string, timeoutMs = 4000): Promise<boolean> =>
-    new Promise((resolve) => {
-      const controller = new AbortController();
-      const timer = setTimeout(() => { controller.abort(); resolve(false); }, timeoutMs);
-      fetch(url, { method: 'HEAD', signal: controller.signal })
-        .then((res) => { clearTimeout(timer); resolve(res.ok); })
-        .catch(() => { clearTimeout(timer); resolve(false); });
-    });
-
-  const processWmQueue = useCallback(() => {
-    while (wmActiveRef.current < WM_CONCURRENCY && wmQueueRef.current.length > 0) {
-      const key = wmQueueRef.current.shift()!;
-      if (wmCacheRef.current.has(key) || wmInflightRef.current.has(key)) continue;
-      wmActiveRef.current++;
-
-      const directUrl = getDirectWatermarkUrl(key);
-
-      const p = (async () => {
-        // 1) Probe S3 — watermark likely pre-generated on upload
-        if (await probeImage(`${directUrl}?v=${Date.now()}`)) {
-          return directUrl;
-        }
-
-        // 2) Trigger Lambda to generate watermark
-        try {
-          await fetch(getWatermarkUrl(key), { redirect: 'follow' });
-        } catch {}
-
-        // 3) Poll S3 until watermark appears (650ms intervals, 15s timeout)
-        const start = Date.now();
-        while (Date.now() - start < 15000) {
-          await new Promise((r) => setTimeout(r, 650));
-          if (await probeImage(`${directUrl}?v=${Date.now()}`)) {
-            return directUrl;
-          }
-        }
-
-        // 4) Final fallback
-        return directUrl;
-      })();
-
-      const finish = (url: string) => {
-        wmCacheRef.current.set(key, url);
-        wmInflightRef.current.delete(key);
-        wmActiveRef.current--;
-        wmForceRender((x) => x + 1);
-        processWmQueue();
-      };
-
-      wmInflightRef.current.set(key, p);
-      p.then(finish);
-    }
-  }, []);
-
-  // Returns a promise that resolves to the watermark URL (cached or newly resolved)
-  const ensurePreview = useCallback((key: string): Promise<string> => {
-    if (!key) return Promise.resolve('');
-    const cached = wmCacheRef.current.get(key);
-    if (cached) return Promise.resolve(cached);
-    const inflight = wmInflightRef.current.get(key);
-    if (inflight) return inflight;
-    wmQueueRef.current.push(key);
-    processWmQueue();
-    // Return the promise that was just created by processWmQueue
-    return wmInflightRef.current.get(key) ?? Promise.resolve('');
-  }, [processWmQueue]);
-
-  // Prefetch watermarks around a given index (called on lightbox open + swipe)
-  const prefetchAroundIndex = useCallback((centerIdx: number, radius = 5) => {
-    const priorityKeys: string[] = [];
-    for (let i = Math.max(0, centerIdx - radius); i <= Math.min(sessionMedia.length - 1, centerIdx + radius); i++) {
-      const key = getPhotoKey(sessionMedia[i]);
-      if (key && !wmCacheRef.current.has(key) && !wmInflightRef.current.has(key)) {
-        priorityKeys.push(key);
-      }
-    }
-    if (priorityKeys.length > 0) {
-      wmQueueRef.current = [...priorityKeys, ...wmQueueRef.current.filter((k) => !priorityKeys.includes(k))];
-      processWmQueue();
-    }
-  }, [sessionMedia, getPhotoKey, processWmQueue]);
-
-  // Pre-resolve watermark URLs as media loads
-  useEffect(() => {
-    sessionMedia.forEach((m) => ensurePreview(getPhotoKey(m)));
-  }, [sessionMedia, ensurePreview, getPhotoKey]);
 
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+  const [isStartingUpload, setIsStartingUpload] = useState(false);
 
   // Tag management state
   const [tagSheetVisible, setTagSheetVisible] = useState(false);
@@ -254,11 +164,18 @@ export default function SessionDetailScreen() {
   const [thumbnailPhotoId, setThumbnailPhotoId] = useState<string | null>(null);
 
   // Session data
-  const { data: sessionData, isLoading } = useGetSessionQuery({
+  const { data: sessionData, isLoading, refetch } = useGetSessionQuery({
     sessionId: sessionId ?? '',
     userId: user?.id,
     limit: FETCH_AMOUNT,
   });
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    seenMediaRef.current = new Set();
+    try { await refetch(); } catch {}
+    setRefreshing(false);
+  }, [refetch]);
 
   const session = sessionData?.results?.session;
   const initialMedia = sessionData?.results?.media ?? [];
@@ -394,16 +311,50 @@ export default function SessionDetailScreen() {
   }, []);
 
   // Start action modes
-  const handleStartAction = useCallback((action: string) => {
+  const handleStartAction = useCallback(async (action: string) => {
     if (!requireAuth()) return;
+    if (action === 'download') {
+      const granted = await checkMediaLibraryPermission();
+      if (!granted) return;
+    }
     setSessionAction(action);
     setSelectedPhotoIds([]);
   }, [requireAuth]);
 
   // Confirm action
   const handleConfirmAction = useCallback(async () => {
-    if (!selectedPhotoIds.length || !session?.id) return;
+    if (!selectedPhotoIds.length || !session?.id || isProcessingAction) return;
 
+    // Delete goes through an Alert confirmation — only set loading once user confirms
+    if (sessionAction === 'delete') {
+      const count = selectedPhotoIds.length;
+      Alert.alert(
+        'Delete Photos',
+        `${count} photo${count !== 1 ? 's' : ''} will be permanently deleted from all storage. This cannot be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              setIsProcessingAction(true);
+              try {
+                await deleteSurfMedia({ sessionId: session.id, photos: selectedPhotoIds as any }).unwrap();
+                Alert.alert('Deleted', `Deleted ${count} photo${count > 1 ? 's' : ''}.`);
+                cancelAction();
+              } catch {
+                Alert.alert('Error', 'Failed to delete photos.');
+              } finally {
+                setIsProcessingAction(false);
+              }
+            },
+          },
+        ],
+      );
+      return;
+    }
+
+    setIsProcessingAction(true);
     try {
       switch (sessionAction) {
         case 'request':
@@ -427,16 +378,14 @@ export default function SessionDetailScreen() {
           }
           break;
         }
-        case 'delete':
-          await deleteSurfMedia({ sessionId: session.id, photos: selectedPhotoIds as any }).unwrap();
-          Alert.alert('Deleted', `Deleted ${selectedPhotoIds.length} photo${selectedPhotoIds.length > 1 ? 's' : ''}.`);
-          break;
       }
       cancelAction();
     } catch {
       Alert.alert('Error', 'Action failed. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
     }
-  }, [sessionAction, selectedPhotoIds, session, sessionHandle, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction]);
+  }, [sessionAction, selectedPhotoIds, session, sessionHandle, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction, isProcessingAction]);
 
   // Group photo assignment
   const handleGroupPhotoAction = useCallback(async (groupId: string) => {
@@ -486,7 +435,7 @@ export default function SessionDetailScreen() {
 
   // Upload photos to existing session
   const handleUploadPhotos = useCallback(async () => {
-    if (!session?.id || activeUpload?.isUploading) return;
+    if (!session?.id || activeUpload?.isUploading || isStartingUpload) return;
 
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
@@ -497,42 +446,45 @@ export default function SessionDetailScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
-      quality: 1,
+      quality: 0.95,
     });
 
     if (result.canceled || result.assets.length === 0) return;
 
+    setIsStartingUpload(true);
     try {
-      const pickedFiles = result.assets.map((asset) => ({
+      const filesMapped = result.assets.map((asset) => ({
+        uuid: generateUUID(),
         uri: asset.uri,
         name: asset.fileName ?? `photo_${Date.now()}.jpg`,
         size: asset.fileSize ?? 0,
         type: asset.mimeType ?? 'image/jpeg',
+        lastModified: Date.now(),
       }));
 
-      const totalSizeInGB = pickedFiles.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
+      const totalSizeInGB = filesMapped.reduce((sum, f) => sum + f.size, 0) / (1024 * 1024 * 1024);
 
       const uploadResult = await saveSurfMedia({
         sessionId: session.id,
-        mediaFiles: pickedFiles.map((f) => ({ name: f.name, size: f.size, type: f.type, source: 'device' })),
+        mediaFiles: filesMapped.map((f) => ({ uuid: f.uuid, name: f.name, size: f.size, type: f.type, lastModified: f.lastModified, source: 'device' })),
         totalSizeInGB,
       }).unwrap();
 
       const presignedUrlMap = uploadResult?.results?.presignedUrlMap;
-      const uploadId = uploadResult?.results?.uploadId;
-      const uploadFileIds = uploadResult?.results?.uploadFileIds ?? [];
+      const uploadFileIdMap = uploadResult?.results?.uploadFileIdMap;
+      const uploadSession = uploadResult?.results?.uploadSession;
+      const uploadId = uploadResult?.results?.uploadId ?? uploadSession?.split('#').pop();
 
       if (!presignedUrlMap || !uploadId) {
         throw new Error('Failed to get upload URLs');
       }
 
-      // Build file list with presigned URLs and upload file IDs
-      const uploadFiles = pickedFiles.map((f, i) => ({
+      const uploadFiles = filesMapped.map((f) => ({
         name: f.name,
         uri: f.uri,
         type: f.type,
-        uploadFileId: uploadFileIds[i],
-        presignedUrl: presignedUrlMap[f.name],
+        uploadFileId: uploadFileIdMap?.[f.uuid] ?? '',
+        presignedUrl: presignedUrlMap[f.uuid] ?? '',
       })).filter((f) => f.presignedUrl && f.uploadFileId);
 
       startUpload({
@@ -543,8 +495,10 @@ export default function SessionDetailScreen() {
     } catch (error: any) {
       console.error('Upload error:', error);
       Alert.alert('Upload Failed', error?.data?.message ?? 'Please try again.');
+    } finally {
+      setIsStartingUpload(false);
     }
-  }, [session?.id, activeUpload?.isUploading, saveSurfMedia, startUpload]);
+  }, [session?.id, activeUpload?.isUploading, isStartingUpload, saveSurfMedia, startUpload]);
 
   // Ellipsis menu
   const handleEllipsisMenu = useCallback(() => setSheetVisible(true), []);
@@ -553,14 +507,14 @@ export default function SessionDetailScreen() {
     {
       options: [
         {
-          label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
-          icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',
-          onPress: handleFavorite,
-        },
-        {
           label: 'Share Session',
           icon: 'share-outline',
           onPress: handleShare,
+        },
+        {
+          label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
+          icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',
+          onPress: handleFavorite,
         },
         ...(session?.surf_break_identifier ? [{
           label: 'View Break' as const,
@@ -574,12 +528,6 @@ export default function SessionDetailScreen() {
         }] : []),
       ],
     },
-    ...(isOwner ? [{
-      options: [
-        { label: 'Upload Photos', icon: 'cloud-upload-outline' as const, onPress: handleUploadPhotos },
-        { label: 'Save Photos', icon: 'download-outline' as const, onPress: () => handleStartAction('download') },
-      ],
-    }] : []),
     ...(isOwner && groups.length > 0 ? [{
       options: [
         { label: 'Manage Groups', icon: 'color-palette-outline' as const, onPress: () => setGroupSheetVisible(true) },
@@ -589,6 +537,12 @@ export default function SessionDetailScreen() {
     }] : isOwner ? [{
       options: [
         { label: 'Create Group', icon: 'color-palette-outline' as const, onPress: () => setGroupSheetVisible(true) },
+      ],
+    }] : []),
+    ...(isOwner ? [{
+      options: [
+        { label: 'Upload Photos', icon: 'cloud-upload-outline' as const, onPress: handleUploadPhotos },
+        { label: 'Save Photos', icon: 'download-outline' as const, onPress: () => handleStartAction('download') },
       ],
     }] : []),
     ...(isOwner ? [{
@@ -693,9 +647,6 @@ export default function SessionDetailScreen() {
             } else {
               const WINDOW = 20;
               const start = Math.max(0, index - WINDOW);
-              const key = getPhotoKey(item);
-              prefetchAroundIndex(index, 5);
-              await ensurePreview(key);
               setViewerWindowStart(start);
               setViewerIndex(index - start);
               setViewerVisible(true);
@@ -705,10 +656,13 @@ export default function SessionDetailScreen() {
           style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
         >
           <View style={{ position: 'relative' }}>
+            <View style={[styles.photoPlaceholder, { width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+              <Ionicons name="image-outline" size={28} color={isDark ? '#374151' : '#d1d5db'} />
+            </View>
             <Image
               source={{ uri: item.thumbnail ?? item.url }}
               style={[
-                { width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6 },
+                { width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6, position: 'absolute', top: 0, left: 0 },
                 inActionMode && isSelected && { borderWidth: 3, borderColor: ac.btn },
               ]}
               contentFit="cover"
@@ -736,7 +690,7 @@ export default function SessionDetailScreen() {
         </Pressable>
       );
     },
-    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress, prefetchAroundIndex, ensurePreview, getPhotoKey]
+    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress, getPhotoKey, isDark]
   );
 
   // Header subtitle
@@ -771,6 +725,7 @@ export default function SessionDetailScreen() {
             renderItem={renderPhoto}
             numColumns={NUM_COLUMNS}
             contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? 80 : 0 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListHeaderComponent={
               <View style={styles.headerWrap}>
                 {/* Photographer + date */}
@@ -923,14 +878,19 @@ export default function SessionDetailScreen() {
             ) : (
               <Pressable
                 onPress={handleConfirmAction}
-                disabled={selectedPhotoIds.length === 0}
+                disabled={selectedPhotoIds.length === 0 || isProcessingAction}
                 style={[styles.confirmBtn, {
-                  backgroundColor: selectedPhotoIds.length > 0 ? ac.btn : (isDark ? '#374151' : '#d1d5db'),
+                  backgroundColor: selectedPhotoIds.length > 0 && !isProcessingAction ? ac.btn : (isDark ? '#374151' : '#d1d5db'),
+                  opacity: isProcessingAction ? 0.7 : 1,
                 }]}
               >
-                <Text style={[styles.confirmBtnText, {
-                  color: selectedPhotoIds.length > 0 ? '#ffffff' : '#9ca3af',
-                }]}>Confirm</Text>
+                {isProcessingAction ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Text style={[styles.confirmBtnText, {
+                    color: selectedPhotoIds.length > 0 ? '#ffffff' : '#9ca3af',
+                  }]}>Confirm</Text>
+                )}
               </Pressable>
             )}
           </View>
@@ -949,58 +909,39 @@ export default function SessionDetailScreen() {
         sections={photoSheetSections}
         onClose={() => { setPhotoSheetVisible(false); setPhotoSheetItem(null); }}
         header={photoSheetItem ? {
-          title: 'Photo Options',
+          title: photoSheetItem.file_name ?? 'Photo Options',
           imageUri: photoSheetItem.thumbnail ?? photoSheetItem.url,
         } : undefined}
       />
 
       {/* Tag Management Modal */}
       <Modal visible={tagSheetVisible} transparent animationType="slide" onRequestClose={() => setTagSheetVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <Pressable style={styles.modalOverlay} onPress={() => setTagSheetVisible(false)}>
-            <Animated.View style={[styles.modalCard, { backgroundColor: isDark ? '#111827' : '#ffffff', transform: [{ translateY: tagSlide }] }]}>
-              <View {...tagPanResponder.panHandlers}>
-                <Pressable onPress={(e) => e.stopPropagation()}>
-                  <View style={[styles.modalHandle, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
-                </Pressable>
-              </View>
-              <Text style={[styles.modalTitle, { color: isDark ? '#ffffff' : '#111827' }]}>Tag Users</Text>
-              <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
-                <SearchBar onSearch={setTagSearch} placeholder="Search users to tag..." />
-              </View>
-              <ScrollView style={{ maxHeight: 350 }} keyboardShouldPersistTaps="handled">
-                {/* Already tagged users */}
-                {taggedUsers.length > 0 && (
-                  <>
-                    <Text style={{ paddingHorizontal: 16, fontSize: 11, fontWeight: '600', color: isDark ? '#6b7280' : '#9ca3af', marginBottom: 4 }}>TAGGED</Text>
-                    {taggedUsers.map((tu: any) => (
-                      <View key={tu.id ?? tu.handle} style={styles.tagResultRow}>
-                        <UserAvatar uri={tu.picture} name={tu.name ?? tu.handle} size={36} />
-                        <View style={styles.tagResultInfo}>
-                          <Text style={[styles.tagResultName, { color: isDark ? '#ffffff' : '#111827' }]}>{tu.name ?? tu.handle}</Text>
-                          <Text style={[styles.tagResultHandle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>@{tu.handle}</Text>
-                        </View>
-                        <Pressable
-                          onPress={async () => {
-                            try {
-                              await updateTaggedUsers({ sessionId: session!.id, userId: tu.id, action: 'remove' }).unwrap();
-                            } catch {
-                              Alert.alert('Error', 'Failed to remove tag.');
-                            }
-                          }}
-                          style={[styles.tagActionBtn, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }]}
-                        >
-                          <Text style={[styles.tagActionText, { color: '#ef4444' }]}>Remove</Text>
-                        </Pressable>
-                      </View>
-                    ))}
-                    {tagSearch.length > 0 && <View style={{ height: 1, backgroundColor: isDark ? '#1f2937' : '#f3f4f6', marginVertical: 8, marginHorizontal: 16 }} />}
-                  </>
-                )}
-                {/* Search results */}
-                {tagSearch.length > 0 && (tagSearchData?.results?.users ?? [])
-                  .filter((u: any) => !taggedUsers.some((tu: any) => tu.id === u.id))
-                  .map((u: any) => (
+        <Pressable style={styles.modalOverlay} onPress={() => setTagSheetVisible(false)}>
+          <Animated.View style={[styles.modalCard, { backgroundColor: isDark ? '#111827' : '#ffffff', transform: [{ translateY: tagSlide }] }, kbVisible && { paddingBottom: kbHeight }]}>
+            <View {...tagPanResponder.panHandlers}>
+              <Pressable onPress={(e) => e.stopPropagation()}>
+                <View style={[styles.modalHandle, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
+              </Pressable>
+            </View>
+            <Text style={[styles.modalTitle, { color: isDark ? '#ffffff' : '#111827' }]}>Tag Users</Text>
+            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
+              <SearchBar onSearch={setTagSearch} placeholder="Search users to tag..." />
+            </View>
+            <ScrollView style={{ maxHeight: kbVisible ? 200 : 350 }} keyboardShouldPersistTaps="handled">
+              {(() => {
+                const searchResults = (tagSearchData?.results?.availableUsers ?? []).filter((u: any) => !taggedUsers.some((tu: any) => tu.id === u.id));
+                const isSearching = tagSearch.length > 0;
+
+                // Show search results when searching
+                if (isSearching) {
+                  if (searchResults.length === 0) {
+                    return (
+                      <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', textAlign: 'center', paddingVertical: 24, fontSize: 14 }}>
+                        No users found matching "{tagSearch}"
+                      </Text>
+                    );
+                  }
+                  return searchResults.map((u: any) => (
                     <View key={u.id ?? u.handle} style={styles.tagResultRow}>
                       <UserAvatar uri={u.picture} name={u.name ?? u.handle} size={36} />
                       <View style={styles.tagResultInfo}>
@@ -1020,125 +961,159 @@ export default function SessionDetailScreen() {
                         <Text style={[styles.tagActionText, { color: '#3b82f6' }]}>Tag</Text>
                       </Pressable>
                     </View>
-                  ))}
-              </ScrollView>
-            </Animated.View>
-          </Pressable>
-        </KeyboardAvoidingView>
+                  ));
+                }
+
+                // Show tagged users when not searching
+                if (taggedUsers.length > 0) {
+                  return taggedUsers.map((tu: any) => (
+                    <View key={tu.id ?? tu.handle} style={styles.tagResultRow}>
+                      <UserAvatar uri={tu.picture} name={tu.name ?? tu.handle} size={36} />
+                      <View style={styles.tagResultInfo}>
+                        <Text style={[styles.tagResultName, { color: isDark ? '#ffffff' : '#111827' }]}>{tu.name ?? tu.handle}</Text>
+                        <Text style={[styles.tagResultHandle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>@{tu.handle}</Text>
+                      </View>
+                      <Pressable
+                        onPress={async () => {
+                          try {
+                            await updateTaggedUsers({ sessionId: session!.id, userId: tu.id, action: 'remove' }).unwrap();
+                          } catch {
+                            Alert.alert('Error', 'Failed to remove tag.');
+                          }
+                        }}
+                        style={[styles.tagActionBtn, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }]}
+                      >
+                        <Text style={[styles.tagActionText, { color: '#ef4444' }]}>Remove</Text>
+                      </Pressable>
+                    </View>
+                  ));
+                }
+
+                // No tagged users and not searching
+                return (
+                  <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', textAlign: 'center', paddingVertical: 24, fontSize: 14 }}>
+                    No tagged users yet. Search to tag surfers.
+                  </Text>
+                );
+              })()}
+            </ScrollView>
+          </Animated.View>
+        </Pressable>
       </Modal>
 
       {/* Group Management Modal */}
       <Modal visible={groupSheetVisible} transparent animationType="slide" onRequestClose={() => setGroupSheetVisible(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <Pressable style={styles.modalOverlay} onPress={() => setGroupSheetVisible(false)}>
-            <Animated.View style={[styles.modalCard, { backgroundColor: isDark ? '#111827' : '#ffffff', transform: [{ translateY: groupSlide }] }]}>
-              <View {...groupPanResponder.panHandlers}>
-                <Pressable onPress={(e) => e.stopPropagation()}>
-                  <View style={[styles.modalHandle, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
-                </Pressable>
-              </View>
-              <Text style={[styles.modalTitle, { color: isDark ? '#ffffff' : '#111827' }]}>Manage Groups</Text>
-              <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled">
-                {groups.map((g: any) => (
-                  <View key={g.id} style={styles.groupManageRow}>
-                    {editingGroupId === g.id ? (
-                      <>
+        <Pressable style={styles.modalOverlay} onPress={() => setGroupSheetVisible(false)}>
+          <Animated.View style={[styles.modalCard, { backgroundColor: isDark ? '#111827' : '#ffffff', transform: [{ translateY: groupSlide }] }, kbVisible && { paddingBottom: kbHeight }]}>
+            <View {...groupPanResponder.panHandlers}>
+              <Pressable onPress={(e) => e.stopPropagation()}>
+                <View style={[styles.modalHandle, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
+              </Pressable>
+            </View>
+            <Text style={[styles.modalTitle, { color: isDark ? '#ffffff' : '#111827', marginBottom: 4 }]}>Manage Groups</Text>
+            <ScrollView style={{ maxHeight: kbVisible ? 150 : 300 }} keyboardShouldPersistTaps="handled">
+              {groups.length > 0 ? groups.map((g: any) => (
+                <View key={g.id} style={styles.groupManageRow}>
+                  {editingGroupId === g.id ? (
+                    <>
+                      <Pressable onPress={() => {
+                        const idx = COLOR_PRESETS.indexOf(editGroupColor);
+                        setEditGroupColor(COLOR_PRESETS[(idx + 1) % COLOR_PRESETS.length]);
+                      }}>
+                        <View style={[styles.groupColorDot, { backgroundColor: editGroupColor }]} />
+                      </Pressable>
+                      <TextInput
+                        value={editGroupName}
+                        onChangeText={setEditGroupName}
+                        style={[styles.createGroupInput, {
+                          color: isDark ? '#ffffff' : '#111827',
+                          borderColor: isDark ? '#374151' : '#d1d5db',
+                          backgroundColor: isDark ? '#1f2937' : '#f9fafb',
+                        }]}
+                      />
+                      <Pressable onPress={async () => {
+                        if (!editGroupName.trim()) return;
+                        try {
+                          await updateGroup({ sessionId: session!.id, groupId: g.id, name: editGroupName.trim(), color: editGroupColor }).unwrap();
+                          setEditingGroupId(null);
+                        } catch {
+                          Alert.alert('Error', 'Failed to update group.');
+                        }
+                      }}>
+                        <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
+                      </Pressable>
+                      <Pressable onPress={() => setEditingGroupId(null)}>
+                        <Ionicons name="close-circle" size={24} color="#9ca3af" />
+                      </Pressable>
+                    </>
+                  ) : (
+                    <>
+                      <View style={[styles.groupColorDot, { backgroundColor: g.color }]} />
+                      <Text style={[styles.groupManageName, { color: isDark ? '#ffffff' : '#111827' }]}>{g.name}</Text>
+                      <View style={styles.groupManageActions}>
+                        <Pressable onPress={() => { setEditingGroupId(g.id); setEditGroupName(g.name); setEditGroupColor(g.color); }}>
+                          <Ionicons name="pencil" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                        </Pressable>
                         <Pressable onPress={() => {
-                          // Cycle through colors
-                          const idx = COLOR_PRESETS.indexOf(editGroupColor);
-                          setEditGroupColor(COLOR_PRESETS[(idx + 1) % COLOR_PRESETS.length]);
+                          Alert.alert('Delete Group', `Delete "${g.name}"? Photos will not be deleted.`, [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Delete', style: 'destructive', onPress: () => deleteGroup({ sessionId: session!.id, groupId: g.id }) },
+                          ]);
                         }}>
-                          <View style={[styles.groupColorDot, { backgroundColor: editGroupColor }]} />
+                          <Ionicons name="trash-outline" size={18} color="#ef4444" />
                         </Pressable>
-                        <TextInput
-                          value={editGroupName}
-                          onChangeText={setEditGroupName}
-                          style={[styles.createGroupInput, {
-                            color: isDark ? '#ffffff' : '#111827',
-                            borderColor: isDark ? '#374151' : '#d1d5db',
-                            backgroundColor: isDark ? '#1f2937' : '#f9fafb',
-                          }]}
-                        />
-                        <Pressable onPress={async () => {
-                          if (!editGroupName.trim()) return;
-                          try {
-                            await updateGroup({ sessionId: session!.id, groupId: g.id, name: editGroupName.trim(), color: editGroupColor }).unwrap();
-                            setEditingGroupId(null);
-                          } catch {
-                            Alert.alert('Error', 'Failed to update group.');
-                          }
-                        }}>
-                          <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
-                        </Pressable>
-                        <Pressable onPress={() => setEditingGroupId(null)}>
-                          <Ionicons name="close-circle" size={24} color="#9ca3af" />
-                        </Pressable>
-                      </>
-                    ) : (
-                      <>
-                        <View style={[styles.groupColorDot, { backgroundColor: g.color }]} />
-                        <Text style={[styles.groupManageName, { color: isDark ? '#ffffff' : '#111827' }]}>{g.name}</Text>
-                        <View style={styles.groupManageActions}>
-                          <Pressable onPress={() => { setEditingGroupId(g.id); setEditGroupName(g.name); setEditGroupColor(g.color); }}>
-                            <Ionicons name="pencil" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
-                          </Pressable>
-                          <Pressable onPress={() => {
-                            Alert.alert('Delete Group', `Delete "${g.name}"? Photos will not be deleted.`, [
-                              { text: 'Cancel', style: 'cancel' },
-                              { text: 'Delete', style: 'destructive', onPress: () => deleteGroup({ sessionId: session!.id, groupId: g.id }) },
-                            ]);
-                          }}>
-                            <Ionicons name="trash-outline" size={18} color="#ef4444" />
-                          </Pressable>
-                        </View>
-                      </>
-                    )}
-                  </View>
-                ))}
-              </ScrollView>
-
-              {/* Color picker */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
-                <View style={styles.colorPickerRow}>
-                  {COLOR_PRESETS.map((c) => (
-                    <Pressable key={c} onPress={() => setNewGroupColor(c)} style={[styles.colorCircle, { backgroundColor: c }]}>
-                      {newGroupColor === c && <Ionicons name="checkmark" size={14} color="#ffffff" />}
-                    </Pressable>
-                  ))}
+                      </View>
+                    </>
+                  )}
                 </View>
-              </ScrollView>
+              )) : (
+                <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', textAlign: 'center', paddingVertical: 24, fontSize: 14 }}>
+                  No groups yet. Create one below.
+                </Text>
+              )}
+            </ScrollView>
 
-              {/* Create group */}
-              <View style={styles.createGroupRow}>
-                <TextInput
-                  value={newGroupName}
-                  onChangeText={setNewGroupName}
-                  placeholder="New group name"
-                  placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
-                  style={[styles.createGroupInput, {
-                    color: isDark ? '#ffffff' : '#111827',
-                    borderColor: isDark ? '#374151' : '#d1d5db',
-                    backgroundColor: isDark ? '#1f2937' : '#f9fafb',
-                  }]}
-                />
-                <Pressable
-                  onPress={async () => {
-                    if (!newGroupName.trim() || !session?.id) return;
-                    try {
-                      await createGroup({ sessionId: session.id, name: newGroupName.trim(), color: newGroupColor }).unwrap();
-                      setNewGroupName('');
-                    } catch {
-                      Alert.alert('Error', 'Failed to create group.');
-                    }
-                  }}
-                  style={styles.createGroupBtn}
-                >
-                  <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 13 }}>Create</Text>
-                </Pressable>
+            {/* Color picker — always visible */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }}>
+              <View style={styles.colorPickerRow}>
+                {COLOR_PRESETS.map((c) => (
+                  <Pressable key={c} onPress={() => setNewGroupColor(c)} style={[styles.colorCircle, { backgroundColor: c }]}>
+                    {newGroupColor === c && <Ionicons name="checkmark" size={14} color="#ffffff" />}
+                  </Pressable>
+                ))}
               </View>
-            </Animated.View>
-          </Pressable>
-        </KeyboardAvoidingView>
+            </ScrollView>
+
+            {/* Create group — always visible */}
+            <View style={styles.createGroupRow}>
+              <TextInput
+                value={newGroupName}
+                onChangeText={setNewGroupName}
+                placeholder="New group name"
+                placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+                style={[styles.createGroupInput, {
+                  color: isDark ? '#ffffff' : '#111827',
+                  borderColor: isDark ? '#374151' : '#d1d5db',
+                  backgroundColor: isDark ? '#1f2937' : '#f9fafb',
+                }]}
+              />
+              <Pressable
+                onPress={async () => {
+                  if (!newGroupName.trim() || !session?.id) return;
+                  try {
+                    await createGroup({ sessionId: session.id, name: newGroupName.trim(), color: newGroupColor }).unwrap();
+                    setNewGroupName('');
+                  } catch {
+                    Alert.alert('Error', 'Failed to create group.');
+                  }
+                }}
+                style={styles.createGroupBtn}
+              >
+                <Text style={{ color: '#ffffff', fontWeight: '600', fontSize: 13 }}>Create</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        </Pressable>
       </Modal>
 
       {/* Photo lightbox viewer — windowed to keep load times consistent */}
@@ -1148,14 +1123,12 @@ export default function SessionDetailScreen() {
             .slice(viewerWindowStart, viewerWindowStart + 41)
             .map((m) => {
               const key = getPhotoKey(m);
-              const cached = wmCacheRef.current.get(key);
-              return { uri: cached || getDirectWatermarkUrl(key) };
+              return { uri: getDirectWatermarkUrl(key) };
             })}
           keyExtractor={(src, idx) => `${viewerWindowStart + idx}-${src?.uri?.slice(-40) ?? idx}`}
           imageIndex={viewerIndex}
           visible
           onRequestClose={() => setViewerVisible(false)}
-          onImageIndexChange={(idx) => prefetchAroundIndex(viewerWindowStart + idx, 5)}
           swipeToCloseEnabled
           doubleTapToZoomEnabled
         />
@@ -1184,6 +1157,9 @@ const styles = StyleSheet.create({
     position: 'absolute', top: 6, left: 6, width: 22, height: 22, borderRadius: 11,
     borderWidth: 2, borderColor: 'rgba(255,255,255,0.8)', backgroundColor: 'rgba(0,0,0,0.3)',
     alignItems: 'center', justifyContent: 'center',
+  },
+  photoPlaceholder: {
+    borderRadius: 6, alignItems: 'center', justifyContent: 'center',
   },
   thumbnailBadge: {
     position: 'absolute', top: 6, left: 6, width: 24, height: 24, borderRadius: 12,
@@ -1226,7 +1202,7 @@ const styles = StyleSheet.create({
   groupManageActions: { flexDirection: 'row', gap: 12 },
   colorPickerRow: { flexDirection: 'row', gap: 6, paddingHorizontal: 16, marginBottom: 10 },
   colorCircle: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  createGroupRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginTop: 8 },
+  createGroupRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, marginTop: 12, marginBottom: 4 },
   createGroupInput: { flex: 1, height: 36, borderRadius: 8, paddingHorizontal: 10, fontSize: 14, borderWidth: 1 },
   createGroupBtn: { height: 36, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#8b5cf6' },
   groupPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.8)', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' },

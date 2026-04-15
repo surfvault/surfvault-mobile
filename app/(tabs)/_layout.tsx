@@ -40,15 +40,19 @@ function TabsInner() {
   }), [tabMap, setActiveTab]);
 
   const { data: unreadData } = useGetUnreadMessageCountQuery(undefined, { skip: !isAuthenticated });
-  const unreadCount = unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0;
+  const unreadCount = isAuthenticated
+    ? (unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0)
+    : 0;
 
   const { data: notifData } = useGetNotificationsQuery(
     { read: false, filter: '', limit: 0, continuationToken: '' },
     { skip: !isAuthenticated }
   );
-  const unreadNotifCount = notifData?.results?.notifications?.length ?? 0;
+  const unreadNotifCount = isAuthenticated
+    ? (notifData?.results?.notifications?.length ?? 0)
+    : 0;
 
-  // Update app badge count
+  // Update app badge count (clears to 0 on logout)
   useEffect(() => {
     const total = unreadCount + unreadNotifCount;
     Notifications.setBadgeCountAsync(total).catch(() => {});
@@ -163,10 +167,7 @@ function TabsInner() {
 export default function TabLayout() {
   return (
     <TabBarProvider>
-      <View style={{ flex: 1 }}>
-        <TabsInner />
-        <UploadProgressPill />
-      </View>
+      <TabsInner />
     </TabBarProvider>
   );
 }

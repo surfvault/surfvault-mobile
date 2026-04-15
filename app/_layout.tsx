@@ -17,6 +17,7 @@ import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
+import UploadProgressPill from '../src/components/UploadProgressPill';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
@@ -154,6 +155,7 @@ function AppShell() {
   return (
     <UserProvider user={user}>
       <Slot />
+      <UploadProgressPill />
       <StatusBar style="auto" />
     </UserProvider>
   );

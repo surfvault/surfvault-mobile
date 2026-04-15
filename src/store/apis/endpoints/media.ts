@@ -31,7 +31,7 @@ const mediaApi = rootApi.injectEndpoints({
         totalSizeInGB,
       }: {
         sessionId: string;
-        mediaFiles: Array<{ name: string; size: number; type: string; source?: string; sourceId?: string }>;
+        mediaFiles: Array<{ uuid: string; name: string; size: number; type: string; lastModified: number; source?: string; sourceId?: string }>;
         totalSizeInGB: number;
       }) => ({
         url: `/media/upload/surf-session/${sessionId}`,
@@ -93,6 +93,7 @@ const mediaApi = rootApi.injectEndpoints({
         url: `/media/access/${requestId}/save`,
         method: 'PATCH',
       }),
+      invalidatesTags: [ApiTag.AccessRequest],
     }),
     downloadSurfMediaAccessRequestPhotos: builder.mutation({
       query: ({ requestId }: { requestId: string }) => ({
