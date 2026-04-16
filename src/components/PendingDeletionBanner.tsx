@@ -41,8 +41,11 @@ export default function PendingDeletionBanner() {
 
   const scheduledFor = new Date(user.deletion_scheduled_for as string);
   const now = new Date();
-  const msRemaining = scheduledFor.getTime() - now.getTime();
-  const daysRemaining = Math.max(0, Math.ceil(msRemaining / (1000 * 60 * 60 * 24)));
+  // Calendar-day difference (not millisecond-based) so "30 days" doesn't stay
+  // pinned for the first 24h due to partial-day ceiling.
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfDeletion = new Date(scheduledFor.getFullYear(), scheduledFor.getMonth(), scheduledFor.getDate());
+  const daysRemaining = Math.max(0, Math.round((startOfDeletion.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24)));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top + 6 }]}>
