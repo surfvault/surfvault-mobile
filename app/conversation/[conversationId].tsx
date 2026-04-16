@@ -146,6 +146,8 @@ export default function ConversationDetailScreen() {
     ? conversation?.participant_two
     : conversation?.participant_one;
 
+  const isOtherUserDeleted = !!otherUser?.deleted_at;
+
   // Auto-scroll to bottom when messages load
   const hasScrolledRef = useRef(false);
   useEffect(() => {
@@ -269,12 +271,21 @@ export default function ConversationDetailScreen() {
             </Pressable>
             {otherUser ? (
               <View style={styles.headerCenter}>
-                <UserAvatar uri={otherUser.picture} name={otherUser.name ?? otherUser.handle} size={36} verified={otherUser.verified} />
-                <Pressable onPress={() => trackedPush(`/user/${otherUser.handle}` as any)} style={[styles.headerNamePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)' }]}>
-                  <Text style={[styles.headerHandle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                    {otherUser.name ?? otherUser.handle}
+                <UserAvatar
+                  uri={isOtherUserDeleted ? undefined : otherUser.picture}
+                  name={isOtherUserDeleted ? 'Deleted User' : (otherUser.name ?? otherUser.handle)}
+                  size={36}
+                  verified={isOtherUserDeleted ? false : otherUser.verified}
+                />
+                <Pressable
+                  onPress={isOtherUserDeleted ? undefined : () => trackedPush(`/user/${otherUser.handle}` as any)}
+                  disabled={isOtherUserDeleted}
+                  style={[styles.headerNamePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)' }]}
+                >
+                  <Text style={[styles.headerHandle, { color: isOtherUserDeleted ? (isDark ? '#6b7280' : '#9ca3af') : (isDark ? '#fff' : '#111827') }]} numberOfLines={1}>
+                    {isOtherUserDeleted ? 'Deleted User' : (otherUser.name ?? otherUser.handle)}
                   </Text>
-                  <Ionicons name="chevron-forward" size={12} color={isDark ? '#6b7280' : '#9ca3af'} />
+                  {!isOtherUserDeleted && <Ionicons name="chevron-forward" size={12} color={isDark ? '#6b7280' : '#9ca3af'} />}
                 </Pressable>
               </View>
             ) : null}
@@ -288,24 +299,32 @@ export default function ConversationDetailScreen() {
 
           {/* Composer */}
           <View style={[styles.composer, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb', backgroundColor: isDark ? '#030712' : '#fff', paddingBottom: Math.max(insets.bottom, 8) }]}>
-            <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-              <TextInput
-                value={message}
-                onChangeText={setMessage}
-                placeholder="Type a message..."
-                placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
-                multiline
-                style={[styles.input, { color: isDark ? '#fff' : '#111827' }]}
-                maxLength={2000}
-              />
-              <Pressable
-                onPress={handleSend}
-                disabled={!message.trim() || sending}
-                style={[styles.sendBtn, { backgroundColor: message.trim() ? '#3b82f6' : (isDark ? '#374151' : '#d1d5db') }]}
-              >
-                <Ionicons name="send" size={16} color="#fff" />
-              </Pressable>
-            </View>
+            {isOtherUserDeleted ? (
+              <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', justifyContent: 'center', paddingVertical: 12 }]}>
+                <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 14, textAlign: 'center' }}>
+                  This user's account has been deleted
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                <TextInput
+                  value={message}
+                  onChangeText={setMessage}
+                  placeholder="Type a message..."
+                  placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+                  multiline
+                  style={[styles.input, { color: isDark ? '#fff' : '#111827' }]}
+                  maxLength={2000}
+                />
+                <Pressable
+                  onPress={handleSend}
+                  disabled={!message.trim() || sending}
+                  style={[styles.sendBtn, { backgroundColor: message.trim() ? '#3b82f6' : (isDark ? '#374151' : '#d1d5db') }]}
+                >
+                  <Ionicons name="send" size={16} color="#fff" />
+                </Pressable>
+              </View>
+            )}
           </View>
         </KeyboardAvoidingView>
       </View>

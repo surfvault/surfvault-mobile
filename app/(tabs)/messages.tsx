@@ -102,6 +102,7 @@ export default function MessagesScreen() {
 
   const renderConversation = ({ item }: { item: any }) => {
     const other = user?.id === item.participant_one?.id ? item.participant_two : item.participant_one;
+    const isDeleted = !!other?.deleted_at;
     const unreadCount = user?.id === item.participant_one?.id
       ? item.participant_one_unread_count
       : item.participant_two_unread_count;
@@ -114,19 +115,19 @@ export default function MessagesScreen() {
         style={[styles.conversationRow, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
       >
         <UserAvatar
-          uri={other?.picture}
-          name={other?.name ?? other?.handle}
+          uri={isDeleted ? undefined : other?.picture}
+          name={isDeleted ? 'Deleted User' : (other?.name ?? other?.handle)}
           size={48}
-          verified={other?.verified}
-          active={other?.active}
+          verified={isDeleted ? false : other?.verified}
+          active={isDeleted ? false : other?.active}
         />
         <View style={styles.conversationInfo}>
           <View style={styles.conversationTop}>
             <Text
-              style={[styles.conversationHandle, hasUnread && styles.conversationHandleBold, { color: isDark ? '#fff' : '#111827' }]}
+              style={[styles.conversationHandle, hasUnread && styles.conversationHandleBold, { color: isDeleted ? (isDark ? '#6b7280' : '#9ca3af') : (isDark ? '#fff' : '#111827') }]}
               numberOfLines={1}
             >
-              {other?.handle}
+              {isDeleted ? 'Deleted User' : other?.handle}
             </Text>
             <Text style={[styles.conversationTime, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
               {formatTime(item.updated_at)}

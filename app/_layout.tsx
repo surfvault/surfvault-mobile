@@ -1,6 +1,7 @@
 import '../global.css';
 import { useEffect, useRef } from 'react';
-import { Platform, Alert } from 'react-native';
+import { Platform, Alert, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -11,13 +12,14 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Auth0Provider } from 'react-native-auth0';
 import { Provider as ReduxProvider } from 'react-redux';
 import Constants from 'expo-constants';
-import { store, useGetSelfQuery, useUpdateUserPushTokenMutation } from '../src/store';
+import { store, useGetSelfQuery, useUpdateUserPushTokenMutation, useCancelAccountDeletionMutation } from '../src/store';
 import { AuthProvider, useAuth } from '../src/context/AuthProvider';
 import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
 import UploadProgressPill from '../src/components/UploadProgressPill';
+import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
@@ -83,6 +85,40 @@ function AppShell() {
       }
     })();
   }, [user?.id]);
+
+  // Prompt to cancel account deletion if pending
+  const [cancelDeletion] = useCancelAccountDeletionMutation();
+  const deletionPromptShown = useRef(false);
+
+  useEffect(() => {
+    if (!user?.deletion_requested_at || deletionPromptShown.current) return;
+    deletionPromptShown.current = true;
+
+    const deletionDate = new Date(user.deletion_scheduled_for).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+
+    Alert.alert(
+      'Account Scheduled for Deletion',
+      `Your account will be permanently deleted on ${deletionDate}. Would you like to cancel the deletion and keep your account?\n\nIf your paid subscription is still active, it will be restored automatically. If it already ended during the grace period, you'll come back on the Free plan.`,
+      [
+        { text: 'Continue Deletion', style: 'cancel' },
+        {
+          text: 'Cancel Deletion',
+          onPress: async () => {
+            try {
+              await cancelDeletion({}).unwrap();
+              Alert.alert('Deletion Cancelled', 'Your account has been restored.');
+            } catch {
+              Alert.alert('Error', 'Failed to cancel deletion. Please try again from Account settings.');
+            }
+          },
+        },
+      ]
+    );
+  }, [user?.deletion_requested_at]);
 
   // Handle notification tap deep linking
   useEffect(() => {
@@ -152,11 +188,26 @@ function AppShell() {
     }
   }, [isAuthenticated, isLoading, selfLoading, isOnboarded, segments]);
 
+  const bannerVisible = !!user?.deletion_requested_at && !user?.deleted_at;
+
   return (
     <UserProvider user={user}>
-      <Slot />
-      <UploadProgressPill />
-      <StatusBar style="auto" />
+      <View style={{ flex: 1 }}>
+        {bannerVisible && <PendingDeletionBanner />}
+        {bannerVisible ? (
+          // Nested SafeAreaProvider creates a new native context. Its view
+          // sits below the banner (which consumed the status bar area), so
+          // child screens' SafeAreaView will see native insets.top = 0 and
+          // won't double-pad for the status bar.
+          <SafeAreaProvider style={{ flex: 1 }}>
+            <Slot />
+          </SafeAreaProvider>
+        ) : (
+          <Slot />
+        )}
+        <UploadProgressPill />
+        <StatusBar style="auto" />
+      </View>
     </UserProvider>
   );
 }
