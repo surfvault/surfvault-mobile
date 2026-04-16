@@ -240,6 +240,11 @@ export default function ProfileScreen() {
           onPress: () => trackedPush('/manage-favorites'),
         },
         {
+          label: 'Account',
+          icon: 'person-circle-outline',
+          onPress: () => trackedPush('/account'),
+        },
+        {
           label: 'Settings',
           icon: 'settings-outline',
           onPress: () => Linking.openSettings(),

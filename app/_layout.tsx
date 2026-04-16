@@ -1,6 +1,7 @@
 import '../global.css';
 import { useEffect, useRef } from 'react';
-import { Platform, Alert } from 'react-native';
+import { Platform, View } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -18,6 +19,7 @@ import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
 import UploadProgressPill from '../src/components/UploadProgressPill';
+import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
@@ -152,11 +154,26 @@ function AppShell() {
     }
   }, [isAuthenticated, isLoading, selfLoading, isOnboarded, segments]);
 
+  const bannerVisible = !!user?.deletion_requested_at && !user?.deleted_at;
+
   return (
     <UserProvider user={user}>
-      <Slot />
-      <UploadProgressPill />
-      <StatusBar style="auto" />
+      <View style={{ flex: 1 }}>
+        {bannerVisible && <PendingDeletionBanner />}
+        {bannerVisible ? (
+          // Nested SafeAreaProvider creates a new native context. Its view
+          // sits below the banner (which consumed the status bar area), so
+          // child screens' SafeAreaView will see native insets.top = 0 and
+          // won't double-pad for the status bar.
+          <SafeAreaProvider style={{ flex: 1 }}>
+            <Slot />
+          </SafeAreaProvider>
+        ) : (
+          <Slot />
+        )}
+        <UploadProgressPill />
+        <StatusBar style="auto" />
+      </View>
     </UserProvider>
   );
 }

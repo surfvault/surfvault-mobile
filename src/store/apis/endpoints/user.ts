@@ -180,6 +180,20 @@ const userApi = rootApi.injectEndpoints({
         body: { action, accessLength },
       }),
     }),
+    requestAccountDeletion: builder.mutation({
+      invalidatesTags: [ApiTag.User],
+      query: () => ({
+        url: '/user/request-deletion',
+        method: 'PATCH',
+      }),
+    }),
+    cancelAccountDeletion: builder.mutation({
+      invalidatesTags: [ApiTag.User],
+      query: () => ({
+        url: '/user/cancel-deletion',
+        method: 'PATCH',
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -204,6 +218,8 @@ export const {
   useGetUserFollowingQuery,
   useGetUserSessionsQuery,
   useUpdateUserRecentSearchesMutation,
+  useRequestAccountDeletionMutation,
+  useCancelAccountDeletionMutation,
 } = userApi;
 
 export { userApi };

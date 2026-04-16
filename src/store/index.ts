@@ -117,6 +117,8 @@ export {
   useClearUserPushTokenMutation,
   useUpdateUserRecentSearchesMutation,
   useUpdateUserTypeMutation,
+  useRequestAccountDeletionMutation,
+  useCancelAccountDeletionMutation,
 } from './apis/endpoints/user';
 
 export {
