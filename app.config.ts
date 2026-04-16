@@ -20,9 +20,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: 'com.surfvault.mobile',
     usesAppleSignIn: true,
     infoPlist: {
-      NSPhotoLibraryUsageDescription: 'SurfVault needs access to your photo library to upload surf session photos.',
-      NSPhotoLibraryAddUsageDescription: 'SurfVault needs permission to save photos to your camera roll.',
-      NSCameraUsageDescription: 'SurfVault needs access to your camera to take surf photos.',
+      NSPhotoLibraryUsageDescription: 'Allow SurfVault to access your photos so you can upload surf session images and update your profile picture.',
+      NSPhotoLibraryAddUsageDescription: 'Allow SurfVault to save surf photos from your sessions and approved access requests to your camera roll.',
       ITSAppUsesNonExemptEncryption: false,
     },
   },
@@ -47,22 +46,22 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     [
       'expo-image-picker',
       {
-        photosPermission: 'SurfVault needs access to your photo library to upload surf session photos.',
-        cameraPermission: 'SurfVault needs access to your camera to take surf photos.',
+        photosPermission: 'Allow SurfVault to access your photos so you can upload surf session images and update your profile picture.',
+        cameraPermission: false,
       },
     ],
     [
       'expo-media-library',
       {
-        photosPermission: 'SurfVault needs permission to save photos to your camera roll.',
-        savePhotosPermission: 'SurfVault needs permission to save photos to your camera roll.',
+        photosPermission: 'Allow SurfVault to access your photos so you can upload surf session images and update your profile picture.',
+        savePhotosPermission: 'Allow SurfVault to save surf photos from your sessions and approved access requests to your camera roll.',
       },
     ],
     'expo-secure-store',
     [
       'expo-location',
       {
-        locationWhenInUsePermission: 'SurfVault uses your location to find nearby surf breaks and photographers.',
+        locationWhenInUsePermission: 'Allow SurfVault to use your location to show nearby surf breaks, photographers, and sessions on the map and discover feed.',
       },
     ],
     [

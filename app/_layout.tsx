@@ -1,5 +1,5 @@
 import '../global.css';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Slot, useRouter, useSegments } from 'expo-router';
@@ -20,6 +20,7 @@ import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
 import UploadProgressPill from '../src/components/UploadProgressPill';
 import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
+import NotificationPrimingModal from '../src/components/NotificationPrimingModal';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
@@ -32,16 +33,14 @@ Notifications.setNotificationHandler({
   }),
 });
 
-async function requestNotificationPermissions() {
-  if (!Device.isDevice) {
-    console.log('[Notifications] Skipping — not a physical device');
-    return;
+async function hasNotificationPermission(): Promise<boolean> {
+  if (!Device.isDevice) return false;
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    return status === 'granted';
+  } catch {
+    return false;
   }
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  console.log('[Notifications] Current permission status:', existing);
-  if (existing === 'granted') return;
-  const { status } = await Notifications.requestPermissionsAsync();
-  console.log('[Notifications] Permission request result:', status);
 }
 
 SplashScreen.preventAutoHideAsync();
@@ -57,34 +56,39 @@ function AppShell() {
   });
 
   const user = isAuthenticated ? (selfData?.results?.user ?? selfData?.results ?? null) : null;
-  const isOnboarded = user?.onboarded;
+  // Mirrors web onboarding gating: user is onboarded once they've picked a handle
+  // (handle_changed) and chosen their user type (surfer/photographer).
+  const isOnboarded = !!user?.handle_changed && !!user?.user_type;
 
   // Set up Pusher when we have a user
   usePusher({ userId: user?.id });
 
-  // Push token registration
+  // Push token registration — only runs once permissions are already granted.
+  // The priming modal handles asking for permission; after it's granted we
+  // call registerPushToken() directly.
   const [updatePushToken] = useUpdateUserPushTokenMutation();
   const pushTokenRegistered = useRef(false);
 
-  useEffect(() => {
+  const registerPushToken = useCallback(async () => {
     if (!user?.id || !Device.isDevice || pushTokenRegistered.current) return;
-
-    (async () => {
-      try {
-        await requestNotificationPermissions();
-        const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-        if (!projectId) return;
-
-        const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-        if (token) {
-          await updatePushToken({ expoPushToken: token });
-          pushTokenRegistered.current = true;
-        }
-      } catch (e) {
-        console.warn('Failed to register push token:', e);
+    if (!(await hasNotificationPermission())) return;
+    try {
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+      if (!projectId) return;
+      const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+      if (token) {
+        await updatePushToken({ expoPushToken: token });
+        pushTokenRegistered.current = true;
       }
-    })();
-  }, [user?.id]);
+    } catch (e) {
+      console.warn('Failed to register push token:', e);
+    }
+  }, [user?.id, updatePushToken]);
+
+  // Try to register on mount / user change (no-ops if permission not yet granted)
+  useEffect(() => {
+    registerPushToken();
+  }, [registerPushToken]);
 
   // Handle notification tap deep linking
   useEffect(() => {
@@ -117,16 +121,6 @@ function AppShell() {
     return () => subscription.remove();
   }, [router]);
 
-  // Request notification permissions after splash screen hides and location dialog settles
-  const notifRequested = useRef(false);
-  useEffect(() => {
-    if (isLoading) return; // Wait until auth state is resolved (splash still showing)
-    if (notifRequested.current) return;
-    notifRequested.current = true;
-    const timer = setTimeout(() => requestNotificationPermissions(), 3000);
-    return () => clearTimeout(timer);
-  }, [isLoading]);
-
   useEffect(() => {
     if (isLoading) return;
     if (isAuthenticated && selfLoading) return;
@@ -134,13 +128,13 @@ function AppShell() {
     SplashScreen.hideAsync();
 
     const inAuthGroup = segments[0] === '(auth)';
+    const onOnboarding = inAuthGroup && (segments as string[])[1] === 'onboarding';
 
-    // If authenticated but not onboarded, send to onboarding
-    if (isAuthenticated && !isOnboarded && inAuthGroup) {
-      const secondSegment = (segments as string[])[1];
-      if (secondSegment !== 'onboarding') {
-        router.replace('/(auth)/onboarding');
-      }
+    // If authenticated but not onboarded, force them to onboarding
+    // (regardless of whether they're in the auth group or not).
+    if (isAuthenticated && !isOnboarded && !onOnboarding) {
+      router.replace('/(auth)/onboarding');
+      return;
     }
 
     // If authenticated + onboarded and still on auth screens, go to tabs
@@ -148,7 +142,7 @@ function AppShell() {
       router.replace('/(tabs)');
     }
 
-    // If not authenticated and not on tabs, go to home
+    // If not authenticated and somehow in auth group, route to tabs (public content)
     if (!isAuthenticated && inAuthGroup) {
       router.replace('/(tabs)');
     }
@@ -172,6 +166,10 @@ function AppShell() {
           <Slot />
         )}
         <UploadProgressPill />
+        <NotificationPrimingModal
+          isOnboarded={isOnboarded}
+          onPermissionChanged={registerPushToken}
+        />
         <StatusBar style="auto" />
       </View>
     </UserProvider>
