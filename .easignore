@@ -1,0 +1,57 @@
+# Replaces .gitignore for EAS Build upload.
+# Everything here is excluded from the archive sent to EAS.
+
+# Dependencies (EAS runs install itself)
+node_modules/
+
+# Expo artifacts
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native folders — EAS regenerates them from app.config.ts via prebuild
+/ios
+/android
+
+# Native build leftovers
+.kotlin/
+*.orig.*
+
+# Secrets / signing material (never ship these; EAS Credentials manages them)
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.env
+.env.local
+.env.*.local
+
+# Metro / debug
+.metro-health-check*
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Tests and coverage
+coverage/
+__tests__/
+*.test.ts
+*.test.tsx
+
+# Documentation (never needed at build time)
+*.md
+docs/
+
+# Claude / agent files
+.claude/

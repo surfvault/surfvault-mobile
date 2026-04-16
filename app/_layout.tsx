@@ -130,15 +130,17 @@ function AppShell() {
     const inAuthGroup = segments[0] === '(auth)';
     const onOnboarding = inAuthGroup && (segments as string[])[1] === 'onboarding';
 
-    // If authenticated but not onboarded, force them to onboarding
-    // (regardless of whether they're in the auth group or not).
+    // If authenticated but not fully onboarded, force them to onboarding.
     if (isAuthenticated && !isOnboarded && !onOnboarding) {
       router.replace('/(auth)/onboarding');
       return;
     }
 
-    // If authenticated + onboarded and still on auth screens, go to tabs
-    if (isAuthenticated && isOnboarded && inAuthGroup) {
+    // If authenticated + onboarded and on a non-onboarding auth screen (login),
+    // route to tabs. NEVER redirect away from onboarding here — the onboarding
+    // component manages its own transition to tabs when the user is done so
+    // mid-flow state changes don't eject them early.
+    if (isAuthenticated && isOnboarded && inAuthGroup && !onOnboarding) {
       router.replace('/(tabs)');
     }
 

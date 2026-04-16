@@ -229,9 +229,54 @@ const surfApi = rootApi.injectEndpoints({
     }),
     getAds: builder.query({
       providesTags: [],
-      query: ({ surfBreakId }: { surfBreakId?: string }) => ({
-        url: `/ads?surfBreakId=${surfBreakId ?? ''}`,
-        method: 'GET',
+      query: ({
+        surfBreakId,
+        lat,
+        lon,
+        placement,
+        limit,
+        feed,
+      }: {
+        surfBreakId?: string;
+        lat?: number;
+        lon?: number;
+        placement?: string | string[];
+        limit?: number;
+        feed?: boolean;
+      } = {}) => {
+        const params = new URLSearchParams();
+        if (surfBreakId) params.set('surfBreakId', surfBreakId);
+        if (lat != null && !Number.isNaN(lat)) params.set('lat', String(lat));
+        if (lon != null && !Number.isNaN(lon)) params.set('lon', String(lon));
+        if (placement) params.set('placement', Array.isArray(placement) ? placement.join(',') : placement);
+        if (limit) params.set('limit', String(limit));
+        if (feed) params.set('feed', 'true');
+        const qs = params.toString();
+        return {
+          url: qs ? `/ads?${qs}` : `/ads`,
+          method: 'GET',
+        };
+      },
+    }),
+    recordAdImpression: builder.mutation({
+      query: ({
+        adId,
+        surfBreakId,
+        placement,
+        device,
+      }: {
+        adId: string;
+        surfBreakId?: string;
+        placement?: string;
+        device: 'ios' | 'android';
+      }) => ({
+        url: `/ads/${adId}/impression`,
+        method: 'POST',
+        body: {
+          surf_break_id: surfBreakId ?? null,
+          placement_key: placement ?? null,
+          device,
+        },
       }),
     }),
     updateSessionThumbnail: builder.mutation({
@@ -300,6 +345,7 @@ export const {
   useGetSessionQuery,
   useGetSessionPhotosQuery,
   useGetAdsQuery,
+  useRecordAdImpressionMutation,
   useGetSurfBreakWithLatestSessionsQuery,
   useGetSurfBreakSessionsQuery,
   useUpdateSessionThumbnailMutation,

@@ -60,7 +60,10 @@ export default function EditProfileScreen() {
     { handle },
     { skip: !handleChanged || handle.length < 3 || handle === user?.handle }
   );
-  const handleExists = handleCheckData?.results?.exists && handle !== user?.handle;
+  // API returns results.success === true when handle is AVAILABLE,
+  // results.success === false when it's already taken.
+  const handleExists =
+    handleCheckData?.results?.success === false && handle !== user?.handle;
   const isHandleValid = handle.length >= 3 && /^[a-zA-Z0-9._-]+$/.test(handle);
 
   // Popular tags

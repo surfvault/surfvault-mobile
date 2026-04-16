@@ -19,6 +19,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     bundleIdentifier: 'com.surfvault.mobile',
     usesAppleSignIn: true,
+    entitlements: {
+      'com.apple.developer.applesignin': ['Default'],
+    },
     infoPlist: {
       NSPhotoLibraryUsageDescription: 'Allow SurfVault to access your photos so you can upload surf session images and update your profile picture.',
       NSPhotoLibraryAddUsageDescription: 'Allow SurfVault to save surf photos from your sessions and approved access requests to your camera roll.',

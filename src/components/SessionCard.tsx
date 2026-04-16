@@ -56,15 +56,23 @@ interface SessionCardProps {
 
 const MAX_VISIBLE_TAGS = 3;
 
+// Pure string-based date formatter. Never constructs `new Date(dateStr)` because
+// session dates represent a calendar day (the day the session happened) — not a
+// UTC instant — so the viewer's timezone must not shift the displayed day.
+// See web counterpart: surfvault-web/src/helpers/dateAndTime.js formatSessionDate.
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '';
-  const d = new Date(dateStr.split('T')[0] + 'T00:00:00');
-  const isCurrentYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    ...(isCurrentYear ? {} : { year: 'numeric' }),
-  });
+  const ymd = dateStr.split('T')[0];
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(ymd);
+  if (!match) return '';
+  const year = parseInt(match[1], 10);
+  const month = parseInt(match[2], 10);
+  const day = parseInt(match[3], 10);
+  const monthLabel = MONTHS_SHORT[month - 1];
+  if (!monthLabel) return '';
+  const currentYear = new Date().getFullYear();
+  return year === currentYear ? `${monthLabel} ${day}` : `${monthLabel} ${day}, ${year}`;
 };
 
 function FadingSubtitle({ items, visible = true }: { items: string[]; visible?: boolean }) {

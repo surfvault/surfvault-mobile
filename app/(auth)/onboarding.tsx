@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   StyleSheet,
   useColorScheme,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -22,14 +22,34 @@ import {
   useUpdateUserTypeMutation,
   useUpdateUserMetaDataMutation,
 } from '../../src/store';
+import { useUser } from '../../src/context/UserProvider';
 
 type Step = 'handle' | 'type' | 'picture';
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { user } = useUser();
   const isDark = useColorScheme() === 'dark';
+  const insets = useSafeAreaInsets();
+  const bottomPad = insets.bottom + 16;
 
-  const [step, setStep] = useState<Step>('handle');
+  // Determine starting step from what's already completed. If the user
+  // arrives mid-flow (e.g. already chose a handle on web), resume from
+  // the first incomplete step instead of forcing them through again.
+  const [step, setStep] = useState<Step>(() => {
+    if (!user?.handle_changed) return 'handle';
+    if (!user?.user_type) return 'type';
+    return 'picture';
+  });
+
+  // If user is already fully onboarded (handle + type both set) when they
+  // land here, don't show onboarding — send them to tabs. This can happen
+  // if they bounce through this route after updating their web profile.
+  useEffect(() => {
+    if (user?.handle_changed && user?.user_type) {
+      router.replace('/(tabs)');
+    }
+  }, [user?.handle_changed, user?.user_type, router]);
 
   // Handle step
   const [handle, setHandle] = useState('');
@@ -53,7 +73,9 @@ export default function OnboardingScreen() {
   const [updateType, { isLoading: updatingType }] = useUpdateUserTypeMutation();
   const [updateMeta] = useUpdateUserMetaDataMutation();
 
-  const handleExists = handleCheck?.results?.exists;
+  // API returns { results: { success: true } } when handle is AVAILABLE
+  // and { results: { success: false } } when handle is already taken.
+  const handleExists = handleCheck?.results?.success === false;
   const isHandleValid = handle.length >= 3 && /^[a-zA-Z0-9._-]+$/.test(handle);
 
   // --- Handle step ---
@@ -145,7 +167,7 @@ export default function OnboardingScreen() {
   if (step === 'handle') {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: bg }]} edges={['top']}>
-        <View style={s.content}>
+        <View style={[s.content, { paddingBottom: bottomPad }]}>
           <StepIndicator current={1} total={3} isDark={isDark} />
           <Text style={[s.title, { color: textColor }]}>Choose your handle</Text>
           <Text style={[s.subtitle, { color: mutedColor }]}>
@@ -202,7 +224,7 @@ export default function OnboardingScreen() {
   if (step === 'type') {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: bg }]} edges={['top']}>
-        <View style={s.content}>
+        <View style={[s.content, { paddingBottom: bottomPad }]}>
           <StepIndicator current={2} total={3} isDark={isDark} />
           <Text style={[s.title, { color: textColor }]}>How will you use SurfVault?</Text>
           <Text style={[s.subtitle, { color: mutedColor }]}>You can change this later in settings</Text>

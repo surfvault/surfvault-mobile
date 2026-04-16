@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,9 +21,12 @@ import {
   useGetSurfBreakWithLatestSessionsQuery,
   useGetSurfBreakSessionsQuery,
   useUpdateUserFavoritesMutation,
+  useGetAdsQuery,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import SponsoredCard from '../../src/components/SponsoredCard';
+import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
 
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -64,6 +67,24 @@ export default function SurfBreakDetailScreen() {
   const initialSessions = initialData?.results?.sessions ?? [];
   const initialToken = initialData?.results?.continuationToken ?? '';
   const isFavorited = breakData?.is_favorited;
+
+  // Ads scoped to this break — surfaces both explicitly-targeted ads and
+  // partners within range of the break's coords. No placement filter on mobile:
+  // sidebar inventory would otherwise be wasted since there is no sidebar rail.
+  const { data: adsData } = useGetAdsQuery(
+    { surfBreakId: breakData?.id, feed: true, limit: 6 },
+    { skip: !breakData?.id }
+  );
+  const breakAds = useMemo(
+    () => adsData?.results?.ads || [],
+    [adsData]
+  );
+
+  // Interleave sessions + ads using the shared cadence (same on web + mobile).
+  const feedRows = useMemo(
+    () => interleaveAds(sessions, breakAds) as FeedRow<any, any>[],
+    [sessions, breakAds]
+  );
 
   useEffect(() => {
     seenIdsRef.current = new Set();
@@ -162,9 +183,20 @@ export default function SurfBreakDetailScreen() {
           <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
         ) : (
           <FlatList
-            data={sessions}
-            keyExtractor={(item) => item.session_id ?? item.id}
-            renderItem={({ item }) => <SessionCard session={item} />}
+            data={feedRows}
+            keyExtractor={(row) => row.key}
+            renderItem={({ item: row }) => {
+              if (row.type === 'ad') {
+                return (
+                  <SponsoredCard
+                    ad={row.data}
+                    placement="content"
+                    surfBreakId={breakData?.id}
+                  />
+                );
+              }
+              return <SessionCard session={row.data} />;
+            }}
             ListHeaderComponent={
               <View style={styles.headerWrap}>
                 <Text style={[styles.breakName, { color: isDark ? '#fff' : '#111827' }]}>{breakName}</Text>
@@ -188,8 +220,27 @@ export default function SurfBreakDetailScreen() {
               <View style={styles.emptyWrap}>
                 <Ionicons name="camera-outline" size={48} color={isDark ? '#374151' : '#d1d5db'} />
                 <Text style={[styles.emptyTitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                  {selectedDate ? 'No sessions on this date' : 'No sessions yet'}
+                  {selectedDate ? 'No sessions on this date' : `Be the first to share ${breakName}`}
                 </Text>
+
+                {breakAds.length > 0 && !selectedDate && (
+                  <View style={styles.localLoveWrap}>
+                    <Text style={[styles.localLoveTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                      Local love near {breakName}
+                    </Text>
+                    <Text style={[styles.localLoveSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                      These businesses are just down the road
+                    </Text>
+                    {breakAds.slice(0, 3).map((ad: any) => (
+                      <SponsoredCard
+                        key={ad.id}
+                        ad={ad}
+                        placement="content"
+                        surfBreakId={breakData?.id}
+                      />
+                    ))}
+                  </View>
+                )}
               </View>
             }
             ListFooterComponent={loadingMore ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null}
@@ -225,6 +276,9 @@ const styles = StyleSheet.create({
   dateBtnText: { fontSize: 14, fontWeight: '500' },
   emptyWrap: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 },
   emptyTitle: { fontSize: 16, fontWeight: '600', marginTop: 12 },
+  localLoveWrap: { width: '100%', marginTop: 32, paddingHorizontal: 12 },
+  localLoveTitle: { fontSize: 15, fontWeight: '700', marginBottom: 2 },
+  localLoveSub: { fontSize: 12, marginBottom: 16 },
   overlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', zIndex: 100 },
   sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
   sheetHeader: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, paddingVertical: 14 },
