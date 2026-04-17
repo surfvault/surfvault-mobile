@@ -146,7 +146,7 @@ export default function AccountScreen() {
           </View>
 
           <Text style={[s.planHint, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
-            Manage your subscription at surf-vault.com
+            Manage your subscription at app.surf-vault.com/plans
           </Text>
         </View>
 

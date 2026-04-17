@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,9 +9,9 @@ import {
   StyleSheet,
   useColorScheme,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 let ImageManipulator: any = null;
@@ -22,14 +22,37 @@ import {
   useUpdateUserTypeMutation,
   useUpdateUserMetaDataMutation,
 } from '../../src/store';
+import { useUser } from '../../src/context/UserProvider';
+import { useAuth } from '../../src/context/AuthProvider';
 
 type Step = 'handle' | 'type' | 'picture';
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { logout } = useAuth();
+  const { user } = useUser();
   const isDark = useColorScheme() === 'dark';
+  const insets = useSafeAreaInsets();
+  const bottomPad = insets.bottom + 16;
 
-  const [step, setStep] = useState<Step>('handle');
+  // Determine starting step from what's already completed. If the user
+  // arrives mid-flow (e.g. already chose a handle on web), resume from
+  // the first incomplete step instead of forcing them through again.
+  const [step, setStep] = useState<Step>(() => {
+    if (!user?.handle_changed) return 'handle';
+    if (!user?.user_type) return 'type';
+    return 'picture';
+  });
+
+  // If user lands here already fully onboarded (e.g. web user who completed
+  // both steps), redirect on mount only — not on every user state change.
+  // This avoids ejecting mid-flow when step 2 sets user_type.
+  const initiallyOnboarded = useRef(!!user?.handle_changed && !!user?.user_type);
+  useEffect(() => {
+    if (initiallyOnboarded.current) {
+      router.replace('/(tabs)');
+    }
+  }, []);
 
   // Handle step
   const [handle, setHandle] = useState('');
@@ -53,7 +76,9 @@ export default function OnboardingScreen() {
   const [updateType, { isLoading: updatingType }] = useUpdateUserTypeMutation();
   const [updateMeta] = useUpdateUserMetaDataMutation();
 
-  const handleExists = handleCheck?.results?.exists;
+  // API returns { results: { success: true } } when handle is AVAILABLE
+  // and { results: { success: false } } when handle is already taken.
+  const handleExists = handleCheck?.results?.success === false;
   const isHandleValid = handle.length >= 3 && /^[a-zA-Z0-9._-]+$/.test(handle);
 
   // --- Handle step ---
@@ -142,14 +167,19 @@ export default function OnboardingScreen() {
   const cardBg = isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc';
   const cardBorder = isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0';
 
+  const firstName = (user?.name ?? '').split(' ')[0];
+
   if (step === 'handle') {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: bg }]} edges={['top']}>
-        <View style={s.content}>
+        <View style={[s.content, { paddingBottom: bottomPad }]}>
           <StepIndicator current={1} total={3} isDark={isDark} />
+          <Text style={[s.welcome, { color: textColor }]}>
+            Welcome to SurfVault{firstName ? `, ${firstName}` : ''}!
+          </Text>
           <Text style={[s.title, { color: textColor }]}>Choose your handle</Text>
           <Text style={[s.subtitle, { color: mutedColor }]}>
-            This is how others will find and recognize you on SurfVault
+            This is how the surf community will find you. You can change it anytime.
           </Text>
 
           <View style={[s.handleInputWrap, { backgroundColor: inputBg }]}>
@@ -194,6 +224,12 @@ export default function OnboardingScreen() {
               {updatingHandle ? 'Setting up...' : 'Continue'}
             </Text>
           </Pressable>
+
+          <Pressable onPress={logout} style={s.signOutLink}>
+            <Text style={[s.signOutText, { color: mutedColor }]}>
+              Sign in with a different account
+            </Text>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -202,7 +238,7 @@ export default function OnboardingScreen() {
   if (step === 'type') {
     return (
       <SafeAreaView style={[s.container, { backgroundColor: bg }]} edges={['top']}>
-        <View style={s.content}>
+        <View style={[s.content, { paddingBottom: bottomPad }]}>
           <StepIndicator current={2} total={3} isDark={isDark} />
           <Text style={[s.title, { color: textColor }]}>How will you use SurfVault?</Text>
           <Text style={[s.subtitle, { color: mutedColor }]}>You can change this later in settings</Text>
@@ -216,11 +252,13 @@ export default function OnboardingScreen() {
             ]}
           >
             <View style={s.optionRow}>
-              <Text style={s.optionEmoji}>🏄‍♂️</Text>
+              <View style={[s.optionIconWrap, { backgroundColor: userType === 'surfer' ? '#e0f2fe' : (isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9') }]}>
+                <MaterialCommunityIcons name="surfing" size={24} color={userType === 'surfer' ? '#0ea5e9' : mutedColor} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={[s.optionTitle, { color: textColor }]}>Surfer</Text>
                 <Text style={[s.optionDescription, { color: mutedColor }]}>
-                  I want to find photos of myself surfing
+                  Track my surf journey and find photos of myself
                 </Text>
               </View>
               {userType === 'surfer' && <Ionicons name="checkmark-circle" size={22} color="#0ea5e9" />}
@@ -236,20 +274,20 @@ export default function OnboardingScreen() {
             ]}
           >
             <View style={s.optionRow}>
-              <Text style={s.optionEmoji}>📸</Text>
+              <View style={[s.optionIconWrap, { backgroundColor: userType === 'photographer' ? '#e0f2fe' : (isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9') }]}>
+                <Ionicons name="camera-outline" size={24} color={userType === 'photographer' ? '#0ea5e9' : mutedColor} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={[s.optionTitle, { color: textColor }]}>Photographer</Text>
                 <Text style={[s.optionDescription, { color: mutedColor }]}>
-                  I shoot surf photos and want to share them
+                  Upload and share my surf session photos
                 </Text>
               </View>
               {userType === 'photographer' && <Ionicons name="checkmark-circle" size={22} color="#0ea5e9" />}
             </View>
           </Pressable>
 
-          <View style={s.spacer} />
-
-          <Text style={[s.sectionLabel, { color: textColor }]}>Profile visibility</Text>
+          <Text style={[s.sectionLabel, { color: textColor, marginTop: 24 }]}>Profile visibility</Text>
 
           <View style={s.toggleRow}>
             <Pressable
@@ -261,9 +299,10 @@ export default function OnboardingScreen() {
                 },
               ]}
             >
-              <Text style={[s.toggleText, { color: isPublic ? '#fff' : textColor }]}>
-                🌍  Public
-              </Text>
+              <View style={s.toggleInner}>
+                <Ionicons name="globe-outline" size={16} color={isPublic ? '#fff' : mutedColor} />
+                <Text style={[s.toggleText, { color: isPublic ? '#fff' : textColor }]}>Public</Text>
+              </View>
             </Pressable>
             <Pressable
               onPress={() => setIsPublic(false)}
@@ -274,16 +313,17 @@ export default function OnboardingScreen() {
                 },
               ]}
             >
-              <Text style={[s.toggleText, { color: !isPublic ? '#fff' : textColor }]}>
-                🔒  Private
-              </Text>
+              <View style={s.toggleInner}>
+                <Ionicons name="lock-closed-outline" size={16} color={!isPublic ? '#fff' : mutedColor} />
+                <Text style={[s.toggleText, { color: !isPublic ? '#fff' : textColor }]}>Private</Text>
+              </View>
             </Pressable>
           </View>
 
           <Text style={[s.hintText, { color: mutedColor, marginTop: 8 }]}>
             {isPublic
-              ? 'Your sessions will be visible to everyone.'
-              : 'Your profile is discoverable, but sessions require approved access requests.'}
+              ? 'Your sessions will be visible to everyone. You can still hide the location of individual sessions if you wish.'
+              : 'Your profile is still discoverable, but users must request access to view your sessions and photos.'}
           </Text>
 
           <View style={s.spacer} />
@@ -305,7 +345,7 @@ export default function OnboardingScreen() {
   // Picture step
   return (
     <SafeAreaView style={[s.container, { backgroundColor: bg }]} edges={['top']}>
-      <View style={s.content}>
+      <View style={[s.content, { paddingBottom: bottomPad }]}>
         <StepIndicator current={3} total={3} isDark={isDark} />
         <Text style={[s.title, { color: textColor }]}>Add a profile picture</Text>
         <Text style={[s.subtitle, { color: mutedColor }]}>
@@ -380,6 +420,12 @@ const s = StyleSheet.create({
     height: 6,
     borderRadius: 3,
   },
+  welcome: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 6,
+    opacity: 0.6,
+  },
   title: {
     fontSize: 26,
     fontWeight: '700',
@@ -441,7 +487,13 @@ const s = StyleSheet.create({
     alignItems: 'center',
     gap: 14,
   },
-  optionEmoji: { fontSize: 28 },
+  optionIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   optionTitle: { fontSize: 17, fontWeight: '700', marginBottom: 2 },
   optionDescription: { fontSize: 13, lineHeight: 18 },
   sectionLabel: { fontSize: 14, fontWeight: '600', marginBottom: 10 },
@@ -454,6 +506,11 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',
+  },
+  toggleInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   toggleText: { fontSize: 15, fontWeight: '600' },
   picPickerWrap: {
@@ -475,4 +532,13 @@ const s = StyleSheet.create({
   },
   picPlaceholderText: { fontSize: 13, textAlign: 'center', paddingHorizontal: 16 },
   spacer: { flex: 1 },
+  signOutLink: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  signOutText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
 });

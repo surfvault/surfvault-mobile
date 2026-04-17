@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import {
   useGetNearbyPhotographersQuery,
   useGetMapSearchContentQuery,
   useGetPopularTagsQuery,
+  useGetAdsQuery,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
@@ -30,6 +31,9 @@ import SessionCard from '../../src/components/SessionCard';
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
+import SponsoredCard from '../../src/components/SponsoredCard';
+import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
+import { useUserCoords } from '../../src/hooks/useUserCoords';
 
 type SearchType = 'surf_break' | 'photographer';
 
@@ -43,6 +47,8 @@ export default function HomeScreen() {
 
   // Location — read from Redux (set by map page when permission is granted)
   const coords = useSelector((state: any) => state.location.coordinates);
+  // Also request on first home visit if the user never opened the map tab
+  const { lat: userLat, lon: userLon, hasCoords } = useUserCoords();
 
   // ---- Viewability tracking ----
   const [viewableIds, setViewableIds] = useState<Set<string>>(new Set());
@@ -154,6 +160,28 @@ export default function HomeScreen() {
   const nearbyBreaks = nearbyBreaksData?.results?.surfBreaks ?? [];
   const nearbyPhotographers = nearbyPhotographersData?.results?.photographers ?? [];
   const popularTags = tagsData?.results?.tags ?? [];
+
+  // Ads for the home feed — geo-boosted when we have user coords.
+  // Mobile has no sidebar rail, so we pull ALL eligible ads (no placement filter)
+  // and render them all as post-style cards in the feed. This keeps "sidebar"
+  // inventory from being wasted on mobile, which is where most traffic lands.
+  const { data: adsData } = useGetAdsQuery({
+    feed: true,
+    lat: hasCoords && userLat != null ? userLat : undefined,
+    lon: hasCoords && userLon != null ? userLon : undefined,
+    limit: 10,
+  });
+  const feedAds = useMemo(
+    () => adsData?.results?.ads || [],
+    [adsData]
+  );
+
+  // Interleave ads using the shared cadence — matches web so both platforms
+  // show ads at the same feed positions.
+  const feedRows = useMemo(
+    () => interleaveAds(sessions, feedAds) as FeedRow<any, any>[],
+    [sessions, feedAds]
+  );
 
   // Parse search results — API returns searchContent array, dedupe by composite key
   const rawSearchContent = searchData?.results?.searchContent ?? [];
@@ -461,18 +489,30 @@ export default function HomeScreen() {
         </View>
       ) : (
         <FlatList
-          data={sessions}
-          keyExtractor={(item) => item.session_id ?? item.id}
-          renderItem={({ item }) => (
-            <SessionCard
-              session={item}
-              isViewable={viewableIds.has(item.session_id ?? item.id)}
-              onPress={() => {
-                const sid = item.session_id ?? item.id;
-                if (sid) trackedPush(`/session/${sid}` as any);
-              }}
-            />
-          )}
+          data={feedRows}
+          keyExtractor={(row) => row.key}
+          renderItem={({ item: row }) => {
+            if (row.type === 'ad') {
+              return (
+                <SponsoredCard
+                  ad={row.data}
+                  placement="content"
+                  isViewable={viewableIds.has(row.key)}
+                />
+              );
+            }
+            const item = row.data;
+            return (
+              <SessionCard
+                session={item}
+                isViewable={viewableIds.has(row.key)}
+                onPress={() => {
+                  const sid = item.session_id ?? item.id;
+                  if (sid) trackedPush(`/session/${sid}` as any);
+                }}
+              />
+            );
+          }}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           ListHeaderComponent={

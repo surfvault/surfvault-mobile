@@ -25,6 +25,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const {
     authorize,
     clearSession,
+    clearCredentials,
     getCredentials,
     isLoading: auth0Loading,
     error,
@@ -94,19 +95,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }).catch(() => {}); // fire and forget
       }
 
-      // Skip clearSession entirely — just clear local tokens
-      // clearSession opens a browser modal which we don't want
+      // Clear Auth0 credentials from Keychain so the next authorize()
+      // can't silently reuse the previous user's session.
+      // We skip clearSession() (which opens a browser modal for Auth0's
+      // /v2/logout endpoint) and instead clear only the local credentials.
+      await clearCredentials();
     } catch (e) {
       console.error('Logout failed:', e);
     } finally {
-      // Always clear local state regardless of Auth0 session clear result
+      // Always clear local state regardless of Auth0 credential clear result
       await clearAuthToken();
       setToken(null);
       setIsAuthenticated(false);
       // Reset all RTK Query caches so stale user data is gone
       store.dispatch(rootApi.util.resetApiState());
     }
-  }, [clearSession]);
+  }, [clearCredentials]);
 
   return (
     <AuthContext.Provider

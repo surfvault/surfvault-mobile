@@ -23,9 +23,12 @@ import {
   useGetUserQuery,
   useGetUserSessionsQuery,
   useFollowUserMutation,
+  useGetAdsQuery,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import SponsoredCard from '../../src/components/SponsoredCard';
+import { useUserCoords } from '../../src/hooks/useUserCoords';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -57,6 +60,20 @@ export default function UserProfileScreen() {
   const { data: sessionsData, isFetching: sessionsFetching } = useGetUserSessionsQuery(
     { handle: handle ?? '', selfFlag: isSelf, limit: 10, continuationToken },
     { skip: !profile }
+  );
+
+  // Local ads for empty-state treatment: if the photographer has zero sessions,
+  // show local-to-viewer sponsored cards so the page never looks barren.
+  const { lat: viewerLat, lon: viewerLon, hasCoords } = useUserCoords();
+  const { data: adsData } = useGetAdsQuery({
+    feed: true,
+    lat: hasCoords && viewerLat != null ? viewerLat : undefined,
+    lon: hasCoords && viewerLon != null ? viewerLon : undefined,
+    placement: 'content',
+    limit: 3,
+  });
+  const emptyStateAds = ((adsData?.results?.ads as any[]) || []).filter(
+    (a) => a.placement_key === 'content'
   );
 
   useEffect(() => {
@@ -212,8 +229,23 @@ export default function UserProfileScreen() {
               </>
             }
             ListEmptyComponent={
-              <View style={{ alignItems: 'center', paddingVertical: 48 }}>
-                <Text style={{ color: '#9ca3af' }}>No sessions yet</Text>
+              <View style={{ paddingVertical: 32, paddingHorizontal: 12 }}>
+                <View style={{ alignItems: 'center', paddingBottom: 24 }}>
+                  <Text style={{ color: '#9ca3af' }}>No sessions yet</Text>
+                </View>
+                {emptyStateAds.length > 0 && (
+                  <>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: isDark ? '#fff' : '#111827', marginBottom: 2 }}>
+                      Local businesses
+                    </Text>
+                    <Text style={{ fontSize: 12, color: isDark ? '#9ca3af' : '#6b7280', marginBottom: 16 }}>
+                      Support the surf community near you
+                    </Text>
+                    {emptyStateAds.slice(0, 3).map((ad) => (
+                      <SponsoredCard key={ad.id} ad={ad} placement="content" />
+                    ))}
+                  </>
+                )}
               </View>
             }
             ListFooterComponent={

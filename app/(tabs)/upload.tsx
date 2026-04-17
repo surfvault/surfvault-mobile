@@ -42,7 +42,14 @@ interface SelectedFile {
   type: string;
 }
 
-const formatDateParam = (date: Date): string => date.toISOString().split('T')[0];
+// Build the YYYY-MM-DD string from LOCAL date components, not UTC.
+// DateTimePicker returns a Date that keeps the current time-of-day, so
+// `toISOString()` can roll into UTC's calendar day — storing April 13
+// when the user picked April 14 in their local tz. getFullYear/getMonth/
+// getDate preserves the picked calendar day regardless of time. Matches
+// the pattern used in app/break/[...breakRoute].tsx.
+const formatDateParam = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 import { generateUUID } from '../../src/helpers/uuid';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';

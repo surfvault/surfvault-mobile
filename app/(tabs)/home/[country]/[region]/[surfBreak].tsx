@@ -28,9 +28,13 @@ const formatDateLabel = (date: Date): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-const formatDateParam = (date: Date): string => {
-  return date.toISOString().split('T')[0]; // YYYY-MM-DD
-};
+// Use LOCAL date components, not UTC. `toISOString()` can shift the calendar
+// day forward/back when the Date carries a non-midnight time — causing the
+// filtered break page to fetch the wrong day's sessions for users whose
+// timezone straddles UTC midnight. Same fix as /break/[...breakRoute] and
+// /(tabs)/upload.
+const formatDateParam = (date: Date): string =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 export default function SurfBreakDetailScreen() {
   const { country, region, surfBreak } = useLocalSearchParams<{

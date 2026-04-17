@@ -81,6 +81,7 @@ export {
   useDeleteSessionGroupMutation,
   useDoesSurfBreakExistQuery,
   useGetAdsQuery,
+  useRecordAdImpressionMutation,
   useGetLatestSessionsQuery,
   useGetSessionGroupsQuery,
   useGetSessionPhotosQuery,
