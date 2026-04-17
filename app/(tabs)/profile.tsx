@@ -171,17 +171,21 @@ export default function ProfileScreen() {
 
   // Sessions
   const [sessions, setSessions] = useState<any[]>([]);
+  const [continuationToken, setContinuationToken] = useState('');
   const seenIdsRef = useRef(new Set<string>());
+  const hasMoreRef = useRef(false);
+  const isFetchingMoreRef = useRef(false);
 
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: sessionsData, isFetching, refetch: refetchSessions } = useGetUserSessionsQuery(
-    { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken: '' },
+    { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken },
     { skip: !user?.handle }
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    setContinuationToken('');
     await refetchSessions();
     setRefreshing(false);
   }, [refetchSessions]);
@@ -190,21 +194,50 @@ export default function ProfileScreen() {
   useEffect(() => {
     seenIdsRef.current = new Set();
     setSessions([]);
+    setContinuationToken('');
   }, [user?.id]);
 
   useEffect(() => {
-    // Only sync once the query has real data (or has confirmed empty) for this user.
-    // Skip while fetching to avoid flashing stale results from a prior user.
-    if (!sessionsData || isFetching) return;
-    const list = sessionsData?.results?.sessions ?? [];
-    seenIdsRef.current = new Set();
-    const unique = list.filter((s: any) => {
-      const key = s.session_id ?? s.id;
-      if (seenIdsRef.current.has(key)) return false;
-      seenIdsRef.current.add(key);
-      return true;
-    });
-    setSessions(unique);
+    const results = sessionsData?.results;
+    if (!results) return;
+    const list = results.sessions ?? [];
+    const nextToken = results.continuationToken || '';
+    hasMoreRef.current = Boolean(nextToken);
+
+    if (!continuationToken) {
+      // Initial load — replace all
+      seenIdsRef.current = new Set();
+      const unique = list.filter((s: any) => {
+        const key = s.session_id ?? s.id;
+        if (!key || seenIdsRef.current.has(key)) return false;
+        seenIdsRef.current.add(key);
+        return true;
+      });
+      setSessions(unique);
+    } else {
+      // Paginated load — append
+      setSessions((prev) => {
+        const newItems: any[] = [];
+        for (const s of list) {
+          const key = s.session_id ?? s.id;
+          if (!key) continue;
+          if (!seenIdsRef.current.has(key)) {
+            seenIdsRef.current.add(key);
+            newItems.push(s);
+          }
+        }
+        return newItems.length ? prev.concat(newItems) : prev;
+      });
+    }
+    isFetchingMoreRef.current = false;
+  }, [sessionsData]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!hasMoreRef.current || isFetchingMoreRef.current || isFetching) return;
+    const nextToken = sessionsData?.results?.continuationToken;
+    if (!nextToken) return;
+    isFetchingMoreRef.current = true;
+    setContinuationToken(nextToken);
   }, [sessionsData, isFetching]);
 
   const handleToggleActive = useCallback(async () => {
@@ -382,6 +415,9 @@ export default function ProfileScreen() {
         currentBreakName={currentBreakName}
         storageUsed={storageUsed}
         storageLimit={storageLimit}
+        onViewStats={(tab) => {
+          if (user?.handle) trackedPush(`/follow-stats/${user.handle}?tab=${tab}` as any);
+        }}
       />
       <View style={[s.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
         <Pressable onPress={() => setActiveTab('grid')} style={[s.tabBtn, activeTab === 'grid' && s.tabBtnActive]}>
@@ -577,6 +613,13 @@ export default function ProfileScreen() {
             </View>
           )
         }
+        ListFooterComponent={
+          activeTab !== 'favorites' && isFetching && sessions.length > 0 ? (
+            <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View>
+          ) : null
+        }
+        onEndReached={activeTab === 'favorites' ? undefined : handleLoadMore}
+        onEndReachedThreshold={0.5}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}
       />

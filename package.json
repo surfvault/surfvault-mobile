@@ -4,9 +4,17 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
+    "dev": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "ios:device": "expo run:ios --device",
+    "ios:sim": "expo run:ios",
+    "ios:clean": "expo prebuild --clean && expo run:ios --device",
+    "prebuild": "expo prebuild --clean",
+    "web": "expo start --web",
+    "build:dev": "eas build --profile development --platform ios",
+    "build:prod": "eas build --profile production --platform ios",
+    "submit": "eas submit --platform ios"
   },
   "dependencies": {
     "@expo/react-native-action-sheet": "^4.1.1",

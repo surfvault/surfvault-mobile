@@ -155,6 +155,9 @@ export default function UserProfileScreen() {
       onFollow={handleFollow}
       onMessage={handleMessage}
       onShare={handleShare}
+      onViewStats={(tab) => {
+        if (handle) trackedPush(`/follow-stats/${handle}?tab=${tab}` as any);
+      }}
     />
   );
 

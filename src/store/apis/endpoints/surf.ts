@@ -332,6 +332,13 @@ const surfApi = rootApi.injectEndpoints({
         method: 'DELETE',
       }),
     }),
+    reportSurfSession: builder.mutation({
+      query: ({ sessionId, reason, details }: { sessionId: string; reason: string; details?: string }) => ({
+        url: `/surf-sessions/${sessionId}/report`,
+        method: 'POST',
+        body: { reason, details: details ?? '' },
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -357,6 +364,7 @@ export const {
   useDeleteSessionGroupMutation,
   useUpdateGroupPhotosMutation,
   useDeleteSessionMutation,
+  useReportSurfSessionMutation,
 } = surfApi;
 
 export { surfApi };

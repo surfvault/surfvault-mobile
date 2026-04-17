@@ -6,6 +6,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetOption, ActionSheetSection, ActionSheetHeader } from './ActionSheet';
+import ReportSessionSheet from './ReportSessionSheet';
 import { useUser } from '../context/UserProvider';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import { useTrackedPush } from '../context/NavigationContext';
@@ -117,6 +118,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
   const [followUser] = useFollowUserMutation();
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
 
   const sessionId = session.session_id ?? session.id;
   const handle = session.user_handle ?? session.handle;
@@ -222,7 +224,12 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
         label: 'Report',
         icon: 'flag-outline',
         destructive: true,
-        onPress: () => Alert.alert('Report', 'This session has been reported. Thank you.'),
+        onPress: () => {
+          // Auth required — guests get prompted to sign in instead.
+          // Keeps moderation reports accountable (reporter user_id in email).
+          if (!requireAuth()) return;
+          setReportVisible(true);
+        },
       }],
     });
   }
@@ -356,6 +363,12 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
           imageUri: session.thumbnail,
         }}
         onClose={() => setSheetVisible(false)}
+      />
+
+      <ReportSessionSheet
+        visible={reportVisible}
+        sessionId={session.session_id ?? session.id}
+        onClose={() => setReportVisible(false)}
       />
     </View>
   );

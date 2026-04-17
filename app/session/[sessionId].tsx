@@ -52,6 +52,7 @@ import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
+import ReportSessionSheet from '../../src/components/ReportSessionSheet';
 import { toOriginalKey, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl';
 import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
 import { useUpload } from '../../src/context/UploadContext';
@@ -115,6 +116,7 @@ export default function SessionDetailScreen() {
   const [sessionAction, setSessionAction] = useState<string | null>(null);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [isStartingUpload, setIsStartingUpload] = useState(false);
 
@@ -632,7 +634,17 @@ export default function SessionDetailScreen() {
     }] : []),
     ...(!isOwner ? [{
       options: [
-        { label: 'Report', icon: 'flag-outline' as const, destructive: true, onPress: () => Alert.alert('Report', 'This session has been reported. Thank you.') },
+        {
+          label: 'Report',
+          icon: 'flag-outline' as const,
+          destructive: true,
+          onPress: () => {
+            // Auth required — prompts Auth0 login if guest.
+            // Accountability matters for moderation reports.
+            if (!requireAuth()) return;
+            setReportSheetVisible(true);
+          },
+        },
       ],
     }] : []),
   ];
@@ -981,6 +993,12 @@ export default function SessionDetailScreen() {
         visible={sheetVisible}
         sections={ellipsisSections}
         onClose={() => setSheetVisible(false)}
+      />
+
+      <ReportSessionSheet
+        visible={reportSheetVisible}
+        sessionId={session?.id}
+        onClose={() => setReportSheetVisible(false)}
       />
 
       {/* Photo long-press action sheet */}

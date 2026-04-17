@@ -10,12 +10,13 @@ import {
   useColorScheme,
   StyleSheet,
   TextInput,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
 import {
   useGetLatestSessionsQuery,
@@ -35,7 +36,7 @@ import SponsoredCard from '../../src/components/SponsoredCard';
 import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
 
-type SearchType = 'surf_break' | 'photographer';
+type SearchType = 'surf_break' | 'user';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -144,13 +145,13 @@ export default function HomeScreen() {
   );
 
   // Search — uses /map/search which returns { results: { searchContent: [...] } }
-  // API accepts type: "all" | "surf_break" | "photographer"
-  const hasTagFilter = searchType === 'photographer' && selectedTags.length > 0;
+  // API accepts type: "all" | "surf_break" | "photographer" (legacy) | "user" (all users)
+  const hasTagFilter = searchType === 'user' && selectedTags.length > 0;
   const { data: searchData, isFetching: searchLoading } = useGetMapSearchContentQuery(
     {
       search: searchTerm,
-      type: searchType, // "surf_break" or "photographer" — matches API
-      tags: searchType === 'photographer' ? selectedTags : [],
+      type: searchType, // "surf_break" or "user" — "user" returns surfers + photographers
+      tags: searchType === 'user' ? selectedTags : [],
     },
     { skip: searchTerm.length < 2 && !hasTagFilter }
   );
@@ -201,6 +202,7 @@ export default function HomeScreen() {
   const recentSearches = user?.recentSearches ?? [];
   const filteredRecents = recentSearches.filter((r: any) => {
     if (searchType === 'surf_break') return r.itemType === 'surf_break';
+    // "user" mode shows any recent person search (surfers + photographers).
     return r.itemType === 'user';
   });
 
@@ -222,6 +224,7 @@ export default function HomeScreen() {
   }, [setTabBarVisible]);
 
   const closeSearch = useCallback(() => {
+    Keyboard.dismiss();
     setSearchVisible(false);
     setTabBarVisible(true);
     setSearchTerm('');
@@ -229,6 +232,7 @@ export default function HomeScreen() {
   }, [setTabBarVisible]);
 
   const navigateAndClose = useCallback((path: string) => {
+    Keyboard.dismiss();
     setSearchVisible(false);
     setTabBarVisible(true);
     setSearchTerm('');
@@ -275,7 +279,7 @@ export default function HomeScreen() {
           <Ionicons name="search-outline" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
           <TextInput
             ref={searchInputRef}
-            placeholder={searchType === 'photographer' ? 'Search photographers...' : 'Search surf breaks...'}
+            placeholder={searchType === 'user' ? 'Search people...' : 'Search surf breaks...'}
             placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
             onChangeText={handleSearchInput}
             autoCapitalize="none"
@@ -300,13 +304,13 @@ export default function HomeScreen() {
               styles.toggleText,
               { color: searchType === 'surf_break' ? (isDark ? '#fff' : '#111827') : (isDark ? '#9ca3af' : '#6b7280') },
               searchType === 'surf_break' && styles.toggleTextActive,
-            ]}>Surf Breaks</Text>
+            ]}>Breaks</Text>
           </Pressable>
           <Pressable
-            onPress={() => { setSearchType('photographer'); setSearchTerm(''); }}
+            onPress={() => { setSearchType('user'); setSearchTerm(''); }}
             style={[
               styles.toggleBtn,
-              searchType === 'photographer' && {
+              searchType === 'user' && {
                 backgroundColor: isDark ? '#374151' : '#ffffff',
                 shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
               },
@@ -314,14 +318,14 @@ export default function HomeScreen() {
           >
             <Text style={[
               styles.toggleText,
-              { color: searchType === 'photographer' ? (isDark ? '#fff' : '#111827') : (isDark ? '#9ca3af' : '#6b7280') },
-              searchType === 'photographer' && styles.toggleTextActive,
-            ]}>Photographers</Text>
+              { color: searchType === 'user' ? (isDark ? '#fff' : '#111827') : (isDark ? '#9ca3af' : '#6b7280') },
+              searchType === 'user' && styles.toggleTextActive,
+            ]}>People</Text>
           </Pressable>
         </View>
 
-        {/* Tags — photographers only */}
-        {searchType === 'photographer' && popularTags.length > 0 && (
+        {/* Tags — people search only (naturally surfaces photographers since surfers have no tags) */}
+        {searchType === 'user' && popularTags.length > 0 && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -355,7 +359,12 @@ export default function HomeScreen() {
         )}
 
         {/* Results / Recents / Default */}
-        <ScrollView style={styles.flex} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          style={styles.flex}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
           {isSearching ? (
             /* ---- Active search results ---- */
             <View style={styles.resultsWrap}>
@@ -365,6 +374,7 @@ export default function HomeScreen() {
                 searchContent.map((item: any) => {
                   // User result
                   if (item.handle) {
+                    const userType = item.user_type;
                     return (
                       <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
                         <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} />
@@ -372,9 +382,23 @@ export default function HomeScreen() {
                           <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
                             {item.name ?? item.handle}
                           </Text>
-                          <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                            @{item.handle}
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
+                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', flexShrink: 1 }]} numberOfLines={1}>
+                              @{item.handle}
+                            </Text>
+                            {userType === 'photographer' && (
+                              <>
+                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
+                                <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
+                              </>
+                            )}
+                            {userType && userType !== 'photographer' && (
+                              <>
+                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
+                                <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
+                              </>
+                            )}
+                          </View>
                         </View>
                       </Pressable>
                     );
@@ -398,7 +422,7 @@ export default function HomeScreen() {
                 })
               ) : (
                 <Text style={[styles.emptyText, { color: '#9ca3af' }]}>
-                  No {searchType === 'photographer' ? 'photographers' : 'surf breaks'} found
+                  No {searchType === 'user' ? 'people' : 'surf breaks'} found
                 </Text>
               )}
             </View>
@@ -415,6 +439,7 @@ export default function HomeScreen() {
                     if (!item) return null;
 
                     if (recent.itemType === 'user' && item.handle) {
+                      const userType = item.user_type;
                       return (
                         <Pressable key={item.id ?? idx} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
                           <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={36} />
@@ -422,9 +447,23 @@ export default function HomeScreen() {
                             <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
                               {item.name ?? item.handle}
                             </Text>
-                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                              @{item.handle}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
+                              <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', flexShrink: 1 }]} numberOfLines={1}>
+                                @{item.handle}
+                              </Text>
+                              {userType === 'photographer' && (
+                                <>
+                                  <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
+                                  <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
+                                </>
+                              )}
+                              {userType && userType !== 'photographer' && (
+                                <>
+                                  <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
+                                  <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
+                                </>
+                              )}
+                            </View>
                           </View>
                         </Pressable>
                       );
@@ -453,7 +492,7 @@ export default function HomeScreen() {
               {filteredRecents.length === 0 && (
                 <View style={styles.centered}>
                   <Text style={{ color: '#9ca3af', fontSize: 14 }}>
-                    Search for {searchType === 'photographer' ? 'photographers' : 'surf breaks'}
+                    Search for {searchType === 'user' ? 'people' : 'surf breaks'}
                   </Text>
                 </View>
               )}

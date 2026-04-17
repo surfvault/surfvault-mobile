@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useCallback } from 'react';
 import { Tabs } from 'expo-router';
-import { useColorScheme, View } from 'react-native';
+import { useColorScheme, View, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useUser } from '../../src/context/UserProvider';
@@ -39,12 +39,15 @@ function TabsInner() {
     },
   }), [tabMap, setActiveTab]);
 
-  const { data: unreadData } = useGetUnreadMessageCountQuery(undefined, { skip: !isAuthenticated });
+  const { data: unreadData, refetch: refetchUnread } = useGetUnreadMessageCountQuery(
+    undefined,
+    { skip: !isAuthenticated }
+  );
   const unreadCount = isAuthenticated
-    ? (unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0)
+    ? Number(unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0) || 0
     : 0;
 
-  const { data: notifData } = useGetNotificationsQuery(
+  const { data: notifData, refetch: refetchNotifs } = useGetNotificationsQuery(
     { read: false, filter: '', limit: 0, continuationToken: '' },
     { skip: !isAuthenticated }
   );
@@ -52,7 +55,22 @@ function TabsInner() {
     ? (notifData?.results?.notifications?.length ?? 0)
     : 0;
 
-  // Update app badge count (clears to 0 on logout)
+  // Refetch counts when app returns to foreground. RTK Query's refetchOnFocus
+  // depends on setupListeners having a React Native AppState bridge, which we
+  // don't have, so we wire it here manually for the badge-driving queries.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        refetchUnread();
+        refetchNotifs();
+      }
+    });
+    return () => sub.remove();
+  }, [isAuthenticated, refetchUnread, refetchNotifs]);
+
+  // Update app icon badge count. Always reflects unreadMessages + unreadNotifications.
+  // Clears to 0 on logout (both values become 0 when queries are skipped).
   useEffect(() => {
     const total = unreadCount + unreadNotifCount;
     Notifications.setBadgeCountAsync(total).catch(() => {});
