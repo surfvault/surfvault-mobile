@@ -27,6 +27,8 @@ interface ProfileHeaderProps {
   onFollow?: () => void;
   onMessage?: () => void;
   onShare?: () => void;
+  // Tap a stat count to open followers/following list
+  onViewStats?: (tab: 'followers' | 'following') => void;
 }
 
 export default function ProfileHeader({
@@ -44,6 +46,7 @@ export default function ProfileHeader({
   onFollow,
   onMessage,
   onShare,
+  onViewStats,
   showStorage = false,
   showActiveToggle = false,
 }: ProfileHeaderProps) {
@@ -120,26 +123,46 @@ export default function ProfileHeader({
           </View>
 
           {/* Stats */}
-          <View style={s.statsRow}>
-            <View style={s.statItem}>
-              <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
-                {profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0}
-              </Text>
-              <Text style={s.statLabel}>spots</Text>
-            </View>
-            <View style={s.statItem}>
-              <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
-                {profile?.followersCount ?? profile?.follower_count ?? profile?.followers_count ?? 0}
-              </Text>
-              <Text style={s.statLabel}>followers</Text>
-            </View>
-            <View style={s.statItem}>
-              <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
-                {profile?.followingCount ?? profile?.following_count ?? 0}
-              </Text>
-              <Text style={s.statLabel}>following</Text>
-            </View>
-          </View>
+          {(() => {
+            // Followers/following are viewable when:
+            //  - it's your own profile, OR
+            //  - the profile is public (not private)
+            // Backend /user/{handle}/follow-stats enforces access on private profiles.
+            const isPrivate = profile?.access === 'private';
+            const statsTappable = Boolean(onViewStats) && (isSelf || !isPrivate);
+            return (
+              <View style={s.statsRow}>
+                <View style={s.statItem}>
+                  <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
+                    {profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0}
+                  </Text>
+                  <Text style={s.statLabel}>spots</Text>
+                </View>
+                <Pressable
+                  onPress={statsTappable ? () => onViewStats?.('followers') : undefined}
+                  disabled={!statsTappable}
+                  style={s.statItem}
+                  hitSlop={4}
+                >
+                  <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
+                    {profile?.followersCount ?? profile?.follower_count ?? profile?.followers_count ?? 0}
+                  </Text>
+                  <Text style={s.statLabel}>followers</Text>
+                </Pressable>
+                <Pressable
+                  onPress={statsTappable ? () => onViewStats?.('following') : undefined}
+                  disabled={!statsTappable}
+                  style={s.statItem}
+                  hitSlop={4}
+                >
+                  <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
+                    {profile?.followingCount ?? profile?.following_count ?? 0}
+                  </Text>
+                  <Text style={s.statLabel}>following</Text>
+                </Pressable>
+              </View>
+            );
+          })()}
         </View>
       </View>
 

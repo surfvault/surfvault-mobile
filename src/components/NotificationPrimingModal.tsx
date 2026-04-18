@@ -61,7 +61,16 @@ export default function NotificationPrimingModal({ isOnboarded, onPermissionChan
   const handleEnable = useCallback(async () => {
     setRequesting(true);
     try {
-      await Notifications.requestPermissionsAsync();
+      // Explicitly request alert + badge + sound on iOS so the app icon
+      // badge works. Defaults omit badge, which causes setBadgeCountAsync
+      // to silently no-op and the home-screen icon to never update.
+      await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: true,
+          allowSound: true,
+        },
+      });
       onPermissionChanged?.();
     } catch {
       // no-op
