@@ -1071,18 +1071,20 @@ export default function SessionDetailScreen() {
                         <Text style={[styles.tagResultName, { color: isDark ? '#ffffff' : '#111827' }]}>{tu.name ?? tu.handle}</Text>
                         <Text style={[styles.tagResultHandle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>@{tu.handle}</Text>
                       </View>
-                      <Pressable
-                        onPress={async () => {
-                          try {
-                            await updateTaggedUsers({ sessionId: session!.id, userId: tu.id, action: 'remove' }).unwrap();
-                          } catch {
-                            Alert.alert('Error', 'Failed to remove tag.');
-                          }
-                        }}
-                        style={[styles.tagActionBtn, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }]}
-                      >
-                        <Text style={[styles.tagActionText, { color: '#ef4444' }]}>Remove</Text>
-                      </Pressable>
+                      {isOwner && (
+                        <Pressable
+                          onPress={async () => {
+                            try {
+                              await updateTaggedUsers({ sessionId: session!.id, userId: tu.id, action: 'remove' }).unwrap();
+                            } catch {
+                              Alert.alert('Error', 'Failed to remove tag.');
+                            }
+                          }}
+                          style={[styles.tagActionBtn, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }]}
+                        >
+                          <Text style={[styles.tagActionText, { color: '#ef4444' }]}>Remove</Text>
+                        </Pressable>
+                      )}
                     </View>
                   ));
                 }
