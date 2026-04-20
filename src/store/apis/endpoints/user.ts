@@ -165,7 +165,7 @@ const userApi = rootApi.injectEndpoints({
       }),
     }),
     updateAccessRequest: builder.mutation({
-      invalidatesTags: [ApiTag.User],
+      invalidatesTags: [ApiTag.User, ApiTag.Notification],
       query: ({
         requestId,
         action,

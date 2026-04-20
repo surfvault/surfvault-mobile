@@ -24,11 +24,15 @@ import {
   useGetUserSessionsQuery,
   useFollowUserMutation,
   useGetAdsQuery,
+  useGetAccessRequestQuery,
+  useRequestAccessToUserMutation,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
+import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
+import ContactUserSheet from '../../src/components/ContactUserSheet';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -61,6 +65,22 @@ export default function UserProfileScreen() {
     { handle: handle ?? '', selfFlag: isSelf, limit: 10, continuationToken },
     { skip: !profile }
   );
+
+  // Access request (for private profiles)
+  const isPrivate = profile?.access === 'private' && !isSelf;
+  const { data: accessData } = useGetAccessRequestQuery(
+    { photographerHandle: handle ?? '' },
+    { skip: !currentUser || !isPrivate || !handle }
+  );
+  const accessRequest = accessData?.results?.accessRequest;
+  const isLocked = isPrivate && accessRequest?.access_status !== 'approved';
+  const [requestAccessToUser, { isLoading: isSendingRequest }] = useRequestAccessToUserMutation();
+  const handleRequestAccess = useCallback(() => {
+    if (!requireAuth()) return;
+    if (!handle) return;
+    if (accessRequest?.access_status === 'pending') return;
+    requestAccessToUser({ photographerHandle: handle });
+  }, [requireAuth, handle, accessRequest, requestAccessToUser]);
 
   // Local ads for empty-state treatment: if the photographer has zero sessions,
   // show local-to-viewer sponsored cards so the page never looks barren.
@@ -120,13 +140,16 @@ export default function UserProfileScreen() {
   }, [sessionsData, sessionsFetching]);
 
   // Follow
-  const [followUser] = useFollowUserMutation();
+  const [followUser, { isLoading: isFollowLoading }] = useFollowUserMutation();
   const handleFollow = useCallback(() => {
     if (!requireAuth()) return;
     if (!profile?.id) return;
     const action = profile.isFollowing ? 'unfollow' : 'follow';
     followUser({ userId: profile.id, action });
   }, [profile, requireAuth, followUser]);
+
+  // Message — open existing convo or compose sheet for a new one
+  const [contactSheetVisible, setContactSheetVisible] = useState(false);
 
   // Share profile
   const handleShare = useCallback(async () => {
@@ -141,9 +164,14 @@ export default function UserProfileScreen() {
     if (!requireAuth()) return;
     if (profile?.conversationId) {
       trackedPush(`/conversation/${profile.conversationId}` as any);
+      return;
     }
-    // If no existing conversation, the start conversation flow will be handled separately
-  }, [requireAuth, profile, router]);
+    setContactSheetVisible(true);
+  }, [requireAuth, profile, trackedPush]);
+
+  const handleConversationStarted = useCallback((conversationId: string) => {
+    trackedPush(`/conversation/${conversationId}` as any);
+  }, [trackedPush]);
 
   const UserProfileHeader = () => (
     <ProfileHeader
@@ -151,6 +179,7 @@ export default function UserProfileScreen() {
       isDark={isDark}
       isSelf={isSelf}
       isFollowing={profile?.isFollowing}
+      isFollowLoading={isFollowLoading}
       currentBreakName={profile?.surf_break_name}
       onFollow={handleFollow}
       onMessage={handleMessage}
@@ -177,10 +206,10 @@ export default function UserProfileScreen() {
           <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
         ) : (
           <FlatList
-            data={sessions}
+            data={isLocked ? [] : sessions}
             keyExtractor={(item) => item.session_id ?? item.id}
-            numColumns={activeTab === 'grid' ? 3 : 1}
-            key={activeTab === 'grid' ? 'grid' : 'list'}
+            numColumns={isLocked ? 1 : (activeTab === 'grid' ? 3 : 1)}
+            key={isLocked ? 'locked' : (activeTab === 'grid' ? 'grid' : 'list')}
             renderItem={({ item }) => {
               if (activeTab === 'grid') {
                 const GAP = 1;
@@ -220,36 +249,48 @@ export default function UserProfileScreen() {
             ListHeaderComponent={
               <>
                 <UserProfileHeader />
-                {/* Grid / List tabs */}
-                <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
-                  <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
-                    <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
-                  </Pressable>
-                  <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
-                    <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
-                  </Pressable>
-                </View>
+                {/* Grid / List tabs — hidden while gallery is locked */}
+                {!isLocked && (
+                  <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+                    <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
+                      <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                    </Pressable>
+                    <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
+                      <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                    </Pressable>
+                  </View>
+                )}
+                <AccessBanner isPrivate={isPrivate} accessRequest={accessRequest} scope="profile" />
               </>
             }
             ListEmptyComponent={
-              <View style={{ paddingVertical: 32, paddingHorizontal: 12 }}>
-                <View style={{ alignItems: 'center', paddingBottom: 24 }}>
-                  <Text style={{ color: '#9ca3af' }}>No sessions yet</Text>
+              isLocked ? (
+                <PrivateGalleryCard
+                  scope="profile"
+                  accessRequest={accessRequest}
+                  onRequestAccess={handleRequestAccess}
+                  isSending={isSendingRequest}
+                />
+              ) : (
+                <View style={{ paddingVertical: 32, paddingHorizontal: 12 }}>
+                  <View style={{ alignItems: 'center', paddingBottom: 24 }}>
+                    <Text style={{ color: '#9ca3af' }}>No sessions yet</Text>
+                  </View>
+                  {emptyStateAds.length > 0 && (
+                    <>
+                      <Text style={{ fontSize: 15, fontWeight: '700', color: isDark ? '#fff' : '#111827', marginBottom: 2 }}>
+                        Local businesses
+                      </Text>
+                      <Text style={{ fontSize: 12, color: isDark ? '#9ca3af' : '#6b7280', marginBottom: 16 }}>
+                        Support the surf community near you
+                      </Text>
+                      {emptyStateAds.slice(0, 3).map((ad) => (
+                        <SponsoredCard key={ad.id} ad={ad} placement="content" />
+                      ))}
+                    </>
+                  )}
                 </View>
-                {emptyStateAds.length > 0 && (
-                  <>
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: isDark ? '#fff' : '#111827', marginBottom: 2 }}>
-                      Local businesses
-                    </Text>
-                    <Text style={{ fontSize: 12, color: isDark ? '#9ca3af' : '#6b7280', marginBottom: 16 }}>
-                      Support the surf community near you
-                    </Text>
-                    {emptyStateAds.slice(0, 3).map((ad) => (
-                      <SponsoredCard key={ad.id} ad={ad} placement="content" />
-                    ))}
-                  </>
-                )}
-              </View>
+              )
             }
             ListFooterComponent={
               sessionsFetching ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null
@@ -260,6 +301,13 @@ export default function UserProfileScreen() {
           />
         )}
       </SafeAreaView>
+
+      <ContactUserSheet
+        visible={contactSheetVisible}
+        user={profile ? { id: profile.id, handle: profile.handle } : null}
+        onClose={() => setContactSheetVisible(false)}
+        onSent={handleConversationStarted}
+      />
     </>
   );
 }
