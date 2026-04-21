@@ -220,15 +220,18 @@ export default function UserProfileScreen() {
       {/* Action buttons */}
       {!isSelf && profile && (
         <View style={styles.actionRow}>
-          <Pressable onPress={handleFollow} style={[styles.actionBtn, {
-            backgroundColor: profile.isFollowing ? (isDark ? '#1f2937' : '#f3f4f6') : '#0ea5e9',
-          }]}>
-            <Text style={[styles.actionBtnText, {
-              color: profile.isFollowing ? (isDark ? '#fff' : '#111827') : '#fff',
+          {/* Follow hidden on private profiles — matches web + top-level user route */}
+          {profile.access !== 'private' && (
+            <Pressable onPress={handleFollow} style={[styles.actionBtn, {
+              backgroundColor: profile.isFollowing ? (isDark ? '#1f2937' : '#f3f4f6') : '#0ea5e9',
             }]}>
-              {profile.isFollowing ? 'Following' : 'Follow'}
-            </Text>
-          </Pressable>
+              <Text style={[styles.actionBtnText, {
+                color: profile.isFollowing ? (isDark ? '#fff' : '#111827') : '#fff',
+              }]}>
+                {profile.isFollowing ? 'Following' : 'Follow'}
+              </Text>
+            </Pressable>
+          )}
           <Pressable onPress={handleMessage} style={[styles.actionBtn, {
             backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
           }]}>
