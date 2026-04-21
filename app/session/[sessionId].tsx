@@ -207,13 +207,26 @@ export default function SessionDetailScreen() {
   const isOwner = !!user?.handle && user.handle === sessionHandle;
   const isFavorited = session?.surf_break_is_favorited;
 
-  // Private-profile access gating
+  // Private-profile access gating. Same fresh-read strategy as the user page.
   const isPrivate = session?.user_access === 'private' && !isOwner;
-  const { data: accessData } = useGetAccessRequestQuery(
+  const { data: accessData, refetch: refetchAccess } = useGetAccessRequestQuery(
     { photographerHandle: sessionHandle ?? '' },
-    { skip: !user || !isPrivate || !sessionHandle }
+    {
+      skip: !user || !isPrivate || !sessionHandle,
+      refetchOnMountOrArgChange: true,
+      refetchOnFocus: true,
+      refetchOnReconnect: true,
+    }
   );
   const accessRequest = accessData?.results?.accessRequest;
+
+  // Poll for approve/reject decisions made from another device.
+  useEffect(() => {
+    if (!isPrivate) return;
+    if (accessRequest?.access_status === 'approved') return;
+    const id = setInterval(() => { refetchAccess(); }, 10000);
+    return () => clearInterval(id);
+  }, [isPrivate, accessRequest?.access_status, refetchAccess]);
   const isLocked = isPrivate && accessRequest?.access_status !== 'approved';
   const [requestAccessToUser, { isLoading: isSendingAccessRequest }] = useRequestAccessToUserMutation();
   const handleRequestAccess = useCallback(() => {

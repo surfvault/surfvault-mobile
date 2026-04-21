@@ -1,4 +1,4 @@
-import { View, Text, Pressable, ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 type AccessStatus = 'pending' | 'approved' | 'rejected' | undefined | null;
@@ -111,7 +111,7 @@ export function PrivateGalleryCard({
           {message}
         </Text>
 
-        {pending ? (
+        {pending && (
           <View
             style={[
               styles.pendingCard,
@@ -121,35 +121,26 @@ export function PrivateGalleryCard({
               },
             ]}
           >
-            <Ionicons
-              name="time-outline"
-              size={16}
-              color={isDark ? '#fbbf24' : '#b45309'}
-            />
+            <Ionicons name="time-outline" size={16} color={isDark ? '#fbbf24' : '#b45309'} />
             <Text style={[styles.pendingText, { color: isDark ? '#fde68a' : '#78350f' }]}>
               Request pending — you'll be notified if it's approved.
             </Text>
           </View>
-        ) : (
-          <Pressable
+        )}
+
+        {!pending && (
+          <TouchableOpacity
             onPress={onRequestAccess}
             disabled={isSending}
-            style={({ pressed }) => [
-              styles.requestBtn,
-              {
-                backgroundColor: '#0284c7',
-                opacity: pressed ? 0.85 : 1,
-              },
-            ]}
+            activeOpacity={0.8}
+            style={styles.requestBtn}
           >
             {isSending ? (
               <ActivityIndicator size="small" color="#ffffff" />
             ) : (
-              <Text style={[styles.requestBtnText, { color: '#ffffff' }]}>
-                Request Access
-              </Text>
+              <Text style={styles.requestBtnText}>Request Access</Text>
             )}
-          </Pressable>
+          </TouchableOpacity>
         )}
       </View>
     </View>
@@ -229,15 +220,19 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   requestBtn: {
-    minWidth: 160,
-    height: 42,
+    minWidth: 180,
+    height: 44,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#0284c7',
+    alignSelf: 'center',
+    marginTop: 4,
   },
   requestBtnText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
+    color: '#ffffff',
   },
 });

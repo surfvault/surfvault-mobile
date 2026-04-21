@@ -10,10 +10,11 @@ import {
   useColorScheme,
   Platform,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
@@ -47,6 +48,7 @@ export default function UserProfileScreen() {
   const [activeTab, setActiveTab] = useState<'grid' | 'list'>('grid');
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const seenIdsRef = useRef(new Set<string>());
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
@@ -54,26 +56,40 @@ export default function UserProfileScreen() {
   const isSelf = currentUser?.handle === handle;
 
   // Profile data
-  const { data: userData, isLoading } = useGetUserQuery({
+  const { data: userData, isLoading, refetch: refetchUser } = useGetUserQuery({
     handle: handle ?? '',
     viewerId: currentUser?.id,
   });
   const profile = userData?.results?.photographer ?? userData?.results;
 
   // Sessions
-  const { data: sessionsData, isFetching: sessionsFetching } = useGetUserSessionsQuery(
+  const { data: sessionsData, isFetching: sessionsFetching, refetch: refetchSessions } = useGetUserSessionsQuery(
     { handle: handle ?? '', selfFlag: isSelf, limit: 10, continuationToken },
     { skip: !profile }
   );
 
-  // Access request (for private profiles)
+  // Access request (for private profiles). Force fresh reads on mount, focus,
+  // reconnect, and every 10s — so approve/reject decisions made on another
+  // device propagate without the viewer having to pull-to-refresh.
   const isPrivate = profile?.access === 'private' && !isSelf;
-  const { data: accessData } = useGetAccessRequestQuery(
+  const { data: accessData, refetch: refetchAccess } = useGetAccessRequestQuery(
     { photographerHandle: handle ?? '' },
-    { skip: !currentUser || !isPrivate || !handle }
+    {
+      skip: !currentUser || !isPrivate || !handle,
+      refetchOnMountOrArgChange: true,
+      refetchOnFocus: true,
+      refetchOnReconnect: true,
+    }
   );
   const accessRequest = accessData?.results?.accessRequest;
   const isLocked = isPrivate && accessRequest?.access_status !== 'approved';
+
+  useEffect(() => {
+    if (!isPrivate) return;
+    if (accessRequest?.access_status === 'approved') return;
+    const id = setInterval(() => { refetchAccess(); }, 10000);
+    return () => clearInterval(id);
+  }, [isPrivate, accessRequest?.access_status, refetchAccess]);
   const [requestAccessToUser, { isLoading: isSendingRequest }] = useRequestAccessToUserMutation();
   const handleRequestAccess = useCallback(() => {
     if (!requireAuth()) return;
@@ -138,6 +154,29 @@ export default function UserProfileScreen() {
     isFetchingMoreRef.current = true;
     setContinuationToken(nextToken);
   }, [sessionsData, sessionsFetching]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    seenIdsRef.current = new Set();
+    setContinuationToken('');
+    try {
+      await Promise.all([
+        refetchUser(),
+        refetchSessions(),
+        isPrivate ? refetchAccess() : Promise.resolve(),
+      ]);
+    } catch {}
+    setRefreshing(false);
+  }, [refetchUser, refetchSessions, refetchAccess, isPrivate]);
+
+  // Refetch latest access state whenever the screen regains focus — covers
+  // cases where the owner approves/rejects from another device while we're
+  // backgrounded or sitting on a different screen.
+  useFocusEffect(
+    useCallback(() => {
+      if (isPrivate) refetchAccess();
+    }, [isPrivate, refetchAccess])
+  );
 
   // Follow
   const [followUser, { isLoading: isFollowLoading }] = useFollowUserMutation();
@@ -298,6 +337,7 @@ export default function UserProfileScreen() {
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5}
             showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           />
         )}
       </SafeAreaView>

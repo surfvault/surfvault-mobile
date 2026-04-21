@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,22 +15,13 @@ import { useRouter, Stack } from 'expo-router';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import ActionSheet, { type ActionSheetOption } from '../../src/components/ActionSheet';
+import ApproveAccessRequestSheet from '../../src/components/ApproveAccessRequestSheet';
 import { Ionicons } from '@expo/vector-icons';
 import {
   useGetNotificationsQuery,
   useMarkNotificationsAsReadMutation,
   useUpdateAccessRequestMutation,
 } from '../../src/store';
-
-const ACCESS_LENGTHS = [
-  '1 week',
-  '2 weeks',
-  '1 month',
-  '3 months',
-  '6 months',
-  '1 year',
-  'Unlimited',
-];
 
 const formatDate = (dateStr: string) => {
   const d = new Date(dateStr);
@@ -99,6 +90,8 @@ export default function NotificationsScreen() {
   const [accessTarget, setAccessTarget] = useState<{ requestId: string; notificationId: string; handle: string } | null>(null);
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
   const [durationSheetVisible, setDurationSheetVisible] = useState(false);
+  const durationSheetVisibleRef = useRef(false);
+  useEffect(() => { durationSheetVisibleRef.current = durationSheetVisible; }, [durationSheetVisible]);
 
   const notifications = data?.results?.notifications ?? [];
   const unread = useMemo(() => notifications.filter((n: any) => !n.is_read), [notifications]);
@@ -125,16 +118,19 @@ export default function NotificationsScreen() {
     setActionSheetVisible(true);
   }, []);
 
+  // Snapshot `accessTarget` on each handler call because ActionSheet's animated
+  // close runs its parent onClose after a delay, and we don't want that to
+  // invalidate state mid-operation.
   const handleReject = useCallback(async () => {
-    if (!accessTarget) return;
-    setActionSheetVisible(false);
+    const target = accessTarget;
+    if (!target) return;
     try {
       await updateAccessRequest({
-        requestId: accessTarget.requestId,
+        requestId: target.requestId,
         action: 'reject',
         accessLength: undefined,
       }).unwrap();
-      await markAsRead({ notificationIds: [accessTarget.notificationId] });
+      await markAsRead({ notificationIds: [target.notificationId] });
     } catch {
       Alert.alert('Error', 'Failed to reject access request.');
     } finally {
@@ -143,19 +139,20 @@ export default function NotificationsScreen() {
   }, [accessTarget, updateAccessRequest, markAsRead]);
 
   const handleApproveWithDuration = useCallback(async (accessLength: string) => {
-    if (!accessTarget) return;
-    setDurationSheetVisible(false);
+    const target = accessTarget;
+    if (!target) throw new Error('No access target');
     try {
       await updateAccessRequest({
-        requestId: accessTarget.requestId,
+        requestId: target.requestId,
         action: 'approve',
         accessLength,
       }).unwrap();
-      await markAsRead({ notificationIds: [accessTarget.notificationId] });
-    } catch {
-      Alert.alert('Error', 'Failed to approve access request.');
-    } finally {
+      await markAsRead({ notificationIds: [target.notificationId] });
+      setDurationSheetVisible(false);
       setAccessTarget(null);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to approve access request.');
+      throw err;
     }
   }, [accessTarget, updateAccessRequest, markAsRead]);
 
@@ -222,15 +219,6 @@ export default function NotificationsScreen() {
     },
   ]), [handleReject]);
 
-  const durationSheetOptions: ActionSheetOption[] = useMemo(
-    () =>
-      ACCESS_LENGTHS.map((length) => ({
-        label: length,
-        icon: length === 'Unlimited' ? 'infinite-outline' : 'time-outline',
-        onPress: () => handleApproveWithDuration(length),
-      })),
-    [handleApproveWithDuration]
-  );
 
   const renderNotification = ({ item }: { item: any }) => {
     const icon = getNotifIcon(item.resource_type);
@@ -347,15 +335,27 @@ export default function NotificationsScreen() {
 
       <ActionSheet
         visible={actionSheetVisible}
-        onClose={() => { setActionSheetVisible(false); setAccessTarget(null); }}
+        onClose={() => {
+          setActionSheetVisible(false);
+          // Only clear the target if the user isn't chaining into the duration sheet.
+          // ActionSheet runs onClose after every option press via an animated close,
+          // so we rely on handlers to null the target when work completes.
+          if (!durationSheetVisible) {
+            // Defer clearing to next tick so an option's onPress (scheduled 250ms
+            // after close) still has the target it needs.
+            setTimeout(() => {
+              if (!durationSheetVisibleRef.current) setAccessTarget(null);
+            }, 400);
+          }
+        }}
         title={accessTarget?.handle ? `${accessTarget.handle}'s access request` : 'Access request'}
         options={actionSheetOptions}
       />
-      <ActionSheet
+      <ApproveAccessRequestSheet
         visible={durationSheetVisible}
+        handle={accessTarget?.handle ?? null}
         onClose={() => { setDurationSheetVisible(false); setAccessTarget(null); }}
-        title="How long should they have access?"
-        options={durationSheetOptions}
+        onConfirm={handleApproveWithDuration}
       />
     </>
   );
