@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,15 +8,19 @@ import {
   ActivityIndicator,
   StyleSheet,
   useColorScheme,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import ActionSheet, { type ActionSheetOption } from '../../src/components/ActionSheet';
+import ApproveAccessRequestSheet from '../../src/components/ApproveAccessRequestSheet';
 import { Ionicons } from '@expo/vector-icons';
 import {
   useGetNotificationsQuery,
   useMarkNotificationsAsReadMutation,
+  useUpdateAccessRequestMutation,
 } from '../../src/store';
 
 const formatDate = (dateStr: string) => {
@@ -80,6 +84,14 @@ export default function NotificationsScreen() {
     setRefreshing(false);
   }, [refetch]);
   const [markAsRead, { isLoading: marking }] = useMarkNotificationsAsReadMutation();
+  const [updateAccessRequest, { isLoading: processingAccess }] = useUpdateAccessRequestMutation();
+
+  // Access-request action sheets: first picks Approve/Reject, second picks a duration on approve.
+  const [accessTarget, setAccessTarget] = useState<{ requestId: string; notificationId: string; handle: string } | null>(null);
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
+  const [durationSheetVisible, setDurationSheetVisible] = useState(false);
+  const durationSheetVisibleRef = useRef(false);
+  useEffect(() => { durationSheetVisibleRef.current = durationSheetVisible; }, [durationSheetVisible]);
 
   const notifications = data?.results?.notifications ?? [];
   const unread = useMemo(() => notifications.filter((n: any) => !n.is_read), [notifications]);
@@ -97,7 +109,60 @@ export default function NotificationsScreen() {
     await markAsRead({ notificationIds: unread.map((n: any) => n.id) });
   }, [unread, markAsRead]);
 
+  const openAccessRequestSheet = useCallback((n: any) => {
+    const status = n.resource_user_access_request?.access_status;
+    // Already decided — no-op (status pill is rendered on the card)
+    if (status === 'approved' || status === 'rejected') return;
+    const handle = n.body?.split(' has ')?.[0] ?? n.metadata_user?.handle ?? '';
+    setAccessTarget({ requestId: n.resource_id, notificationId: n.id, handle });
+    setActionSheetVisible(true);
+  }, []);
+
+  // Snapshot `accessTarget` on each handler call because ActionSheet's animated
+  // close runs its parent onClose after a delay, and we don't want that to
+  // invalidate state mid-operation.
+  const handleReject = useCallback(async () => {
+    const target = accessTarget;
+    if (!target) return;
+    try {
+      await updateAccessRequest({
+        requestId: target.requestId,
+        action: 'reject',
+        accessLength: undefined,
+      }).unwrap();
+      await markAsRead({ notificationIds: [target.notificationId] });
+    } catch {
+      Alert.alert('Error', 'Failed to reject access request.');
+    } finally {
+      setAccessTarget(null);
+    }
+  }, [accessTarget, updateAccessRequest, markAsRead]);
+
+  const handleApproveWithDuration = useCallback(async (accessLength: string) => {
+    const target = accessTarget;
+    if (!target) throw new Error('No access target');
+    try {
+      await updateAccessRequest({
+        requestId: target.requestId,
+        action: 'approve',
+        accessLength,
+      }).unwrap();
+      await markAsRead({ notificationIds: [target.notificationId] });
+      setDurationSheetVisible(false);
+      setAccessTarget(null);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to approve access request.');
+      throw err;
+    }
+  }, [accessTarget, updateAccessRequest, markAsRead]);
+
   const handleNotifPress = useCallback((n: any) => {
+    // Access requests open an action sheet, never navigate / auto-mark as read.
+    if (n.resource_type === 'userAccessRequest') {
+      openAccessRequestSheet(n);
+      return;
+    }
+
     // Mark as read
     if (!n.is_read) markAsRead({ notificationIds: [n.id] });
 
@@ -135,12 +200,34 @@ export default function NotificationsScreen() {
         break;
       }
     }
-  }, [router, markAsRead]);
+  }, [router, markAsRead, openAccessRequestSheet]);
+
+  const actionSheetOptions: ActionSheetOption[] = useMemo(() => ([
+    {
+      label: 'Approve',
+      icon: 'checkmark-circle',
+      onPress: () => {
+        setActionSheetVisible(false);
+        setDurationSheetVisible(true);
+      },
+    },
+    {
+      label: 'Reject',
+      icon: 'close-circle',
+      destructive: true,
+      onPress: handleReject,
+    },
+  ]), [handleReject]);
+
 
   const renderNotification = ({ item }: { item: any }) => {
     const icon = getNotifIcon(item.resource_type);
     const title = getNotifTitle(item);
     const isUnread = !item.is_read;
+    const accessStatus =
+      item.resource_type === 'userAccessRequest'
+        ? item.resource_user_access_request?.access_status
+        : null;
 
     return (
       <Pressable
@@ -166,6 +253,29 @@ export default function NotificationsScreen() {
           <Text style={[s.notifBody, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={2}>
             {item.body}
           </Text>
+          {accessStatus === 'approved' && (
+            <View style={[s.statusPill, { backgroundColor: isDark ? 'rgba(16,185,129,0.15)' : '#ecfdf5' }]}>
+              <Ionicons name="checkmark-circle" size={14} color="#10b981" />
+              <Text style={[s.statusPillText, { color: '#059669' }]}>Accepted</Text>
+            </View>
+          )}
+          {accessStatus === 'rejected' && (
+            <View style={[s.statusPill, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }]}>
+              <Ionicons name="close-circle" size={14} color="#ef4444" />
+              <Text style={[s.statusPillText, { color: '#dc2626' }]}>Rejected</Text>
+            </View>
+          )}
+          {item.resource_type === 'userAccessRequest' && (!accessStatus || accessStatus === 'pending') && (
+            <View style={s.actionRow}>
+              <Pressable
+                onPress={() => handleNotifPress(item)}
+                disabled={processingAccess}
+                style={[s.primaryActionBtn, { opacity: processingAccess ? 0.6 : 1 }]}
+              >
+                <Text style={s.primaryActionText}>Approve / Reject</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
         {isUnread && <View style={s.unreadDot} />}
       </Pressable>
@@ -222,6 +332,31 @@ export default function NotificationsScreen() {
           />
         )}
       </SafeAreaView>
+
+      <ActionSheet
+        visible={actionSheetVisible}
+        onClose={() => {
+          setActionSheetVisible(false);
+          // Only clear the target if the user isn't chaining into the duration sheet.
+          // ActionSheet runs onClose after every option press via an animated close,
+          // so we rely on handlers to null the target when work completes.
+          if (!durationSheetVisible) {
+            // Defer clearing to next tick so an option's onPress (scheduled 250ms
+            // after close) still has the target it needs.
+            setTimeout(() => {
+              if (!durationSheetVisibleRef.current) setAccessTarget(null);
+            }, 400);
+          }
+        }}
+        title={accessTarget?.handle ? `${accessTarget.handle}'s access request` : 'Access request'}
+        options={actionSheetOptions}
+      />
+      <ApproveAccessRequestSheet
+        visible={durationSheetVisible}
+        handle={accessTarget?.handle ?? null}
+        onClose={() => { setDurationSheetVisible(false); setAccessTarget(null); }}
+        onConfirm={handleApproveWithDuration}
+      />
     </>
   );
 }
@@ -255,4 +390,19 @@ const s = StyleSheet.create({
   },
   emptyWrap: { alignItems: 'center', paddingVertical: 60 },
   emptyTitle: { fontSize: 16, fontWeight: '600', marginTop: 12 },
+  statusPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 8, paddingVertical: 3,
+    marginTop: 6,
+  },
+  statusPillText: { fontSize: 12, fontWeight: '700' },
+  actionRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  primaryActionBtn: {
+    backgroundColor: '#0284c7',
+    borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 6,
+  },
+  primaryActionText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 });

@@ -13,7 +13,7 @@ import {
   Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -64,6 +64,18 @@ export default function HomeScreen() {
   const seenIdsRef = useRef(new Set<string>());
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
+  const feedListRef = useRef<FlatList<any>>(null);
+
+  // Tap the Home tab while focused → scroll feed to top
+  const navigation = useNavigation();
+  useEffect(() => {
+    const unsub = (navigation as any).addListener?.('tabPress', () => {
+      if ((navigation as any).isFocused?.()) {
+        feedListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      }
+    });
+    return unsub;
+  }, [navigation]);
 
   const [refreshing, setRefreshing] = useState(false);
 
@@ -528,6 +540,7 @@ export default function HomeScreen() {
         </View>
       ) : (
         <FlatList
+          ref={feedListRef}
           data={feedRows}
           keyExtractor={(row) => row.key}
           renderItem={({ item: row }) => {

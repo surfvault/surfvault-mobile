@@ -1,4 +1,4 @@
-import { View, Text, Pressable, StyleSheet, Linking } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Linking, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
@@ -24,6 +24,8 @@ interface ProfileHeaderProps {
   storageLimit?: number;
   // Other user actions
   isFollowing?: boolean;
+  isFollowLoading?: boolean;
+  isMessageLoading?: boolean;
   onFollow?: () => void;
   onMessage?: () => void;
   onShare?: () => void;
@@ -43,6 +45,8 @@ export default function ProfileHeader({
   storageUsed = 0,
   storageLimit = 15,
   isFollowing,
+  isFollowLoading = false,
+  isMessageLoading = false,
   onFollow,
   onMessage,
   onShare,
@@ -172,7 +176,7 @@ export default function ProfileHeader({
       )}
 
       {/* Tags */}
-      {(userType || (profile?.tags?.length ?? 0) > 0) && (
+      {(userType || profile?.verified || (!isSelf && profile?.access === 'private') || (profile?.tags?.length ?? 0) > 0) && (
         <View style={s.tagsRow}>
           {userType && (
             <View style={[s.tagPill, s.typePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9' }]}>
@@ -184,6 +188,16 @@ export default function ProfileHeader({
               <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#d1d5db' : '#475569' }}>
                 {userType === 'photographer' ? 'Photographer' : 'Surfer'}
               </Text>
+            </View>
+          )}
+          {profile?.verified && (
+            <View style={[s.tagPill, { backgroundColor: isDark ? 'rgba(14,165,233,0.15)' : '#f0f9ff', borderWidth: 1, borderColor: isDark ? 'rgba(14,165,233,0.3)' : '#bae6fd' }]}>
+              <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#38bdf8' : '#0284c7' }}>Verified</Text>
+            </View>
+          )}
+          {!isSelf && profile?.access === 'private' && (
+            <View style={[s.tagPill, { backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2', borderWidth: 1, borderColor: isDark ? 'rgba(239,68,68,0.25)' : '#fecaca' }]}>
+              <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#fca5a5' : '#dc2626' }}>Private</Text>
             </View>
           )}
           {profile?.tags?.map((tag: string) => (
@@ -252,15 +266,57 @@ export default function ProfileHeader({
         )}
         {!isSelf && (
         <View style={s.actionRow}>
-          <Pressable onPress={onFollow} style={[s.actionBtn, {
-            backgroundColor: isFollowing ? (isDark ? '#1f2937' : '#f3f4f6') : '#0ea5e9',
-          }]}>
-            <Text style={[s.actionBtnText, { color: isFollowing ? (isDark ? '#fff' : '#111827') : '#fff' }]}>
-              {isFollowing ? 'Following' : 'Follow'}
-            </Text>
+          {/* Follow — hidden on private profiles (matches web) */}
+          {profile?.access !== 'private' && (
+          <Pressable
+            onPress={onFollow}
+            disabled={isFollowLoading}
+            style={[s.actionBtn, {
+              backgroundColor: isFollowing
+                ? 'transparent'
+                : '#0ea5e9',
+              borderWidth: isFollowing ? 1 : 0,
+              borderColor: isFollowing
+                ? (isDark ? 'rgba(255,255,255,0.18)' : '#cbd5e1')
+                : 'transparent',
+              opacity: isFollowLoading ? 0.75 : 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 4,
+            }]}
+          >
+            {isFollowLoading ? (
+              <ActivityIndicator size="small" color={isFollowing ? (isDark ? '#fff' : '#111827') : '#fff'} />
+            ) : (
+              <>
+                {isFollowing && (
+                  <Ionicons
+                    name="checkmark"
+                    size={14}
+                    color={isDark ? '#fff' : '#111827'}
+                  />
+                )}
+                <Text style={[s.actionBtnText, { color: isFollowing ? (isDark ? '#fff' : '#111827') : '#fff' }]}>
+                  {isFollowing ? 'Following' : 'Follow'}
+                </Text>
+              </>
+            )}
           </Pressable>
-          <Pressable onPress={onMessage} style={[s.actionBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            <Text style={[s.actionBtnText, { color: isDark ? '#fff' : '#111827' }]}>Message</Text>
+          )}
+          <Pressable
+            onPress={onMessage}
+            disabled={isMessageLoading}
+            style={[s.actionBtn, {
+              backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+              opacity: isMessageLoading ? 0.75 : 1,
+            }]}
+          >
+            {isMessageLoading ? (
+              <ActivityIndicator size="small" color={isDark ? '#fff' : '#111827'} />
+            ) : (
+              <Text style={[s.actionBtnText, { color: isDark ? '#fff' : '#111827' }]}>Message</Text>
+            )}
           </Pressable>
           {onShare && (
             <Pressable onPress={onShare} style={[s.iconBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
@@ -287,12 +343,6 @@ export default function ProfileHeader({
         </View>
       )}
 
-      {/* Private badge (other users) */}
-      {!isSelf && profile?.access === 'private' && (
-        <View style={[s.tagPill, { backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2', alignSelf: 'flex-start', marginTop: 4 }]}>
-          <Text style={{ fontSize: 10, fontWeight: '600', color: isDark ? '#fca5a5' : '#dc2626' }}>Private</Text>
-        </View>
-      )}
     </View>
   );
 }

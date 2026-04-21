@@ -46,7 +46,10 @@ import {
   useUpdateGroupPhotosMutation,
   useUpdateSessionMutation,
   useCreateSurfSessionViewReportMutation,
+  useGetAccessRequestQuery,
+  useRequestAccessToUserMutation,
 } from '../../src/store';
+import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ImageViewing from 'react-native-image-viewing';
 import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
@@ -203,6 +206,35 @@ export default function SessionDetailScreen() {
   const sessionHandle = session?.handle ?? session?.user_handle;
   const isOwner = !!user?.handle && user.handle === sessionHandle;
   const isFavorited = session?.surf_break_is_favorited;
+
+  // Private-profile access gating. Same fresh-read strategy as the user page.
+  const isPrivate = session?.user_access === 'private' && !isOwner;
+  const { data: accessData, refetch: refetchAccess } = useGetAccessRequestQuery(
+    { photographerHandle: sessionHandle ?? '' },
+    {
+      skip: !user || !isPrivate || !sessionHandle,
+      refetchOnMountOrArgChange: true,
+      refetchOnFocus: true,
+      refetchOnReconnect: true,
+    }
+  );
+  const accessRequest = accessData?.results?.accessRequest;
+
+  // Poll for approve/reject decisions made from another device.
+  useEffect(() => {
+    if (!isPrivate) return;
+    if (accessRequest?.access_status === 'approved') return;
+    const id = setInterval(() => { refetchAccess(); }, 10000);
+    return () => clearInterval(id);
+  }, [isPrivate, accessRequest?.access_status, refetchAccess]);
+  const isLocked = isPrivate && accessRequest?.access_status !== 'approved';
+  const [requestAccessToUser, { isLoading: isSendingAccessRequest }] = useRequestAccessToUserMutation();
+  const handleRequestAccess = useCallback(() => {
+    if (!requireAuth()) return;
+    if (!sessionHandle) return;
+    if (accessRequest?.access_status === 'pending') return;
+    requestAccessToUser({ photographerHandle: sessionHandle });
+  }, [requireAuth, sessionHandle, accessRequest, requestAccessToUser]);
 
   // Sync thumbnail from session data
   useEffect(() => {
@@ -812,10 +844,11 @@ export default function SessionDetailScreen() {
         ) : (
           <FlatList
             ref={flatListRef}
-            data={sessionMedia}
+            data={isLocked ? [] : sessionMedia}
             keyExtractor={(item) => item.id ?? item.thumbnail}
             renderItem={renderPhoto}
-            numColumns={NUM_COLUMNS}
+            numColumns={isLocked ? 1 : NUM_COLUMNS}
+            key={isLocked ? 'locked' : 'grid'}
             contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? 80 : 0 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListHeaderComponent={
@@ -910,10 +943,18 @@ export default function SessionDetailScreen() {
                   </View>
                 )}
 
+                <AccessBanner isPrivate={isPrivate} accessRequest={accessRequest} scope="session" />
               </View>
             }
             ListEmptyComponent={
-              !isLoading && !loadingMore ? (
+              isLocked ? (
+                <PrivateGalleryCard
+                  scope="session"
+                  accessRequest={accessRequest}
+                  onRequestAccess={handleRequestAccess}
+                  isSending={isSendingAccessRequest}
+                />
+              ) : !isLoading && !loadingMore ? (
                 <View style={{ alignItems: 'center', paddingVertical: 48 }}>
                   <Ionicons name="images-outline" size={32} color="#9ca3af" style={{ marginBottom: 8 }} />
                   <Text style={{ color: '#9ca3af', fontSize: 15 }}>
@@ -931,8 +972,8 @@ export default function SessionDetailScreen() {
           />
         )}
 
-        {/* Floating "Request Photos" — non-owners, no active action */}
-        {!isOwner && session && !sessionAction && (
+        {/* Floating "Request Photos" — non-owners, no active action, not gated */}
+        {!isOwner && session && !sessionAction && !isLocked && (
           <Pressable onPress={() => handleStartAction('request')} style={styles.requestFab}>
             <Ionicons name="camera-outline" size={18} color="#ffffff" />
             <Text style={styles.requestFabText}>Request Photos</Text>

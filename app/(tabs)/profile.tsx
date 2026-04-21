@@ -41,6 +41,7 @@ import ProfileHeader from '../../src/components/ProfileHeader';
 import SessionCard from '../../src/components/SessionCard';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
+import ProfileSkeleton from '../../src/components/ProfileSkeleton';
 
 const formatCount = (n: number): string => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
@@ -300,6 +301,13 @@ export default function ProfileScreen() {
     setSessionSheetItem(item);
     setSessionSheetVisible(true);
   }, []);
+
+  // Authenticated but user data hasn't loaded yet (Auth0 → getSelf window).
+  // Render a skeleton so we never flash empty placeholders ("@", 0 counts,
+  // empty storage bar) while the real data arrives.
+  if (isAuthenticated && !user?.handle) {
+    return <ProfileSkeleton />;
+  }
 
   // Not logged in
   if (!isAuthenticated) {

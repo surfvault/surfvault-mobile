@@ -63,7 +63,7 @@ export default function UserAvatar({
     >
       {showImage ? (
         <Image
-          source={{ uri }}
+          source={uri}
           style={{
             width: size,
             height: size,
@@ -71,6 +71,8 @@ export default function UserAvatar({
           }}
           contentFit="cover"
           transition={200}
+          recyclingKey={uri ?? undefined}
+          cachePolicy="memory-disk"
           onError={() => setImgError(true)}
         />
       ) : (
