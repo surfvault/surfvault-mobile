@@ -68,6 +68,63 @@ export default function ProfileScreen() {
   const [sessionSheetItem, setSessionSheetItem] = useState<any>(null);
   const [deleteSession] = useDeleteSessionMutation();
 
+  const confirmAndDeleteSession = (sid: string, name: string, photoCount?: number) => {
+    Alert.alert(
+      'Delete Session',
+      `This will permanently delete "${name}" and everything associated with it:\n\n` +
+        `• All photos${photoCount ? ` (${photoCount})` : ''} and their originals from storage\n` +
+        `• All photo groups and assignments\n` +
+        `• All tagged users\n` +
+        `• All access requests\n` +
+        `• All related notifications\n\n` +
+        `This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => runDelete(sid, name, false),
+        },
+      ],
+    );
+  };
+
+  const runDelete = async (sid: string, name: string, force: boolean) => {
+    try {
+      await deleteSession({ sessionId: sid, force }).unwrap();
+      Alert.alert('Deleted', 'Session deleted successfully.');
+    } catch (err: any) {
+      const data = err?.data;
+      if (err?.status === 409 && data?.code === 'UNFULFILLED_ACCESS_REQUESTS') {
+        const requests = data.results?.unfulfilledRequests ?? [];
+        const names = requests
+          .map((r: any) => {
+            const display =
+              r.firstName || r.lastName
+                ? `${r.firstName ?? ''} ${r.lastName ?? ''}`.trim()
+                : `@${r.handle}`;
+            return `• ${display} (${r.photoCount} photo${r.photoCount === 1 ? '' : 's'})`;
+          })
+          .join('\n');
+        const count = requests.length;
+        Alert.alert(
+          'Undelivered access requests',
+          `${count === 1 ? '1 surfer has' : `${count} surfers have`} approved access to this session but haven't saved to their vault or downloaded yet. Deleting now may leave them with nothing.\n\n${names}`,
+          [
+            { text: 'Keep Session', style: 'cancel' },
+            {
+              text: 'Delete Anyway',
+              style: 'destructive',
+              onPress: () => runDelete(sid, name, true),
+            },
+          ],
+        );
+        return;
+      }
+      Alert.alert('Error', 'Failed to delete session.');
+    }
+  };
+
   // Fetch public profile data for follower/following counts
   const { data: publicProfileData } = useGetUserQuery(
     { handle: user?.handle ?? '', viewerId: user?.id },
@@ -377,31 +434,7 @@ export default function ProfileScreen() {
           onPress: () => {
             const sid = sessionSheetItem.session_id ?? sessionSheetItem.id;
             const name = sessionSheetItem.session_name ?? 'this session';
-            Alert.alert(
-              'Delete Session',
-              `This will permanently delete "${name}" and everything associated with it:\n\n` +
-                    `• All photos${sessionSheetItem.photo_count ? ` (${sessionSheetItem.photo_count})` : ''} and their originals from storage\n` +
-                    `• All photo groups and assignments\n` +
-                    `• All tagged users\n` +
-                    `• All access requests\n` +
-                    `• All related notifications\n\n` +
-                    `This cannot be undone.`,
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await deleteSession({ sessionId: sid }).unwrap();
-                      Alert.alert('Deleted', 'Session deleted successfully.');
-                    } catch {
-                      Alert.alert('Error', 'Failed to delete session.');
-                    }
-                  },
-                },
-              ],
-            );
+            confirmAndDeleteSession(sid, name, sessionSheetItem.photo_count);
           },
         },
       ],
@@ -573,31 +606,7 @@ export default function ProfileScreen() {
               onDelete={() => {
                 const sid = item.session_id ?? item.id;
                 const name = item.session_name ?? 'this session';
-                Alert.alert(
-                  'Delete Session',
-                  `This will permanently delete "${name}" and everything associated with it:\n\n` +
-                    `• All photos${item.photo_count ? ` (${item.photo_count})` : ''} and their originals from storage\n` +
-                    `• All photo groups and assignments\n` +
-                    `• All tagged users\n` +
-                    `• All access requests\n` +
-                    `• All related notifications\n\n` +
-                    `This cannot be undone.`,
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                      text: 'Delete',
-                      style: 'destructive',
-                      onPress: async () => {
-                        try {
-                          await deleteSession({ sessionId: sid }).unwrap();
-                          Alert.alert('Deleted', 'Session deleted successfully.');
-                        } catch {
-                          Alert.alert('Error', 'Failed to delete session.');
-                        }
-                      },
-                    },
-                  ],
-                );
+                confirmAndDeleteSession(sid, name, item.photo_count);
               }}
             />
           );

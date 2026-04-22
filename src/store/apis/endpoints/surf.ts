@@ -327,8 +327,8 @@ const surfApi = rootApi.injectEndpoints({
     }),
     deleteSession: builder.mutation({
       invalidatesTags: [ApiTag.SurfBreak, ApiTag.Session, ApiTag.User],
-      query: ({ sessionId }: { sessionId: string }) => ({
-        url: `/surf-sessions/${sessionId}`,
+      query: ({ sessionId, force }: { sessionId: string; force?: boolean }) => ({
+        url: `/surf-sessions/${sessionId}${force ? '?force=true' : ''}`,
         method: 'DELETE',
       }),
     }),
