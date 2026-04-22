@@ -99,10 +99,7 @@ export default function ProfileScreen() {
         const requests = data.results?.unfulfilledRequests ?? [];
         const names = requests
           .map((r: any) => {
-            const display =
-              r.firstName || r.lastName
-                ? `${r.firstName ?? ''} ${r.lastName ?? ''}`.trim()
-                : `@${r.handle}`;
+            const display = r.name || `@${r.handle}`;
             return `• ${display} (${r.photoCount} photo${r.photoCount === 1 ? '' : 's'})`;
           })
           .join('\n');
