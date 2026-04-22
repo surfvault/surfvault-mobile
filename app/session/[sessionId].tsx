@@ -87,7 +87,7 @@ const formatDate = (dateStr?: string) => {
 };
 
 export default function SessionDetailScreen() {
-  const { sessionId } = useLocalSearchParams<{ sessionId: string }>();
+  const { sessionId, group: groupNameFromUrl } = useLocalSearchParams<{ sessionId: string; group?: string }>();
   const { user } = useUser();
   const router = useRouter();
   const smartBack = useSmartBack();
@@ -371,6 +371,19 @@ export default function SessionDetailScreen() {
     setTimeout(() => flatListRef.current?.scrollToOffset?.({ offset: 0, animated: true }), 100);
   }, [initialMedia, initialToken]);
 
+  // Resolve ?group=name from share URL to activeGroupId once groups load
+  const groupFromUrlAppliedRef = useRef(false);
+  useEffect(() => {
+    if (groupFromUrlAppliedRef.current) return;
+    if (!groupNameFromUrl || !groups.length) return;
+    const decoded = decodeURIComponent(groupNameFromUrl).toLowerCase();
+    const match = groups.find((g: any) => g.name.toLowerCase() === decoded);
+    if (match) {
+      groupFromUrlAppliedRef.current = true;
+      handleGroupFilter(match.id);
+    }
+  }, [groupNameFromUrl, groups, handleGroupFilter]);
+
   // Photo selection
   const togglePhotoSelection = useCallback((photoId: string) => {
     setSelectedPhotoIds((prev) =>
@@ -490,13 +503,15 @@ export default function SessionDetailScreen() {
   // Share
   const handleShare = useCallback(async () => {
     if (!session?.id) return;
-    const shareUrl = `https://share.surf-vault.com/s/${session.id}`;
+    const activeGroup = groups.find((g: any) => g.id === activeGroupId);
+    const query = activeGroup ? `?group=${encodeURIComponent(activeGroup.name)}` : '';
+    const shareUrl = `https://share.surf-vault.com/s/${session.id}${query}`;
     await Share.share(
       Platform.OS === 'ios'
         ? { url: shareUrl }
         : { message: shareUrl }
     );
-  }, [session]);
+  }, [session, activeGroupId, groups]);
 
   // Favorite
   const handleFavorite = useCallback(async () => {
