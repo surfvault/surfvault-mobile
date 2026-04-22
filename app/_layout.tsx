@@ -1,6 +1,6 @@
 import '../global.css';
 import { useCallback, useEffect, useRef } from 'react';
-import { Platform, View } from 'react-native';
+import { AppState, Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -63,32 +63,60 @@ function AppShell() {
   // Set up Pusher when we have a user
   usePusher({ userId: user?.id });
 
-  // Push token registration — only runs once permissions are already granted.
-  // The priming modal handles asking for permission; after it's granted we
-  // call registerPushToken() directly.
+  // Push token registration — kept fresh against OS-initiated APNs rotation.
+  // Runs on mount, on foreground, and on `addPushTokenListener` events. Only
+  // writes to the server when the token actually changes.
   const [updatePushToken] = useUpdateUserPushTokenMutation();
-  const pushTokenRegistered = useRef(false);
+  const lastSyncedToken = useRef<string | null>(null);
+
+  const syncToken = useCallback(
+    async (token: string) => {
+      if (!token || token === lastSyncedToken.current) return;
+      try {
+        await updatePushToken({ expoPushToken: token }).unwrap();
+        lastSyncedToken.current = token;
+      } catch (e) {
+        console.warn('Failed to sync push token:', e);
+      }
+    },
+    [updatePushToken]
+  );
 
   const registerPushToken = useCallback(async () => {
-    if (!user?.id || !Device.isDevice || pushTokenRegistered.current) return;
+    if (!user?.id || !Device.isDevice) return;
     if (!(await hasNotificationPermission())) return;
     try {
       const projectId = Constants.expoConfig?.extra?.eas?.projectId;
       if (!projectId) return;
       const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
-      if (token) {
-        await updatePushToken({ expoPushToken: token });
-        pushTokenRegistered.current = true;
-      }
+      if (token) await syncToken(token);
     } catch (e) {
       console.warn('Failed to register push token:', e);
     }
-  }, [user?.id, updatePushToken]);
+  }, [user?.id, syncToken]);
 
-  // Try to register on mount / user change (no-ops if permission not yet granted)
+  // Register on mount / user change.
   useEffect(() => {
     registerPushToken();
   }, [registerPushToken]);
+
+  // Re-register whenever the app comes to the foreground — catches tokens
+  // rotated by iOS while the app was backgrounded.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') registerPushToken();
+    });
+    return () => sub.remove();
+  }, [registerPushToken]);
+
+  // Push token rotation events from Expo/iOS — fires in-session when the
+  // underlying APNs device token changes.
+  useEffect(() => {
+    const sub = Notifications.addPushTokenListener(({ data }) => {
+      if (typeof data === 'string' && data) syncToken(data);
+    });
+    return () => sub.remove();
+  }, [syncToken]);
 
   // Handle notification tap deep linking
   useEffect(() => {
