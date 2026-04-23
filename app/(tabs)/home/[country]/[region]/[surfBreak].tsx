@@ -210,7 +210,7 @@ export default function SurfBreakDetailScreen() {
             keyExtractor={(item) => item.session_id ?? item.id}
             renderItem={({ item }) => (
               <View style={{ paddingHorizontal: 16 }}>
-                <SessionCard session={item} />
+                <SessionCard session={item} enableCarousel />
               </View>
             )}
             ListHeaderComponent={<BreakHeader />}

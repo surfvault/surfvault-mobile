@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, useColorScheme } from 'react-native';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, useColorScheme, FlatList } from 'react-native';
+import type { ViewToken, LayoutChangeEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -29,6 +30,7 @@ interface SessionCardProps {
   hidePhotographer?: boolean;
   showViewCount?: boolean;
   showHiddenLocations?: boolean;
+  enableCarousel?: boolean;
   onPress?: () => void;
   onDelete?: () => void;
   isViewable?: boolean;
@@ -38,6 +40,7 @@ interface SessionCardProps {
     session_name?: string;
     session_date?: string;
     thumbnail?: string;
+    extra_photos?: Array<{ id: string; url: string }>;
     photo_count?: number;
     user_handle?: string;
     handle?: string;
@@ -56,6 +59,21 @@ interface SessionCardProps {
 }
 
 const MAX_VISIBLE_TAGS = 3;
+
+// Pager dots: all dots always visible (max 11 slides), active is larger and colored,
+// dots further from active shrink slightly for an Instagram-like look.
+function computeDots(activeIdx: number, total: number) {
+  if (total <= 1) return [] as Array<{ key: number; size: number; isActive: boolean }>;
+  return Array.from({ length: total }, (_, i) => {
+    const isActive = i === activeIdx;
+    const dist = Math.abs(i - activeIdx);
+    let size = 6;
+    if (isActive) size = 7;
+    else if (dist >= 3) size = 4;
+    else if (dist === 2) size = 5;
+    return { key: i, size, isActive };
+  });
+}
 
 // Pure string-based date formatter. Never constructs `new Date(dateStr)` because
 // session dates represent a calendar day (the day the session happened) — not a
@@ -108,7 +126,12 @@ function FadingSubtitle({ items, visible = true }: { items: string[]; visible?: 
   );
 }
 
-export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
+type Slide =
+  | { kind: 'thumb'; url: string }
+  | { kind: 'photo'; url: string; id: string }
+  | { kind: 'cta' };
+
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
   const router = useRouter();
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
@@ -119,12 +142,52 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
   const [sheetVisible, setSheetVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [activeSlide, setActiveSlide] = useState(0);
+  const [slideWidth, setSlideWidth] = useState(0);
 
   const sessionId = session.session_id ?? session.id;
   const handle = session.user_handle ?? session.handle;
   const taggedUsers = session.tagged_users ?? [];
   const surfBreakId = (session as any).surf_break_id;
   const showLocation = (!session.hide_location || showHiddenLocations) && session.surf_break_name;
+
+  const slides: Slide[] = useMemo(() => {
+    if (!enableCarousel || !session.thumbnail) return [];
+    const extras = session.extra_photos ?? [];
+    const photoCount = session.photo_count ?? 0;
+    const shownSoFar = 1 + extras.length;
+    const list: Slide[] = [
+      { kind: 'thumb', url: session.thumbnail },
+      ...extras.map((p) => ({ kind: 'photo' as const, url: p.url, id: p.id })),
+    ];
+    if (photoCount > shownSoFar) list.push({ kind: 'cta' });
+    return list;
+  }, [enableCarousel, session.thumbnail, session.extra_photos, session.photo_count]);
+
+  const useCarousel = slides.length > 1;
+  const prefetchedRef = useRef<Set<string>>(new Set());
+  const prefetchSlide = useCallback((idx: number) => {
+    const slide = slides[idx];
+    if (!slide || slide.kind === 'cta') return;
+    if (prefetchedRef.current.has(slide.url)) return;
+    prefetchedRef.current.add(slide.url);
+    Image.prefetch(slide.url).catch(() => {});
+  }, [slides]);
+
+  useEffect(() => {
+    if (useCarousel && isViewable) prefetchSlide(1);
+  }, [useCarousel, isViewable, prefetchSlide]);
+
+  const handleViewChange = useCallback(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const first = viewableItems[0];
+    if (first?.index == null) return;
+    const idx = first.index;
+    setActiveSlide(idx);
+    prefetchSlide(idx + 1);
+    prefetchSlide(idx - 1);
+  }, [prefetchSlide]);
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
 
   // Optimistic local state for follow/favorite — initialized from server data
   const serverFollowing = !!(session as any).is_following;
@@ -293,20 +356,60 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
         </Pressable>
       </View>
 
-      {/* Thumbnail — edge to edge */}
+      {/* Thumbnail / carousel — edge to edge */}
       <Pressable onPress={handlePress}>
-        <View>
+        <View onLayout={(e: LayoutChangeEvent) => setSlideWidth(e.nativeEvent.layout.width)}>
           <View style={[styles.thumbnail, styles.emptyThumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
             <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
           </View>
-          {session.thumbnail && (
+          {useCarousel && slideWidth > 0 ? (
+            <FlatList
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              data={slides}
+              keyExtractor={(_, i) => `${sessionId}-slide-${i}`}
+              initialNumToRender={1}
+              windowSize={3}
+              maxToRenderPerBatch={1}
+              removeClippedSubviews
+              onViewableItemsChanged={handleViewChange}
+              viewabilityConfig={viewabilityConfig}
+              style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
+              renderItem={({ item }) => {
+                const slideStyle = { width: slideWidth, aspectRatio: 5 / 4 };
+                if (item.kind === 'cta') {
+                  return (
+                    <View style={[slideStyle, styles.ctaSlide, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                      <Ionicons name="images-outline" size={28} color={isDark ? '#9ca3af' : '#6b7280'} />
+                      <Text style={[styles.ctaTitle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                        See all {session.photo_count ?? ''} photos
+                      </Text>
+                      <View style={styles.ctaHintRow}>
+                        <Text style={[styles.ctaHint, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Tap to open</Text>
+                        <Ionicons name="chevron-forward" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
+                      </View>
+                    </View>
+                  );
+                }
+                return (
+                  <Image
+                    source={{ uri: item.url }}
+                    style={slideStyle}
+                    contentFit="cover"
+                    transition={200}
+                  />
+                );
+              }}
+            />
+          ) : session.thumbnail ? (
             <Image
               source={{ uri: session.thumbnail }}
               style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
               contentFit="cover"
               transition={200}
             />
-          )}
+          ) : null}
 
           {/* Tagged users — bottom right overlay */}
           {taggedUsers.length > 0 && (
@@ -349,6 +452,24 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
           )}
         </View>
       </Pressable>
+
+      {/* Pager dots — Instagram-style sliding window, only shown for carousel */}
+      {useCarousel && slides.length > 1 && (
+        <View style={styles.dotsRow}>
+          {computeDots(activeSlide, slides.length).map((dot) => (
+            <View
+              key={dot.key}
+              style={[
+                styles.dot,
+                { width: dot.size, height: dot.size, borderRadius: dot.size / 2 },
+                dot.isActive
+                  ? styles.dotActive
+                  : { backgroundColor: isDark ? '#4b5563' : '#d1d5db' },
+              ]}
+            />
+          ))}
+        </View>
+      )}
 
       <ActionSheet
         visible={sheetVisible}
@@ -430,6 +551,38 @@ const styles = StyleSheet.create({
     backgroundColor: '#f3f4f6',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ctaSlide: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  ctaTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  ctaHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  ctaHint: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  dot: {
+    backgroundColor: '#d1d5db',
+  },
+  dotActive: {
+    backgroundColor: '#0ea5e9',
   },
   taggedOverlay: {
     position: 'absolute',

@@ -558,6 +558,7 @@ export default function HomeScreen() {
               <SessionCard
                 session={item}
                 isViewable={viewableIds.has(row.key)}
+                enableCarousel
                 onPress={() => {
                   const sid = item.session_id ?? item.id;
                   if (sid) trackedPush(`/session/${sid}` as any);
