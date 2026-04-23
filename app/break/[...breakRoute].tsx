@@ -195,7 +195,7 @@ export default function SurfBreakDetailScreen() {
                   />
                 );
               }
-              return <SessionCard session={row.data} />;
+              return <SessionCard session={row.data} enableCarousel />;
             }}
             ListHeaderComponent={
               <View style={styles.headerWrap}>

@@ -280,7 +280,7 @@ const surfApi = rootApi.injectEndpoints({
       }),
     }),
     updateSessionThumbnail: builder.mutation({
-      invalidatesTags: [],
+      invalidatesTags: [ApiTag.SurfBreak, ApiTag.Session, ApiTag.User],
       query: ({ sessionId, photoId }: { sessionId: string; photoId: string }) => ({
         url: `/surf-sessions/${sessionId}/thumbnail`,
         method: 'PATCH',
