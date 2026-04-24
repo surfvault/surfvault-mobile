@@ -14,12 +14,11 @@ import {
   ActivityIndicator,
   Keyboard,
   Dimensions,
-  KeyboardAvoidingView,
   Share,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -301,6 +300,17 @@ export default function ProfileScreen() {
   }, [user, updateMeta]);
 
   const handleMenu = useCallback(() => setMenuVisible(true), []);
+
+  // Tap the Profile tab while focused → open the action sheet
+  const navigation = useNavigation();
+  useEffect(() => {
+    const unsub = (navigation as any).addListener?.('tabPress', () => {
+      if ((navigation as any).isFocused?.()) {
+        setMenuVisible(true);
+      }
+    });
+    return unsub;
+  }, [navigation]);
 
   const menuSections: ActionSheetSection[] = [
     {
@@ -642,39 +652,37 @@ export default function ProfileScreen() {
       {showNoteEditor && (
         <View style={[s.sheetOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={handleCloseNoteEditor} />
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ justifyContent: 'flex-end' }}>
-            <View style={[s.noteSheet, { backgroundColor: isDark ? '#111827' : '#fff' }]}>
-              <View style={s.noteSheetHeader}>
-                <Text style={[s.noteSheetTitle, { color: isDark ? '#fff' : '#111827' }]}>Status Note</Text>
-                <Pressable onPress={handleSaveNote}>
-                  <Text style={{ fontSize: 15, color: '#0ea5e9', fontWeight: '600' }}>Save</Text>
-                </Pressable>
-              </View>
-              <TextInput
-                ref={noteInputRef}
-                value={noteText}
-                onChangeText={(t) => t.length <= STATUS_NOTE_MAX && setNoteText(t)}
-                placeholder="What's happening? e.g. Heading to Pipeline next week..."
-                placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
-                multiline
-                maxLength={STATUS_NOTE_MAX}
-                style={[s.noteInput, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', color: isDark ? '#fff' : '#111827' }]}
-              />
-              <View style={s.noteFooter}>
-                <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af' }}>
-                  {noteText.length}/{STATUS_NOTE_MAX}
-                </Text>
-                {(user?.status_note as string)?.length > 0 && (
-                  <Pressable onPress={handleClearNote}>
-                    <Text style={{ fontSize: 13, color: '#ef4444', fontWeight: '500' }}>Clear Note</Text>
-                  </Pressable>
-                )}
-              </View>
-              <Text style={{ fontSize: 11, color: isDark ? '#4b5563' : '#9ca3af', paddingHorizontal: 16, paddingBottom: 12 }}>
-                Notes auto-expire after 7 days
-              </Text>
+          <View style={[s.noteSheet, { backgroundColor: isDark ? '#111827' : '#fff' }, kbVisible && { paddingBottom: kbHeight }]}>
+            <View style={s.noteSheetHeader}>
+              <Text style={[s.noteSheetTitle, { color: isDark ? '#fff' : '#111827' }]}>Status Note</Text>
+              <Pressable onPress={handleSaveNote}>
+                <Text style={{ fontSize: 15, color: '#0ea5e9', fontWeight: '600' }}>Save</Text>
+              </Pressable>
             </View>
-          </KeyboardAvoidingView>
+            <TextInput
+              ref={noteInputRef}
+              value={noteText}
+              onChangeText={(t) => t.length <= STATUS_NOTE_MAX && setNoteText(t)}
+              placeholder="What's happening? e.g. Heading to Pipeline next week..."
+              placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+              multiline
+              maxLength={STATUS_NOTE_MAX}
+              style={[s.noteInput, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', color: isDark ? '#fff' : '#111827' }]}
+            />
+            <View style={s.noteFooter}>
+              <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                {noteText.length}/{STATUS_NOTE_MAX}
+              </Text>
+              {(user?.status_note as string)?.length > 0 && (
+                <Pressable onPress={handleClearNote}>
+                  <Text style={{ fontSize: 13, color: '#ef4444', fontWeight: '500' }}>Clear Note</Text>
+                </Pressable>
+              )}
+            </View>
+            <Text style={{ fontSize: 11, color: isDark ? '#4b5563' : '#9ca3af', paddingHorizontal: 16, paddingBottom: 12 }}>
+              Notes auto-expire after 7 days
+            </Text>
+          </View>
         </View>
       )}
 

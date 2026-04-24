@@ -5,7 +5,6 @@ import {
   FlatList,
   TextInput,
   Pressable,
-  ActivityIndicator,
   StyleSheet,
   useColorScheme,
   KeyboardAvoidingView,
@@ -24,6 +23,7 @@ import {
   useReadConversationMutation,
 } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
+import ConversationSkeleton from '../../src/components/ConversationSkeleton';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_REGEX = /(https?:\/\/[^\s]+)/gi;
@@ -251,7 +251,7 @@ export default function ConversationDetailScreen() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           {isLoading ? (
-            <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
+            <ConversationSkeleton topPadding={insets.top + 70} />
           ) : (
             <FlatList
               ref={flatListRef}
@@ -288,7 +288,15 @@ export default function ConversationDetailScreen() {
                   {!isOtherUserDeleted && <Ionicons name="chevron-forward" size={12} color={isDark ? '#6b7280' : '#9ca3af'} />}
                 </Pressable>
               </View>
-            ) : null}
+            ) : (
+              // Keeps BlurView at full height so the bottom-anchored back button stays on-screen.
+              <View style={styles.headerCenter}>
+                <View style={[styles.headerAvatarPlaceholder, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]} />
+                <View style={[styles.headerNamePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)' }]}>
+                  <View style={[styles.headerNamePlaceholder, { backgroundColor: isDark ? '#374151' : '#d1d5db' }]} />
+                </View>
+              </View>
+            )}
           </BlurView>
           {/* Soft fade below header */}
           <View style={[styles.headerFade, { top: insets.top + 68 }]} pointerEvents="none">
@@ -334,7 +342,6 @@ export default function ConversationDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   floatingHeader: {
     position: 'absolute',
     top: 0,
@@ -370,6 +377,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   headerHandle: { fontSize: 13, fontWeight: '600' },
+  headerAvatarPlaceholder: { width: 36, height: 36, borderRadius: 18 },
+  headerNamePlaceholder: { width: 70, height: 10, borderRadius: 4 },
   messagesList: { padding: 16, paddingBottom: 8 },
   dateSeparator: { alignItems: 'center', paddingVertical: 12 },
   dateSeparatorText: { fontSize: 12, fontWeight: '500', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, overflow: 'hidden' },

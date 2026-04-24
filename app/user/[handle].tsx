@@ -34,6 +34,7 @@ import SponsoredCard from '../../src/components/SponsoredCard';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
 import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ContactUserSheet from '../../src/components/ContactUserSheet';
+import UserSkeleton from '../../src/components/UserSkeleton';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -242,7 +243,7 @@ export default function UserProfileScreen() {
       />
       <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
-          <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
+          <UserSkeleton />
         ) : (
           <FlatList
             data={isLocked ? [] : sessions}
@@ -310,7 +311,7 @@ export default function UserProfileScreen() {
                   onRequestAccess={handleRequestAccess}
                   isSending={isSendingRequest}
                 />
-              ) : (
+              ) : sessionsData && !sessionsFetching ? (
                 <View style={{ paddingVertical: 32, paddingHorizontal: 12 }}>
                   <View style={{ alignItems: 'center', paddingBottom: 24 }}>
                     <Text style={{ color: '#9ca3af' }}>No sessions yet</Text>
@@ -329,7 +330,7 @@ export default function UserProfileScreen() {
                     </>
                   )}
                 </View>
-              )
+              ) : null
             }
             ListFooterComponent={
               sessionsFetching ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null
@@ -354,7 +355,6 @@ export default function UserProfileScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   profileWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 4 },
 
   topRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
