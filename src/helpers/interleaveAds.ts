@@ -1,6 +1,6 @@
 export type FeedRow<T, A> =
     | { type: 'item'; key: string; data: T }
-    | { type: 'ad'; key: string; data: A };
+    | { type: 'ad'; key: string; data: A[] };
 
 /**
  * Show one ad after every N feed items. Single source of truth — matches
@@ -10,18 +10,36 @@ export type FeedRow<T, A> =
 export const AD_EVERY_N_ITEMS = 4;
 
 /**
- * Interleave ads into a feed of items, inserting one ad after every `every`
- * items (defaults to AD_EVERY_N_ITEMS). Deterministic and stable — same
- * inputs → same output. Ads are never repeated; if the list runs out before
- * the feed ends, remaining slots fall through to regular items.
+ * Group a flat list of ads by `ad_partner_id` so each partner occupies a
+ * single feed slot (rendered as a swipeable carousel on the client). Preserves
+ * first-appearance order of each partner so the server's weighted shuffle /
+ * geo-boost ordering stays meaningful.
  */
-export function interleaveAds<T extends { id?: string; session_id?: string }, A extends { id: string }>(
+export function groupAdsByPartner<A extends { id: string; ad_partner_id?: string }>(ads: A[]): A[][] {
+    const groups = new Map<string, A[]>();
+    for (const ad of ads) {
+        if (!ad) continue;
+        const key = ad.ad_partner_id || ad.id;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key)!.push(ad);
+    }
+    return Array.from(groups.values());
+}
+
+/**
+ * Interleave ads into a feed of items, inserting one partner ad group after
+ * every `every` items (defaults to AD_EVERY_N_ITEMS). Ads are grouped by
+ * `ad_partner_id` so each feed slot renders as one swipeable carousel per
+ * partner rather than N separate sponsored posts. Deterministic.
+ */
+export function interleaveAds<T extends { id?: string; session_id?: string }, A extends { id: string; ad_partner_id?: string }>(
     items: T[],
     ads: A[],
     every: number = AD_EVERY_N_ITEMS,
     itemKey: (t: T, idx: number) => string = (t, i) => t.id ?? (t as any).session_id ?? `item-${i}`
 ): Array<FeedRow<T, A>> {
     if (!items?.length) return [];
+    const groups = groupAdsByPartner(ads);
     const out: Array<FeedRow<T, A>> = [];
     let adCursor = 0;
 
@@ -30,10 +48,13 @@ export function interleaveAds<T extends { id?: string; session_id?: string }, A 
         out.push({ type: 'item', key: `i-${itemKey(item, i)}`, data: item });
 
         const shouldInsertAd = (i + 1) % every === 0;
-        if (shouldInsertAd && adCursor < ads.length) {
-            const ad = ads[adCursor];
-            out.push({ type: 'ad', key: `a-${ad.id}`, data: ad });
-            adCursor += 1;
+        if (shouldInsertAd && adCursor < groups.length) {
+            const group = groups[adCursor];
+            if (group.length) {
+                const keyBase = group[0].ad_partner_id ?? group[0].id;
+                out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
+                adCursor += 1;
+            }
         }
     }
 

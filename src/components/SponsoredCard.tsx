@@ -1,5 +1,15 @@
-import { useEffect, useRef } from 'react';
-import { View, Text, Pressable, StyleSheet, Linking, useColorScheme } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  Linking,
+  useColorScheme,
+  FlatList,
+  Dimensions,
+  type ViewToken,
+} from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRecordAdImpressionMutation } from '../store';
@@ -7,73 +17,120 @@ import { buildAdClickUrl, currentDevice } from '../helpers/adTracking';
 
 interface Ad {
   id: string;
+  ad_partner_id?: string;
   company_name?: string;
   headline?: string;
   body?: string;
   media_url?: string;
-  /**
-   * Optional feed-optimized creative (landscape / 5:4). When provided, the
-   * card's hero image uses this instead of media_url so portrait sidebar
-   * creatives don't center-crop awkwardly in the feed.
-   */
   hero_media_url?: string | null;
   click_url?: string;
   cta_label?: string;
   cta_type?: 'url' | 'tel';
+  /** Server-computed flag: partner is within their target_radius_km of the
+   * reference point (surf break on break pages; user coords otherwise). */
+  is_local?: boolean;
 }
 
 interface SponsoredCardProps {
-  ad: Ad;
+  /** Single ad (back-compat — used by user profile + empty-state local-love lists). */
+  ad?: Ad;
+  /** Partner-grouped ads. When length > 1, renders a paging FlatList carousel. */
+  ads?: Ad[];
   placement?: 'content' | 'sidebar';
   surfBreakId?: string;
-  /** True when this card is currently visible in the feed. Triggers the impression beacon. */
+  /** True when the card is currently visible in the parent feed. */
   isViewable?: boolean;
 }
 
 /**
- * Post-styled sponsored card. Visually mirrors SessionCard — same header row,
- * same thumbnail dimensions, same muted header palette. The only visual
- * differentiator is the small "Sponsored" pill + CTA button, per App Store
- * policy.
+ * Post-styled sponsored card. Visually mirrors SessionCard. When given a
+ * partner group via `ads`, renders a horizontal paging FlatList so the user
+ * can swipe through every creative from the same partner in one slot — no
+ * more "three ads in a row" for a single advertiser. Each slide fires its
+ * own impression when it becomes the active page.
  */
 export default function SponsoredCard({
   ad,
+  ads,
   placement = 'content',
   surfBreakId,
   isViewable = true,
 }: SponsoredCardProps) {
   const isDark = useColorScheme() === 'dark';
   const [recordImpression] = useRecordAdImpressionMutation();
-  const firedRef = useRef(false);
 
+  const slides = useMemo<Ad[]>(() => {
+    if (ads && ads.length) return ads.filter(Boolean);
+    if (ad) return [ad];
+    return [];
+  }, [ad, ads]);
+
+  const [activeIdx, setActiveIdx] = useState(0);
+  const firedRef = useRef<Set<string>>(new Set());
+  const [width, setWidth] = useState(Dimensions.get('window').width);
+  const isCarousel = slides.length > 1;
+
+  // Reset impression tracking when the slide set changes (different partner).
   useEffect(() => {
-    if (!isViewable || !ad?.id || firedRef.current) return;
-    firedRef.current = true;
+    firedRef.current = new Set();
+    setActiveIdx(0);
+  }, [slides]);
+
+  // Fire impression for single-ad usage when the card enters the viewport.
+  useEffect(() => {
+    if (isCarousel) return;
+    const target = slides[0];
+    if (!isViewable || !target?.id || firedRef.current.has(target.id)) return;
+    firedRef.current.add(target.id);
     recordImpression({
-      adId: ad.id,
+      adId: target.id,
       surfBreakId,
       placement,
       device: currentDevice(),
     }).catch(() => { /* fire-and-forget */ });
-  }, [isViewable, ad?.id, surfBreakId, placement, recordImpression]);
+  }, [isViewable, isCarousel, slides, surfBreakId, placement, recordImpression]);
 
-  const openClick = () => {
-    const url = buildAdClickUrl(ad.id, { placement, surfBreakId, device: currentDevice() });
+  // Fire impression for the active carousel slide once the card is visible.
+  useEffect(() => {
+    if (!isCarousel || !isViewable) return;
+    const target = slides[activeIdx];
+    if (!target?.id || firedRef.current.has(target.id)) return;
+    firedRef.current.add(target.id);
+    recordImpression({
+      adId: target.id,
+      surfBreakId,
+      placement,
+      device: currentDevice(),
+    }).catch(() => { /* fire-and-forget */ });
+  }, [isCarousel, isViewable, activeIdx, slides, surfBreakId, placement, recordImpression]);
+
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    if (!viewableItems.length) return;
+    const first = viewableItems[0];
+    if (typeof first.index === 'number') setActiveIdx(first.index);
+  }).current;
+
+  const openClick = useCallback((slide: Ad) => {
+    const url = buildAdClickUrl(slide.id, { placement, surfBreakId, device: currentDevice() });
     Linking.openURL(url).catch(() => { /* noop */ });
-  };
+  }, [placement, surfBreakId]);
 
-  const ctaLabel = ad.cta_label || (ad.cta_type === 'tel' ? 'Call now' : 'Learn more');
-  // Hero prefers feed-optimized creative; falls back to main media_url.
-  const heroImage = ad.hero_media_url || ad.media_url;
+  if (!slides.length) return null;
+
+  const partner = slides[0];
+  const active = slides[activeIdx] || partner;
+  const avatarSource = partner.media_url;
+  const singleHero = active.hero_media_url || active.media_url;
 
   return (
-    <View style={styles.card}>
-      {/* Header */}
+    <View style={styles.card} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      {/* Header — partner identity stays static; body text below mirrors active slide */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            {ad.media_url ? (
-              <Image source={{ uri: ad.media_url }} style={styles.avatarImg} contentFit="cover" />
+            {avatarSource ? (
+              <Image source={{ uri: avatarSource }} style={styles.avatarImg} contentFit="cover" />
             ) : (
               <Ionicons name="business-outline" size={18} color="#9ca3af" />
             )}
@@ -81,53 +138,102 @@ export default function SponsoredCard({
           <View style={styles.headerInfo}>
             <View style={styles.headerNameRow}>
               <Text style={[styles.companyName, { color: isDark ? '#ffffff' : '#111827' }]} numberOfLines={1}>
-                {ad.company_name || 'Local business'}
+                {partner.company_name || 'Local business'}
               </Text>
               <View style={styles.sponsoredPill}>
                 <Text style={styles.sponsoredText}>Sponsored</Text>
               </View>
+              {active.is_local ? (
+                <View style={styles.localPill}>
+                  <Ionicons name="location-sharp" size={9} color="#047857" />
+                  <Text style={styles.localText}>Local</Text>
+                </View>
+              ) : null}
             </View>
-            {ad.headline ? (
-              <Text style={styles.subtitle} numberOfLines={1}>{ad.headline}</Text>
+            {active.headline ? (
+              <Text style={styles.subtitle} numberOfLines={1}>{active.headline}</Text>
             ) : null}
           </View>
         </View>
       </View>
 
-      {/* Hero */}
-      <Pressable onPress={openClick}>
+      {/* Hero — carousel when multi-slide, single Pressable otherwise */}
+      {isCarousel ? (
         <View>
+          <FlatList
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            data={slides}
+            keyExtractor={(s) => s.id}
+            renderItem={({ item }) => {
+              const img = item.hero_media_url || item.media_url;
+              return (
+                <Pressable onPress={() => openClick(item)} style={{ width }}>
+                  <View style={[styles.thumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                    <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
+                  </View>
+                  {img ? (
+                    <Image
+                      source={{ uri: img }}
+                      style={[styles.thumb, { position: 'absolute', top: 0, left: 0, width }]}
+                      contentFit="cover"
+                      transition={200}
+                    />
+                  ) : null}
+                </Pressable>
+              );
+            }}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
+          />
+          {/* Dot pager — tapered, no floor (dots fade out past distance 7). */}
+          <View style={styles.dotsRow}>
+            {slides.map((s, i) => {
+              const dist = Math.abs(i - activeIdx);
+              const size = 8 - dist;
+              if (size < 1) return null;
+              const isActive = i === activeIdx;
+              return (
+                <View
+                  key={s.id}
+                  style={{
+                    width: size,
+                    height: size,
+                    borderRadius: size / 2,
+                    backgroundColor: isActive
+                      ? (isDark ? '#d1d5db' : '#6b7280')
+                      : (isDark ? '#4b5563' : '#d1d5db'),
+                  }}
+                />
+              );
+            })}
+          </View>
+        </View>
+      ) : (
+        <Pressable onPress={() => openClick(active)}>
           <View style={[styles.thumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
             <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
           </View>
-          {heroImage ? (
+          {singleHero ? (
             <Image
-              source={{ uri: heroImage }}
+              source={{ uri: singleHero }}
               style={[styles.thumb, { position: 'absolute', top: 0, left: 0 }]}
               contentFit="cover"
               transition={200}
             />
           ) : null}
-        </View>
-      </Pressable>
-
-      {/* Body + CTA */}
-      <View style={styles.footer}>
-        <View style={{ flex: 1, marginRight: 12 }}>
-          {ad.body ? (
-            <Text style={[styles.body, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={2}>
-              {ad.body}
-            </Text>
-          ) : null}
-        </View>
-        <Pressable
-          onPress={openClick}
-          style={[styles.cta, { backgroundColor: isDark ? '#ffffff' : '#111827' }]}
-          hitSlop={6}
-        >
-          <Text style={[styles.ctaText, { color: isDark ? '#111827' : '#ffffff' }]}>{ctaLabel}</Text>
         </Pressable>
-      </View>
+      )}
+
+      {/* Body only — tap anywhere on the card (header/hero/body) opens the ad */}
+      {active.body ? (
+        <Pressable onPress={() => openClick(active)} style={styles.footer}>
+          <Text style={[styles.body, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={2}>
+            {active.body}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -187,6 +293,22 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: '#6b7280',
   },
+  localPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+  },
+  localText: {
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    color: '#047857',
+  },
   subtitle: {
     fontSize: 13,
     color: '#6b7280',
@@ -199,8 +321,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -208,13 +328,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 19,
   },
-  cta: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 999,
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingTop: 8,
+    paddingBottom: 2,
   },
-  ctaText: {
-    fontSize: 12,
-    fontWeight: '700',
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  dotActive: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 });
