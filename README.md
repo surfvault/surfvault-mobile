@@ -213,6 +213,23 @@ Badge count = `unreadMessageCount + unreadNotificationCount`, set via `Notificat
 
 `src/helpers/saveToPhotos.ts` — requests `MediaLibrary` permission, fetches a presigned URL from `GET /media/photo/{photoId}/download-url`, downloads via `expo-file-system`, then `MediaLibrary.saveToLibraryAsync`, then cleans up the cache file. `savePhotosToCameraRoll(ids[], onProgress)` does a batch with progress callbacks.
 
+### Ads
+
+- **In-feed card** (`src/components/SponsoredCard.tsx`) — accepts `ad` (single, back-compat for user profile + empty-state local-love lists) or `ads` (partner group → horizontal paging `FlatList`). **No CTA button** — the whole card is tappable (header + hero + body each have `Pressable` wrappers). Per-slide impression tracking via `onViewableItemsChanged` at 60% visibility. Same tapered dot pager as `SessionCard` (active 8px, tapers off past distance 7).
+- **Interleave helper** (`src/helpers/interleaveAds.ts`) — TypeScript mirror of web's `adFeedInterleave.js`. `interleaveAds(sessions, ads)` groups ads by partner internally and emits `FeedRow<T, A>` with `data: A[]` (a partner group). Use `AD_EVERY_N_ITEMS = 4` (shared with web for cross-platform parity).
+- **Click tracking:** `src/helpers/adTracking.ts:buildAdClickUrl(adId, ...)` wraps the click through the server-side tracker. `currentDevice()` auto-detects `ios` / `android`.
+
+### Carousel gesture pattern
+
+The horizontal `FlatList` in `SessionCard.tsx` and `SponsoredCard.tsx` follows a specific structure to avoid iOS tap-vs-pan conflicts:
+
+- **No outer `Pressable`** wrapping the `FlatList`. An outer tap recognizer will fight the FlatList's pan, and swipes only register near the screen edge.
+- **Per-slide `Pressable`** inside `renderItem` (and on the single-image non-carousel fallback too).
+- **Absolute overlays** (tagged users, stats badge, photo count) set `pointerEvents="none"` so taps fall through to the slide.
+- **Never set `removeClippedSubviews`** on the carousel FlatList — deprecated on iOS, interferes with gesture handlers.
+
+When adding a new horizontal carousel, mirror `SponsoredCard`'s structure.
+
 ### Account deletion (Apple requirement)
 
 `app/account/index.tsx` surfaces:
