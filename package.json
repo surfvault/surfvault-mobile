@@ -14,7 +14,7 @@
     "web": "expo start --web",
     "build:dev": "eas build --profile development --platform ios",
     "build:prod": "eas build --profile production --platform ios",
-    "submit": "eas submit --platform ios"
+    "submit:ios": "eas submit --platform ios"
   },
   "dependencies": {
     "@expo/react-native-action-sheet": "^4.1.1",
