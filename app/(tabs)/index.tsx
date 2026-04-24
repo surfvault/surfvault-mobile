@@ -12,8 +12,8 @@ import {
   TextInput,
   Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useNavigation } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter, useNavigation, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -33,10 +33,14 @@ import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
 import SponsoredCard from '../../src/components/SponsoredCard';
+import HomeSkeleton from '../../src/components/HomeSkeleton';
 import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
 
 type SearchType = 'surf_break' | 'user';
+
+// Module-level so the offset survives any remount (tab detach/attach cycles).
+let savedFeedOffset = 0;
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -45,6 +49,14 @@ export default function HomeScreen() {
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
   const { setTabBarVisible } = useTabBar();
+
+  // Cache the top inset so it never drops to 0 mid-session (safe-area-context
+  // can briefly report 0 during stack push/pop transitions, which makes the
+  // header snap above the status bar until the next frame).
+  const insets = useSafeAreaInsets();
+  const stableTopRef = useRef(0);
+  if (insets.top > stableTopRef.current) stableTopRef.current = insets.top;
+  const topInset = stableTopRef.current;
 
   // Location — read from Redux (set by map page when permission is granted)
   const coords = useSelector((state: any) => state.location.coordinates);
@@ -55,6 +67,11 @@ export default function HomeScreen() {
   const [viewableIds, setViewableIds] = useState<Set<string>>(new Set());
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
+    // Ignore transient empty reports (fires briefly during back-navigation
+    // re-attach and during programmatic scrollToOffset). Treating those as
+    // "nothing visible" causes every card to flip isViewable → false → true,
+    // which restarts every fade animation and looks like a flash.
+    if (viewableItems.length === 0) return;
     setViewableIds(new Set(viewableItems.map((v) => v.key)));
   }).current;
 
@@ -65,12 +82,34 @@ export default function HomeScreen() {
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
   const feedListRef = useRef<FlatList<any>>(null);
+  // Frozen at mount so re-renders never push a new contentOffset prop into
+  // the ScrollView (which on iOS would reset the user's current scroll).
+  const initialContentOffset = useRef({ x: 0, y: savedFeedOffset }).current;
+
+  const handleFeedScroll = useCallback((e: any) => {
+    savedFeedOffset = e.nativeEvent.contentOffset.y;
+  }, []);
+
+  // Restore scroll position on focus, single attempt. Multiple retries
+  // caused viewable-items thrash (re-firing all the card animations as
+  // the Set was rebuilt repeatedly).
+  useFocusEffect(
+    useCallback(() => {
+      const target = savedFeedOffset;
+      if (target <= 0) return;
+      const t = setTimeout(() => {
+        feedListRef.current?.scrollToOffset({ offset: target, animated: false });
+      }, 100);
+      return () => clearTimeout(t);
+    }, [])
+  );
 
   // Tap the Home tab while focused → scroll feed to top
   const navigation = useNavigation();
   useEffect(() => {
     const unsub = (navigation as any).addListener?.('tabPress', () => {
       if ((navigation as any).isFocused?.()) {
+        savedFeedOffset = 0;
         feedListRef.current?.scrollToOffset({ offset: 0, animated: true });
       }
     });
@@ -516,8 +555,10 @@ export default function HomeScreen() {
   }
 
   // ---- Main discover feed ----
+  const showSkeleton = isLoading && sessions.length === 0;
+
   return (
-    <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={['top']}>
+    <View className="flex-1 bg-white dark:bg-gray-950" style={{ paddingTop: topInset }}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Image
@@ -534,13 +575,9 @@ export default function HomeScreen() {
         </Pressable>
       </View>
 
-      {isLoading && sessions.length === 0 ? (
-        <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" />
-        </View>
-      ) : (
-        <FlatList
-          ref={feedListRef}
+      {showSkeleton ? <HomeSkeleton /> : (
+      <FlatList
+        ref={feedListRef}
           data={feedRows}
           keyExtractor={(row) => row.key}
           renderItem={({ item: row }) => {
@@ -568,6 +605,13 @@ export default function HomeScreen() {
           }}
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
+          onScroll={handleFeedScroll}
+          onMomentumScrollEnd={handleFeedScroll}
+          onScrollEndDrag={handleFeedScroll}
+          scrollEventThrottle={16}
+          // Initial scroll position; reference is frozen at mount via
+          // useRef so re-renders don't reset the user's live scroll.
+          contentOffset={initialContentOffset}
           ListHeaderComponent={
             <>
               {/* Nearby Surf Breaks */}
@@ -662,13 +706,13 @@ export default function HomeScreen() {
               <View className="py-6"><ActivityIndicator /></View>
             ) : null
           }
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          showsVerticalScrollIndicator={false}
-        />
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        showsVerticalScrollIndicator={false}
+      />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

@@ -63,6 +63,7 @@ import { generateUUID } from '../../src/helpers/uuid';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
 import { getViewerHash } from '../../src/helpers/viewerHash';
 import ScreenHeader from '../../src/components/ScreenHeader';
+import SessionSkeleton from '../../src/components/SessionSkeleton';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 
 const FETCH_AMOUNT = 30;
@@ -855,7 +856,7 @@ export default function SessionDetailScreen() {
       />
       <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={[]}>
         {isLoading ? (
-          <View style={styles.centered}><ActivityIndicator size="large" /></View>
+          <SessionSkeleton />
         ) : (
           <FlatList
             ref={flatListRef}

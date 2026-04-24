@@ -26,6 +26,7 @@ import {
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
+import BreakSkeleton from '../../src/components/BreakSkeleton';
 import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
 
 const formatDateLabel = (date: Date): string =>
@@ -180,7 +181,7 @@ export default function SurfBreakDetailScreen() {
       />
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
-          <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
+          <BreakSkeleton />
         ) : (
           <FlatList
             data={feedRows}
@@ -267,7 +268,6 @@ export default function SurfBreakDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   headerWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
   breakName: { fontSize: 22, fontWeight: '700' },
   breakLocation: { fontSize: 13, marginTop: 3 },

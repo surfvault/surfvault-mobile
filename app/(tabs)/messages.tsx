@@ -18,6 +18,7 @@ import { useAuth } from '../../src/context/AuthProvider';
 import { useGetConversationsQuery } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
+import MessagesSkeleton from '../../src/components/MessagesSkeleton';
 
 const formatTime = (dateStr?: string) => {
   if (!dateStr) return '';
@@ -69,6 +70,11 @@ export default function MessagesScreen() {
         return handle.toLowerCase().includes(term) || name.toLowerCase().includes(term) || lastMsg.toLowerCase().includes(term);
       })
     : conversations;
+
+  // Initial load — show skeleton rather than a spinner so the layout is stable
+  if (isAuthenticated && isLoading && !data) {
+    return <MessagesSkeleton />;
+  }
 
   // Not logged in
   if (!isAuthenticated) {
