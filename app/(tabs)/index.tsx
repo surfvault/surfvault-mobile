@@ -547,7 +547,7 @@ export default function HomeScreen() {
             if (row.type === 'ad') {
               return (
                 <SponsoredCard
-                  ad={row.data}
+                  ads={row.data}
                   placement="content"
                   isViewable={viewableIds.has(row.key)}
                 />

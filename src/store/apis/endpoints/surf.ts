@@ -294,6 +294,7 @@ const surfApi = rootApi.injectEndpoints({
         sessionName,
         sessionDate,
         hideLocation,
+        notifyFollowers,
         files,
         totalSizeInGB,
       }: {
@@ -301,12 +302,13 @@ const surfApi = rootApi.injectEndpoints({
         sessionName: string;
         sessionDate: string;
         hideLocation: boolean;
+        notifyFollowers: boolean;
         files: Array<{ name: string; size: number; type: string }>;
         totalSizeInGB: number;
       }) => ({
         url: '/surf-session',
         method: 'POST',
-        body: { surfBreakId, sessionName, sessionDate, hideLocation, files, totalSizeInGB },
+        body: { surfBreakId, sessionName, sessionDate, hideLocation, notifyFollowers, files, totalSizeInGB },
       }),
     }),
     updateSession: builder.mutation({

@@ -189,7 +189,7 @@ export default function SurfBreakDetailScreen() {
               if (row.type === 'ad') {
                 return (
                   <SponsoredCard
-                    ad={row.data}
+                    ads={row.data}
                     placement="content"
                     surfBreakId={breakData?.id}
                   />

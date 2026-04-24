@@ -60,20 +60,6 @@ interface SessionCardProps {
 
 const MAX_VISIBLE_TAGS = 3;
 
-// Pager dots: all dots always visible (max 11 slides), active is larger and colored,
-// dots further from active shrink slightly for an Instagram-like look.
-function computeDots(activeIdx: number, total: number) {
-  if (total <= 1) return [] as Array<{ key: number; size: number; isActive: boolean }>;
-  return Array.from({ length: total }, (_, i) => {
-    const isActive = i === activeIdx;
-    const dist = Math.abs(i - activeIdx);
-    let size = 6;
-    if (isActive) size = 7;
-    else if (dist >= 3) size = 4;
-    else if (dist === 2) size = 5;
-    return { key: i, size, isActive };
-  });
-}
 
 // Pure string-based date formatter. Never constructs `new Date(dateStr)` because
 // session dates represent a calendar day (the day the session happened) — not a
@@ -356,118 +342,127 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
         </Pressable>
       </View>
 
-      {/* Thumbnail / carousel — edge to edge */}
-      <Pressable onPress={handlePress}>
-        <View onLayout={(e: LayoutChangeEvent) => setSlideWidth(e.nativeEvent.layout.width)}>
-          <View style={[styles.thumbnail, styles.emptyThumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
-          </View>
-          {useCarousel && slideWidth > 0 ? (
-            <FlatList
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              data={slides}
-              keyExtractor={(_, i) => `${sessionId}-slide-${i}`}
-              initialNumToRender={1}
-              windowSize={3}
-              maxToRenderPerBatch={1}
-              removeClippedSubviews
-              onViewableItemsChanged={handleViewChange}
-              viewabilityConfig={viewabilityConfig}
-              style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
-              renderItem={({ item }) => {
-                const slideStyle = { width: slideWidth, aspectRatio: 5 / 4 };
-                if (item.kind === 'cta') {
-                  return (
-                    <View style={[slideStyle, styles.ctaSlide, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-                      <Ionicons name="images-outline" size={28} color={isDark ? '#9ca3af' : '#6b7280'} />
-                      <Text style={[styles.ctaTitle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                        See all {session.photo_count ?? ''} photos
-                      </Text>
-                      <View style={styles.ctaHintRow}>
-                        <Text style={[styles.ctaHint, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Tap to open</Text>
-                        <Ionicons name="chevron-forward" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
-                      </View>
-                    </View>
-                  );
-                }
+      {/* Thumbnail / carousel — edge to edge.
+          Slide Pressables are INSIDE renderItem (not wrapping the whole FlatList)
+          so horizontal swipes don't fight an outer tap-gesture recognizer.
+          Overlays use pointerEvents="none" so taps fall through to the slide. */}
+      <View onLayout={(e: LayoutChangeEvent) => setSlideWidth(e.nativeEvent.layout.width)}>
+        <View style={[styles.thumbnail, styles.emptyThumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+          <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
+        </View>
+        {useCarousel && slideWidth > 0 ? (
+          <FlatList
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            data={slides}
+            keyExtractor={(_, i) => `${sessionId}-slide-${i}`}
+            onViewableItemsChanged={handleViewChange}
+            viewabilityConfig={viewabilityConfig}
+            style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
+            renderItem={({ item }) => {
+              const slideStyle = { width: slideWidth, aspectRatio: 5 / 4 };
+              if (item.kind === 'cta') {
                 return (
+                  <Pressable onPress={handlePress} style={[slideStyle, styles.ctaSlide, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                    <Ionicons name="images-outline" size={28} color={isDark ? '#9ca3af' : '#6b7280'} />
+                    <Text style={[styles.ctaTitle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                      See all {session.photo_count ?? ''} photos
+                    </Text>
+                    <View style={styles.ctaHintRow}>
+                      <Text style={[styles.ctaHint, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Tap to open</Text>
+                      <Ionicons name="chevron-forward" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
+                    </View>
+                  </Pressable>
+                );
+              }
+              return (
+                <Pressable onPress={handlePress} style={slideStyle}>
                   <Image
                     source={{ uri: item.url }}
                     style={slideStyle}
                     contentFit="cover"
                     transition={200}
                   />
-                );
-              }}
-            />
-          ) : session.thumbnail ? (
+                </Pressable>
+              );
+            }}
+          />
+        ) : session.thumbnail ? (
+          <Pressable onPress={handlePress} style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}>
             <Image
               source={{ uri: session.thumbnail }}
-              style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
+              style={styles.thumbnail}
               contentFit="cover"
               transition={200}
             />
-          ) : null}
+          </Pressable>
+        ) : null}
 
-          {/* Tagged users — bottom right overlay */}
-          {taggedUsers.length > 0 && (
-            <View style={styles.taggedOverlay}>
-              {taggedUsers.slice(0, MAX_VISIBLE_TAGS).map((tagged, index) => (
-                <View
-                  key={tagged.id ?? tagged.handle ?? index}
-                  style={{ marginLeft: index > 0 ? -8 : 0, zIndex: MAX_VISIBLE_TAGS - index }}
-                >
-                  <UserAvatar uri={tagged.picture} name={tagged.name ?? tagged.handle} size={26} />
-                </View>
-              ))}
-              {taggedUsers.length > MAX_VISIBLE_TAGS && (
-                <View style={[styles.tagOverflow, { marginLeft: -8 }]}>
-                  <Text style={styles.tagOverflowText}>+{taggedUsers.length - MAX_VISIBLE_TAGS}</Text>
-                </View>
-              )}
-            </View>
-          )}
+        {/* Tagged users — bottom right overlay (taps pass through to slide) */}
+        {taggedUsers.length > 0 && (
+          <View style={styles.taggedOverlay} pointerEvents="none">
+            {taggedUsers.slice(0, MAX_VISIBLE_TAGS).map((tagged, index) => (
+              <View
+                key={tagged.id ?? tagged.handle ?? index}
+                style={{ marginLeft: index > 0 ? -8 : 0, zIndex: MAX_VISIBLE_TAGS - index }}
+              >
+                <UserAvatar uri={tagged.picture} name={tagged.name ?? tagged.handle} size={26} />
+              </View>
+            ))}
+            {taggedUsers.length > MAX_VISIBLE_TAGS && (
+              <View style={[styles.tagOverflow, { marginLeft: -8 }]}>
+                <Text style={styles.tagOverflowText}>+{taggedUsers.length - MAX_VISIBLE_TAGS}</Text>
+              </View>
+            )}
+          </View>
+        )}
 
-          {/* Stats badge — bottom left */}
-          {(session.photo_count > 0 || (showViewCount && session.view_count != null)) && (
-            <View style={styles.statsBadge}>
-              {showViewCount && session.view_count != null && (
-                <>
-                  <Ionicons name="eye-outline" size={11} color="#fff" />
-                  <Text style={styles.statsText}>{formatCount(session.view_count ?? 0)}</Text>
-                </>
-              )}
-              {showViewCount && session.view_count != null && session.photo_count > 0 && (
-                <Text style={styles.statsText}> · </Text>
-              )}
-              {session.photo_count > 0 && (
-                <>
-                  <Ionicons name="images-outline" size={11} color="#fff" />
-                  <Text style={styles.statsText}>{formatCount(session.photo_count)}</Text>
-                </>
-              )}
-            </View>
-          )}
-        </View>
-      </Pressable>
+        {/* Stats badge — bottom left (taps pass through to slide) */}
+        {(session.photo_count > 0 || (showViewCount && session.view_count != null)) && (
+          <View style={styles.statsBadge} pointerEvents="none">
+            {showViewCount && session.view_count != null && (
+              <>
+                <Ionicons name="eye-outline" size={11} color="#fff" />
+                <Text style={styles.statsText}>{formatCount(session.view_count ?? 0)}</Text>
+              </>
+            )}
+            {showViewCount && session.view_count != null && session.photo_count > 0 && (
+              <Text style={styles.statsText}> · </Text>
+            )}
+            {session.photo_count > 0 && (
+              <>
+                <Ionicons name="images-outline" size={11} color="#fff" />
+                <Text style={styles.statsText}>{formatCount(session.photo_count)}</Text>
+              </>
+            )}
+          </View>
+        )}
+      </View>
 
-      {/* Pager dots — Instagram-style sliding window, only shown for carousel */}
+      {/* Dot pager — tapered, no floor: dots fade out past distance 7 so large
+          sessions show a sliding window of ~15 dots instead of a long cluster. */}
       {useCarousel && slides.length > 1 && (
         <View style={styles.dotsRow}>
-          {computeDots(activeSlide, slides.length).map((dot) => (
-            <View
-              key={dot.key}
-              style={[
-                styles.dot,
-                { width: dot.size, height: dot.size, borderRadius: dot.size / 2 },
-                dot.isActive
-                  ? styles.dotActive
-                  : { backgroundColor: isDark ? '#4b5563' : '#d1d5db' },
-              ]}
-            />
-          ))}
+          {slides.map((_, i) => {
+            const dist = Math.abs(i - activeSlide);
+            const size = 8 - dist;
+            if (size < 1) return null;
+            const isActive = i === activeSlide;
+            return (
+              <View
+                key={i}
+                style={{
+                  width: size,
+                  height: size,
+                  borderRadius: size / 2,
+                  backgroundColor: isActive
+                    ? (isDark ? '#d1d5db' : '#6b7280')
+                    : (isDark ? '#4b5563' : '#d1d5db'),
+                }}
+              />
+            );
+          })}
         </View>
       )}
 
@@ -579,10 +574,14 @@ const styles = StyleSheet.create({
     paddingBottom: 2,
   },
   dot: {
-    backgroundColor: '#d1d5db',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   dotActive: {
-    backgroundColor: '#0ea5e9',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   taggedOverlay: {
     position: 'absolute',

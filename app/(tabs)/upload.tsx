@@ -74,6 +74,7 @@ export default function CreateSessionScreen() {
   const [sessionDate, setSessionDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [hideLocation, setHideLocation] = useState(false);
+  const [notifyFollowers, setNotifyFollowers] = useState(true);
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -183,6 +184,7 @@ export default function CreateSessionScreen() {
         sessionName: sessionName.trim(),
         sessionDate: formatDateParam(sessionDate),
         hideLocation,
+        notifyFollowers,
         files: filesMapped,
         totalSizeInGB: totalSizeGB,
       }).unwrap();
@@ -218,6 +220,7 @@ export default function CreateSessionScreen() {
       setSelectedBreak(null);
       setFiles([]);
       setHideLocation(false);
+      setNotifyFollowers(true);
       setSessionDate(new Date());
 
       // Navigate to home
@@ -227,7 +230,7 @@ export default function CreateSessionScreen() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [canSubmit, requireAuth, user, files, selectedBreak, sessionName, sessionDate, hideLocation, createSession, saveSurfMedia, startUpload, router]);
+  }, [canSubmit, requireAuth, user, files, selectedBreak, sessionName, sessionDate, hideLocation, notifyFollowers, createSession, saveSurfMedia, startUpload, router]);
 
   // Not logged in
   if (!isAuthenticated) {
@@ -346,6 +349,21 @@ export default function CreateSessionScreen() {
           <Switch
             value={hideLocation}
             onValueChange={setHideLocation}
+            trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
+          />
+        </View>
+
+        {/* Notify Followers */}
+        <View style={[styles.fieldWrap, styles.switchRow]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151', marginBottom: 0 }]}>Notify Followers</Text>
+            <Text style={[styles.switchDesc, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
+              Alert followers and users who favorited this break. Turn off for backfills.
+            </Text>
+          </View>
+          <Switch
+            value={notifyFollowers}
+            onValueChange={setNotifyFollowers}
             trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
           />
         </View>
