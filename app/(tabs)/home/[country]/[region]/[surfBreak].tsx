@@ -199,7 +199,7 @@ export default function SurfBreakDetailScreen() {
           </View>
         }
       />
-      <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="large" />

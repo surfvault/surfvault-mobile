@@ -90,7 +90,7 @@ export default function ApproveAccessRequestSheet({
           style={[
             s.sheet,
             {
-              backgroundColor: isDark ? '#030712' : '#ffffff',
+              backgroundColor: isDark ? '#000000' : '#ffffff',
               paddingBottom: insets.bottom + 16,
               transform: [{ translateY: slide }],
             },
@@ -188,7 +188,7 @@ export default function ApproveAccessRequestSheet({
                       ]}
                     >
                       {isSelected && (
-                        <View style={[s.radioInner, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} />
+                        <View style={[s.radioInner, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} />
                       )}
                     </View>
                   </TouchableOpacity>

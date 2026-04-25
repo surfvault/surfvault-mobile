@@ -86,7 +86,7 @@ export default function ManageFavoritesScreen() {
           <View
             style={[
               s.row,
-              { backgroundColor: isDark ? '#030712' : '#fff' },
+              { backgroundColor: isDark ? '#000000' : '#fff' },
               { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' },
               isActive && {
                 backgroundColor: isDark ? '#1f2937' : '#f0f9ff',
@@ -123,7 +123,7 @@ export default function ManageFavoritesScreen() {
 
             {/* Remove button */}
             <Pressable onPress={() => handleRemove(item)} hitSlop={8} style={s.removeBtn}>
-              <Ionicons name="close-circle" size={22} color={isDark ? '#6b7280' : '#d1d5db'} />
+              <Ionicons name="close-circle" size={22} color="#ef4444" />
             </Pressable>
           </View>
         </ScaleDecorator>
@@ -133,7 +133,7 @@ export default function ManageFavoritesScreen() {
   );
 
   return (
-    <View style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]}>
+    <View style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]}>
       <Stack.Screen options={{ headerShown: false }} />
       <ScreenHeader
         title="Manage Favorites"

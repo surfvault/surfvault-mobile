@@ -244,7 +244,7 @@ export default function ConversationDetailScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <View style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]}>
+      <View style={[styles.container, { backgroundColor: isDark ? '#000000' : '#fff' }]}>
         <KeyboardAvoidingView
           style={styles.container}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -306,7 +306,7 @@ export default function ConversationDetailScreen() {
           </View>
 
           {/* Composer */}
-          <View style={[styles.composer, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb', backgroundColor: isDark ? '#030712' : '#fff', paddingBottom: Math.max(insets.bottom, 8) }]}>
+          <View style={[styles.composer, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb', backgroundColor: isDark ? '#000000' : '#fff', paddingBottom: Math.max(insets.bottom, 8) }]}>
             {isOtherUserDeleted ? (
               <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', justifyContent: 'center', paddingVertical: 12 }]}>
                 <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 14, textAlign: 'center' }}>

@@ -31,6 +31,9 @@ interface SessionCardProps {
   showViewCount?: boolean;
   showHiddenLocations?: boolean;
   enableCarousel?: boolean;
+  // Use the older 5:4 landscape thumbnail (the in-feed default is 4:5
+  // portrait). Set on profile-list-tab usages so list rows stay compact.
+  compact?: boolean;
   onPress?: () => void;
   onDelete?: () => void;
   isViewable?: boolean;
@@ -117,7 +120,8 @@ type Slide =
   | { kind: 'photo'; url: string; id: string }
   | { kind: 'cta' };
 
-export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, compact = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
+  const thumbAspect = compact ? 5 / 4 : 4 / 5;
   const router = useRouter();
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
@@ -297,7 +301,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             />
             <View style={styles.headerInfo}>
               <View style={styles.headerNameRow}>
-                <Text style={styles.handleText} numberOfLines={1}>{handle}</Text>
+                <Text style={[styles.handleText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{handle}</Text>
                 {session.user_type && (
                   session.user_type === 'photographer' ? (
                     <Ionicons name="camera-outline" size={12} color="#9ca3af" style={styles.typeIcon} />
@@ -325,7 +329,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
           <View style={styles.headerLeft}>
             <View style={{ flex: 1 }}>
               {session.session_name && (
-                <Text style={styles.handleText} numberOfLines={1}>{session.session_name}</Text>
+                <Text style={[styles.handleText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{session.session_name}</Text>
               )}
               <FadingSubtitle
                 items={[
@@ -347,7 +351,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
           so horizontal swipes don't fight an outer tap-gesture recognizer.
           Overlays use pointerEvents="none" so taps fall through to the slide. */}
       <View onLayout={(e: LayoutChangeEvent) => setSlideWidth(e.nativeEvent.layout.width)}>
-        <View style={[styles.thumbnail, styles.emptyThumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+        <View style={[styles.thumbnail, styles.emptyThumb, { aspectRatio: thumbAspect, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
           <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
         </View>
         {useCarousel && slideWidth > 0 ? (
@@ -361,7 +365,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             viewabilityConfig={viewabilityConfig}
             style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
             renderItem={({ item }) => {
-              const slideStyle = { width: slideWidth, aspectRatio: 5 / 4 };
+              const slideStyle = { width: slideWidth, aspectRatio: thumbAspect };
               if (item.kind === 'cta') {
                 return (
                   <Pressable onPress={handlePress} style={[slideStyle, styles.ctaSlide, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
@@ -389,10 +393,10 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             }}
           />
         ) : session.thumbnail ? (
-          <Pressable onPress={handlePress} style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}>
+          <Pressable onPress={handlePress} style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}>
             <Image
               source={{ uri: session.thumbnail }}
-              style={styles.thumbnail}
+              style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
               contentFit="cover"
               transition={200}
             />
@@ -540,7 +544,7 @@ const styles = StyleSheet.create({
   },
   thumbnail: {
     width: '100%',
-    aspectRatio: 5 / 4,
+    aspectRatio: 4 / 5,
   },
   emptyThumb: {
     backgroundColor: '#f3f4f6',

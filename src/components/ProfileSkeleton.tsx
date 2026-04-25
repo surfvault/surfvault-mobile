@@ -32,7 +32,7 @@ export default function ProfileSkeleton() {
 
   return (
     <SafeAreaView
-      style={[styles.container, { backgroundColor: isDark ? '#030712' : '#ffffff' }]}
+      style={[styles.container, { backgroundColor: isDark ? '#000000' : '#ffffff' }]}
       edges={['top']}
     >
       {/* Header bar (handle placeholder) */}

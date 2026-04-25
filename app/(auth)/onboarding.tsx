@@ -160,7 +160,7 @@ export default function OnboardingScreen() {
   // RENDER
   // -----------------------------------------------------------------
 
-  const bg = isDark ? '#030712' : '#ffffff';
+  const bg = isDark ? '#000000' : '#ffffff';
   const textColor = isDark ? '#ffffff' : '#111827';
   const mutedColor = isDark ? '#9ca3af' : '#6b7280';
   const inputBg = isDark ? '#1f2937' : '#f3f4f6';

@@ -13,7 +13,7 @@ export default function ScreenHeader({ title, center, left, right }: ScreenHeade
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: isDark ? '#030712' : '#ffffff' }]}>
+    <View style={[styles.container, { paddingTop: insets.top, backgroundColor: isDark ? '#000000' : '#ffffff' }]}>
       <View style={styles.row}>
         <View style={styles.side}>{left}</View>
         <View style={styles.center}>

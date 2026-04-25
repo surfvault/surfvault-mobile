@@ -91,6 +91,43 @@ export default function UserAvatar({
           <Text style={{ fontSize: size * 0.18, color: 'white' }}>✓</Text>
         </View>
       )}
+      {/* Instagram-style ACTIVE pill — overlaps the bottom edge of the
+          ring. Hidden on small avatars (the green ring alone reads as
+          "active" when the label would be unreadable). */}
+      {active && size >= 44 && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            bottom: -7,
+            alignItems: 'center',
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: '#22c55e',
+              borderRadius: 999,
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              borderWidth: 1.5,
+              borderColor: '#fff',
+            }}
+          >
+            <Text
+              style={{
+                fontSize: Math.max(8, size * 0.14),
+                fontWeight: '800',
+                color: '#fff',
+                letterSpacing: 0.4,
+              }}
+            >
+              ACTIVE
+            </Text>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

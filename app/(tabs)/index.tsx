@@ -316,7 +316,7 @@ export default function HomeScreen() {
   // ---- Search overlay ----
   if (searchVisible) {
     return (
-      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]}>
+      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#000000' : '#ffffff' }]}>
         {/* Header */}
         <View style={styles.searchHeader}>
           <Text style={[styles.searchTitle, { color: isDark ? '#ffffff' : '#111827' }]}>Search</Text>
@@ -558,12 +558,12 @@ export default function HomeScreen() {
   const showSkeleton = isLoading && sessions.length === 0;
 
   return (
-    <View className="flex-1 bg-white dark:bg-gray-950" style={{ paddingTop: topInset }}>
+    <View className="flex-1 bg-white dark:bg-black" style={{ paddingTop: topInset }}>
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Image
-            source={require('../../assets/surfvault-logo.png')}
-            style={[styles.headerLogo, isDark && { tintColor: '#ffffff' }]}
+            source={isDark ? require('../../assets/surfvault-logo-dark.png') : require('../../assets/surfvault-logo.png')}
+            style={styles.headerLogo}
             contentFit="contain"
           />
           <Text style={[styles.headerTitle, { color: isDark ? '#ffffff' : '#000000' }]}>

@@ -56,6 +56,7 @@ export default function AccessRequestScreen() {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [savingAll, setSavingAll] = useState(false);
+  const flatListRef = useRef<FlatList<any>>(null);
 
   // API
   const { data, isLoading, isFetching, refetch } = useGetSurfMediaAccessRequestQuery(
@@ -125,6 +126,46 @@ export default function AccessRequestScreen() {
     if (nextToken) setContinuationToken(nextToken);
   }, [hasMore, isFetching, data]);
 
+  // Track current photo by id so the gallery can scroll back to the exact
+  // photo on close even if photos array reorders/grows.
+  const fetchFromViewerRef = useRef(false);
+  const viewerCurrentPhotoIdRef = useRef<string | null>(null);
+  const photosRef = useRef<any[]>([]);
+  useEffect(() => { photosRef.current = photos; }, [photos]);
+  useEffect(() => {
+    fetchFromViewerRef.current = false;
+  }, [photos.length]);
+
+  const handleViewerIndexChange = useCallback((index: number) => {
+    const photo = photosRef.current[index];
+    viewerCurrentPhotoIdRef.current = photo?.id ?? null;
+    if (
+      index >= photosRef.current.length - 5 &&
+      !fetchFromViewerRef.current &&
+      hasMore &&
+      !isFetching
+    ) {
+      fetchFromViewerRef.current = true;
+      handleLoadMore();
+    }
+  }, [hasMore, isFetching, handleLoadMore]);
+
+  const headerHeightRef = useRef(0);
+
+  const handleViewerClose = useCallback(() => {
+    setViewerVisible(false);
+    const id = viewerCurrentPhotoIdRef.current;
+    if (!id || !flatListRef.current) return;
+    const idx = photosRef.current.findIndex((p: any) => p.id === id);
+    if (idx < 0) return;
+    const rowIdx = Math.floor(idx / NUM_COLUMNS);
+    const rowHeight = PHOTO_WIDTH * 1.2 + GAP;
+    const offset = headerHeightRef.current + GAP / 2 + rowIdx * rowHeight;
+    setTimeout(() => {
+      flatListRef.current?.scrollToOffset?.({ offset, animated: false });
+    }, 50);
+  }, []);
+
   const handleGrant = useCallback(async () => {
     if (!requestId) return;
     try {
@@ -183,6 +224,7 @@ export default function AccessRequestScreen() {
       <Pressable
         onPress={() => {
           setViewerIndex(index);
+          viewerCurrentPhotoIdRef.current = item?.id ?? null;
           setViewerVisible(true);
         }}
         onLongPress={() => {}}
@@ -201,7 +243,10 @@ export default function AccessRequestScreen() {
   );
 
   const listHeader = (
-    <View style={s.headerWrap}>
+    <View
+      style={s.headerWrap}
+      onLayout={(e) => { headerHeightRef.current = e.nativeEvent.layout.height; }}
+    >
       {/* Status badge */}
       <View style={[s.statusBadge, { backgroundColor: statusColor + '20' }]}>
         <View style={[s.statusDot, { backgroundColor: statusColor }]} />
@@ -365,11 +410,12 @@ export default function AccessRequestScreen() {
           </Pressable>
         }
       />
-      <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={[]}>
+      <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={[]}>
         {isLoading && !photos.length ? (
           <View style={s.loadingWrap}><ActivityIndicator size="large" /></View>
         ) : (
           <FlatList
+            ref={flatListRef}
             data={photos}
             keyExtractor={(item: any) => item.id ?? item.url ?? String(Math.random())}
             numColumns={NUM_COLUMNS}
@@ -412,7 +458,8 @@ export default function AccessRequestScreen() {
         images={lightboxImages}
         imageIndex={viewerIndex}
         visible={viewerVisible}
-        onRequestClose={() => setViewerVisible(false)}
+        onRequestClose={handleViewerClose}
+        onImageIndexChange={handleViewerIndexChange}
         swipeToCloseEnabled
         doubleTapToZoomEnabled
       />

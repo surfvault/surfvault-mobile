@@ -7,7 +7,7 @@ export default function LoginScreen() {
   const colorScheme = useColorScheme();
 
   return (
-    <View className="flex-1 items-center justify-center bg-white dark:bg-gray-950 px-8">
+    <View className="flex-1 items-center justify-center bg-white dark:bg-black px-8">
       {/* Logo placeholder — replace with actual SurfVault logo */}
       <View className="w-24 h-24 bg-sky-500 rounded-2xl items-center justify-center mb-8">
         <Text className="text-white text-4xl font-bold">SV</Text>

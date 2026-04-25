@@ -79,7 +79,7 @@ export default function MessagesScreen() {
   // Not logged in
   if (!isAuthenticated) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
+      <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
         <View style={styles.emptyWrap}>
           <View style={styles.emptyIconRow}>
             <View style={[styles.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#eff6ff' }]}>
@@ -162,7 +162,7 @@ export default function MessagesScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
+    <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>Messages</Text>
       </View>

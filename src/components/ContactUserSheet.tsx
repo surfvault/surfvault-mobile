@@ -92,7 +92,7 @@ export default function ContactUserSheet({ visible, user, onClose, onSent }: Con
           style={[
             s.sheet,
             {
-              backgroundColor: isDark ? '#030712' : '#ffffff',
+              backgroundColor: isDark ? '#000000' : '#ffffff',
               paddingBottom: insets.bottom + 16,
               transform: [{ translateY: slide }],
             },

@@ -300,7 +300,7 @@ export default function NotificationsScreen() {
           </Pressable>
         ) : undefined}
       />
-      <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={[]}>
+      <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={[]}>
         {isLoading ? (
           <View style={s.loadingWrap}><ActivityIndicator size="large" /></View>
         ) : (
@@ -309,7 +309,7 @@ export default function NotificationsScreen() {
             keyExtractor={(item) => item.id}
             renderItem={renderNotification}
             renderSectionHeader={({ section }) => (
-              <View style={[s.sectionHeader, { backgroundColor: isDark ? '#030712' : '#fff' }]}>
+              <View style={[s.sectionHeader, { backgroundColor: isDark ? '#000000' : '#fff' }]}>
                 <Text style={[s.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
                   {section.title}
                 </Text>

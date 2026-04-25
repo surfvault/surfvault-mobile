@@ -36,7 +36,7 @@ export default function PhotographersScreen() {
           headerBackTitle: 'Back',
         }}
       />
-      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={['bottom']}>
+      <SafeAreaView className="flex-1 bg-white dark:bg-black" edges={['bottom']}>
         {/* Continent filter */}
         <FlatList
           data={CONTINENTS}

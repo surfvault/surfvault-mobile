@@ -241,7 +241,7 @@ export default function UserProfileScreen() {
           </Pressable>
         }
       />
-      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
+      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <UserSkeleton />
         ) : (
@@ -284,7 +284,7 @@ export default function UserProfileScreen() {
                   </Pressable>
                 );
               }
-              return <SessionCard session={item} hidePhotographer />;
+              return <SessionCard session={item} hidePhotographer compact />;
             }}
             ListHeaderComponent={
               <>

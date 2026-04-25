@@ -68,7 +68,7 @@ export default function SurfBreaksScreen() {
           headerBackTitle: 'Back',
         }}
       />
-      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={['bottom']}>
+      <SafeAreaView className="flex-1 bg-white dark:bg-black" edges={['bottom']}>
         <View className="px-4 py-3">
           <SearchBar placeholder="Search surf breaks..." onSearch={handleSearch} />
         </View>

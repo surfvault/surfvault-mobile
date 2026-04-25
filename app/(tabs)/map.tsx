@@ -11,7 +11,7 @@ import {
   Keyboard,
   InteractionManager,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT } from 'react-native-maps';
@@ -95,6 +95,10 @@ const INITIAL_REGION: Region = {
   longitudeDelta: 80,
 };
 
+// Module-level so the value survives the map screen losing focus to a
+// pushed break page. Cleared after the restore animation runs once.
+let pendingRestoreBreak: any = null;
+
 export default function MapScreen() {
   const router = useRouter();
   const trackedPush = useTrackedPush();
@@ -107,10 +111,34 @@ export default function MapScreen() {
   const searchInputRef = useRef<TextInput>(null);
   const markerRefs = useRef<Record<string, any>>({});
   const hasAnimatedToLocation = useRef(false);
+  const isAnimatingRef = useRef(false);
   const [locationGranted, setLocationGranted] = useState(false);
 
   // Device location from Redux
   const deviceCoords = useSelector((state: any) => state.location.coordinates);
+
+  // If we already have device coords from a previous session/tab visit, open
+  // the map zoomed to that location so the surf-break query fires on first
+  // mount (instead of waiting for the location animation to settle past the
+  // isZoomedTooFarOut threshold).
+  const initialMapRegion = useMemo<Region>(() => {
+    if (deviceCoords?.lat && deviceCoords?.lon) {
+      return {
+        latitude: Number(deviceCoords.lat),
+        longitude: Number(deviceCoords.lon),
+        latitudeDelta: 0.5,
+        longitudeDelta: 0.5,
+      };
+    }
+    return INITIAL_REGION;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // If we initialized at user coords, no need to animate later — mark as done
+  // synchronously so the deviceCoords useEffect skips the redundant animation.
+  if (initialMapRegion !== INITIAL_REGION && !hasAnimatedToLocation.current) {
+    hasAnimatedToLocation.current = true;
+  }
 
   // Request location permission when map tab is first visited
   useEffect(() => {
@@ -131,6 +159,7 @@ export default function MapScreen() {
             dispatch(setCoordinates({ lat, lon }));
             if (!hasAnimatedToLocation.current) {
               hasAnimatedToLocation.current = true;
+              isAnimatingRef.current = true;
               mapRef.current?.animateToRegion({
                 latitude: lat, longitude: lon,
                 latitudeDelta: 0.5, longitudeDelta: 0.5,
@@ -148,6 +177,7 @@ export default function MapScreen() {
     if (deviceCoords?.lat && deviceCoords?.lon) {
       hasAnimatedToLocation.current = true;
       setLocationGranted(true);
+      isAnimatingRef.current = true;
       mapRef.current?.animateToRegion({
         latitude: deviceCoords.lat,
         longitude: deviceCoords.lon,
@@ -157,7 +187,7 @@ export default function MapScreen() {
     }
   }, [deviceCoords]);
 
-  const [region, setRegion] = useState<Region>(INITIAL_REGION);
+  const [region, setRegion] = useState<Region>(initialMapRegion);
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -328,8 +358,6 @@ export default function MapScreen() {
     Keyboard.dismiss();
   }, []);
 
-  const isAnimatingRef = useRef(false);
-
   const handleRegionChange = useCallback((newRegion: Region) => {
     if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
     // If programmatic animation, just update region directly without skipping query
@@ -356,9 +384,52 @@ export default function MapScreen() {
     if (id) {
       const country = sb.country_code;
       const region = sb.region && sb.region !== '0' ? sb.region : '0';
+      // Stash the break so the map can re-center + reopen its callout when
+      // the user pops back from the break page.
+      pendingRestoreBreak = sb;
       trackedPush(`/break/${country}/${region}/${id}` as any);
     }
   }, [trackedPush]);
+
+  // When the map regains focus and we have a pending break (the user just
+  // pressed back from a break page they opened from the map), animate to it
+  // and reopen the callout so they pick up exactly where they left off.
+  useFocusEffect(
+    useCallback(() => {
+      const sb = pendingRestoreBreak;
+      if (!sb) return;
+      pendingRestoreBreak = null;
+      const lat = parseFloat(sb.coordinates?.lat);
+      const lon = parseFloat(sb.coordinates?.lon);
+      if (isNaN(lat) || isNaN(lon)) return;
+      if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
+      isAnimatingRef.current = true;
+      setRegionStable(true);
+      mapRef.current?.animateToRegion({
+        latitude: lat,
+        longitude: lon,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      }, 500);
+      setSelectedBreak(sb);
+
+      // Reopen the callout once the marker is mounted. Retry briefly in case
+      // the marker hasn't rendered yet — same pattern as pendingCalloutRef.
+      let attempts = 0;
+      let cancelled = false;
+      const tryShow = () => {
+        if (cancelled || attempts++ > 12) return;
+        const ref = markerRefs.current[sb.id];
+        if (ref?.showCallout) {
+          try { ref.showCallout(); } catch {}
+          return;
+        }
+        setTimeout(tryShow, 200);
+      };
+      const t = setTimeout(tryShow, 600);
+      return () => { cancelled = true; clearTimeout(t); };
+    }, [])
+  );
 
   const handleMarkerPress = useCallback((sb: any) => {
     setSelectedBreak(sb);
@@ -466,7 +537,7 @@ export default function MapScreen() {
       <ClusteredMapView
         ref={mapRef as any}
         style={styles.map}
-        initialRegion={INITIAL_REGION}
+        initialRegion={initialMapRegion}
         onRegionChangeComplete={handleRegionChange}
         provider={PROVIDER_DEFAULT}
         customMapStyle={isDark ? DARK_MAP_STYLE : undefined}

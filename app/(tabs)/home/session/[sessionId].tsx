@@ -68,6 +68,31 @@ export default function SessionDetailScreen() {
   // Photo viewer (lightbox)
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const viewerCurrentPhotoIdRef = useRef<string | null>(null);
+  const flatListRef = useRef<FlatList<any>>(null);
+  const sessionMediaRef = useRef<any[]>([]);
+  useEffect(() => { sessionMediaRef.current = sessionMedia; }, [sessionMedia]);
+
+  const handleViewerIndexChange = useCallback((index: number) => {
+    const photo = sessionMediaRef.current[index];
+    viewerCurrentPhotoIdRef.current = photo?.id ?? null;
+  }, []);
+
+  const headerHeightRef = useRef(0);
+
+  const handleViewerClose = useCallback(() => {
+    setViewerVisible(false);
+    const id = viewerCurrentPhotoIdRef.current;
+    if (!id || !flatListRef.current) return;
+    const idx = sessionMediaRef.current.findIndex((m: any) => m.id === id);
+    if (idx < 0) return;
+    const rowIdx = Math.floor(idx / NUM_COLUMNS);
+    const rowHeight = PHOTO_WIDTH * 1.2 + GAP;
+    const offset = headerHeightRef.current + GAP / 2 + rowIdx * rowHeight;
+    setTimeout(() => {
+      flatListRef.current?.scrollToOffset?.({ offset, animated: false });
+    }, 50);
+  }, []);
 
   // Action mode: "request" | "download" | "delete" | null
   const [sessionAction, setSessionAction] = useState<string | null>(null);
@@ -392,6 +417,7 @@ export default function SessionDetailScreen() {
               togglePhotoSelection(item.id);
             } else {
               setViewerIndex(index);
+              viewerCurrentPhotoIdRef.current = item?.id ?? null;
               setViewerVisible(true);
             }
           }}
@@ -456,18 +482,22 @@ export default function SessionDetailScreen() {
           </Pressable>
         }
       />
-      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={[]}>
+      <SafeAreaView className="flex-1 bg-white dark:bg-black" edges={[]}>
         {isLoading ? (
           <View style={styles.centered}><ActivityIndicator size="large" /></View>
         ) : (
           <FlatList
+            ref={flatListRef}
             data={sessionMedia}
             keyExtractor={(item) => item.id ?? item.thumbnail}
             renderItem={renderPhoto}
             numColumns={NUM_COLUMNS}
             contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? 80 : 0 }}
             ListHeaderComponent={
-              <View style={styles.headerWrap}>
+              <View
+                style={styles.headerWrap}
+                onLayout={(e) => { headerHeightRef.current = e.nativeEvent.layout.height; }}
+              >
                 {/* Session name */}
                 {session?.session_name && (
                   <Text style={[styles.sessionName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={2}>
@@ -617,7 +647,8 @@ export default function SessionDetailScreen() {
         }))}
         imageIndex={viewerIndex}
         visible={viewerVisible}
-        onRequestClose={() => setViewerVisible(false)}
+        onRequestClose={handleViewerClose}
+        onImageIndexChange={handleViewerIndexChange}
         swipeToCloseEnabled
         doubleTapToZoomEnabled
       />

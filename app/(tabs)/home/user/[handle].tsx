@@ -261,7 +261,7 @@ export default function UserProfileScreen() {
           </Pressable>
         }
       />
-      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
+      <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <View style={styles.loadingWrap}><ActivityIndicator size="large" /></View>
         ) : (
@@ -270,7 +270,7 @@ export default function UserProfileScreen() {
             keyExtractor={(item) => item.session_id ?? item.id}
             renderItem={({ item }) => (
               <View style={{ paddingHorizontal: 16 }}>
-                <SessionCard session={item} hidePhotographer />
+                <SessionCard session={item} hidePhotographer compact />
               </View>
             )}
             ListHeaderComponent={<ProfileHeader />}

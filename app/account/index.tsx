@@ -95,7 +95,7 @@ export default function AccountScreen() {
   }, [cancelDeletion]);
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
+    <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
       <ScreenHeader
         title="Account"
         left={

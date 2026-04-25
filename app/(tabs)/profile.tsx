@@ -54,7 +54,7 @@ export default function ProfileScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
-  const { user } = useUser();
+  const { user, setCurrentUser } = useUser();
   const { isAuthenticated, login, logout } = useAuth();
   const [updateMeta] = useUpdateUserMetaDataMutation();
   const { setTabBarVisible } = useTabBar();
@@ -296,8 +296,18 @@ export default function ProfileScreen() {
 
   const handleToggleActive = useCallback(async () => {
     if (!user) return;
-    await updateMeta({ metaData: { active: !user.active } });
-  }, [user, updateMeta]);
+    const previous = !!user.active;
+    const next = !previous;
+    // Flip the local user immediately so the toggle responds without
+    // waiting for the round-trip. UserProvider's useEffect re-syncs from
+    // the upstream getSelf cache once the mutation completes.
+    setCurrentUser({ ...user, active: next });
+    try {
+      await updateMeta({ metaData: { active: next } }).unwrap();
+    } catch {
+      setCurrentUser({ ...user, active: previous });
+    }
+  }, [user, setCurrentUser, updateMeta]);
 
   const handleMenu = useCallback(() => setMenuVisible(true), []);
 
@@ -376,7 +386,7 @@ export default function ProfileScreen() {
   // Not logged in
   if (!isAuthenticated) {
     return (
-      <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
+      <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
         <View style={s.emptyWrap}>
           <View style={s.emptyIconRow}>
             <View style={[s.emptyIconCircle, { backgroundColor: isDark ? '#1f2937' : '#f0f9ff' }]}>
@@ -475,14 +485,14 @@ export default function ProfileScreen() {
           <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
         <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
-          <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+          <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? '#ef4444' : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
       </View>
     </>
   );
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#030712' : '#fff' }]} edges={['top']}>
+    <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
       {/* Header */}
       <View style={s.header}>
         <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
@@ -604,6 +614,7 @@ export default function ProfileScreen() {
             <SessionCard
               session={item}
               hidePhotographer
+              compact
               showViewCount
               showHiddenLocations
               onPress={() => {

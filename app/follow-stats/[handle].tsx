@@ -196,7 +196,7 @@ export default function FollowStatsScreen() {
           </Pressable>
         }
       />
-      <SafeAreaView style={[s.flex, { backgroundColor: isDark ? '#030712' : '#ffffff' }]} edges={[]}>
+      <SafeAreaView style={[s.flex, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {/* Tabs */}
         <View style={[s.tabs, { backgroundColor: isDark ? '#1f2937' : '#f1f5f9' }]}>
           <Pressable

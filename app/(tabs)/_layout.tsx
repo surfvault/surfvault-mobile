@@ -85,7 +85,7 @@ function TabsInner() {
         tabBarInactiveTintColor: isDark ? '#6b7280' : '#9ca3af',
         tabBarStyle: tabBarVisible
           ? {
-              backgroundColor: isDark ? '#030712' : '#ffffff',
+              backgroundColor: isDark ? '#000000' : '#ffffff',
               borderTopColor: isDark ? '#1f2937' : '#e5e7eb',
             }
           : { display: 'none' },
@@ -165,7 +165,7 @@ function TabsInner() {
                       borderRadius: 7,
                       backgroundColor: '#10b981',
                       borderWidth: 1.5,
-                      borderColor: isDark ? '#030712' : '#ffffff',
+                      borderColor: isDark ? '#000000' : '#ffffff',
                     }} />
                   )}
                 </View>

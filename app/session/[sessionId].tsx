@@ -348,6 +348,56 @@ export default function SessionDetailScreen() {
     }
   }, [loadingMore]);
 
+  // Mirrors web ViewableSurfPhotos: trigger pagination as user swipes near
+  // the end of the lightbox, and track the current photo so the gallery can
+  // scroll back to it on close. Use photo id (not index) since indices can
+  // shift when pagination/cache invalidation reorders sessionMedia.
+  const fetchFromViewerRef = useRef(false);
+  const viewerCurrentPhotoIdRef = useRef<string | null>(null);
+  // Keep the latest sessionMedia in a ref so the index-change handler can
+  // resolve the current photo even when its useCallback closure is stale.
+  const sessionMediaRef = useRef<any[]>([]);
+  useEffect(() => { sessionMediaRef.current = sessionMedia; }, [sessionMedia]);
+  useEffect(() => {
+    fetchFromViewerRef.current = false;
+  }, [sessionMedia.length]);
+
+  const handleViewerIndexChange = useCallback((relativeIndex: number) => {
+    const all = sessionMediaRef.current;
+    const photo = all[viewerWindowStart + relativeIndex];
+    viewerCurrentPhotoIdRef.current = photo?.id ?? null;
+    const absoluteIndex = viewerWindowStart + relativeIndex;
+    if (
+      absoluteIndex >= all.length - 5 &&
+      !fetchFromViewerRef.current &&
+      !loadingMore &&
+      nextTokenRef.current
+    ) {
+      fetchFromViewerRef.current = true;
+      setContinuationToken(nextTokenRef.current);
+      nextTokenRef.current = '';
+    }
+  }, [viewerWindowStart, loadingMore]);
+
+  // Header height measured at runtime so we can compute the exact pixel
+  // offset of any photo row regardless of how the header expands.
+  const headerHeightRef = useRef(0);
+
+  const handleViewerClose = useCallback(() => {
+    setViewerVisible(false);
+    const id = viewerCurrentPhotoIdRef.current;
+    if (!id || !flatListRef.current) return;
+    const idx = sessionMediaRef.current.findIndex((m: any) => m.id === id);
+    if (idx < 0) return;
+    const rowIdx = Math.floor(idx / NUM_COLUMNS);
+    const rowHeight = PHOTO_WIDTH * 1.2 + GAP;
+    const offset = headerHeightRef.current + GAP / 2 + rowIdx * rowHeight;
+    // Defer past the modal close animation so the FlatList has settled.
+    setTimeout(() => {
+      flatListRef.current?.scrollToOffset?.({ offset, animated: false });
+    }, 50);
+  }, []);
+
   // Group filter — don't clear sessionMedia immediately to avoid FlatList crash mid-scroll.
   // shouldReplaceRef handles atomic data swap when new group data arrives.
   const handleGroupFilter = useCallback((groupId: string | null) => {
@@ -789,6 +839,7 @@ export default function SessionDetailScreen() {
               const start = Math.max(0, index - WINDOW);
               setViewerWindowStart(start);
               setViewerIndex(index - start);
+              viewerCurrentPhotoIdRef.current = item?.id ?? null;
               setViewerVisible(true);
             }
           }}
@@ -854,7 +905,7 @@ export default function SessionDetailScreen() {
           </Pressable>
         }
       />
-      <SafeAreaView className="flex-1 bg-white dark:bg-gray-950" edges={[]}>
+      <SafeAreaView className="flex-1 bg-white dark:bg-black" edges={[]}>
         {isLoading ? (
           <SessionSkeleton />
         ) : (
@@ -868,7 +919,10 @@ export default function SessionDetailScreen() {
             contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? 80 : 0 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListHeaderComponent={
-              <View style={styles.headerWrap}>
+              <View
+                style={styles.headerWrap}
+                onLayout={(e) => { headerHeightRef.current = e.nativeEvent.layout.height; }}
+              >
                 {/* Photographer + date */}
                 {session && (
                   <Pressable
@@ -1352,11 +1406,13 @@ export default function SessionDetailScreen() {
         </Pressable>
       </Modal>
 
-      {/* Photo lightbox viewer — windowed to keep load times consistent */}
+      {/* Photo lightbox viewer — slice from viewerWindowStart with no upper
+          bound; ImageViewing's internal FlatList virtualizes, and the slice
+          grows as more photos are paginated in via handleViewerIndexChange. */}
       {viewerVisible && (
         <ImageViewing
           images={sessionMedia
-            .slice(viewerWindowStart, viewerWindowStart + 41)
+            .slice(viewerWindowStart)
             .map((m) => {
               const key = getPhotoKey(m);
               return { uri: getDirectWatermarkUrl(key) };
@@ -1364,7 +1420,8 @@ export default function SessionDetailScreen() {
           keyExtractor={(src, idx) => `${viewerWindowStart + idx}-${src?.uri?.slice(-40) ?? idx}`}
           imageIndex={viewerIndex}
           visible
-          onRequestClose={() => setViewerVisible(false)}
+          onRequestClose={handleViewerClose}
+          onImageIndexChange={handleViewerIndexChange}
           swipeToCloseEnabled
           doubleTapToZoomEnabled
         />

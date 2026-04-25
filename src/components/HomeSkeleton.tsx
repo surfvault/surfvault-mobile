@@ -28,6 +28,12 @@ export default function HomeSkeleton() {
     <Animated.View style={[{ backgroundColor: blockColor, borderRadius: 8, opacity: pulse }, style]} />
   );
 
+  // SessionCard image is edge-to-edge with aspectRatio 4:5 (portrait), so
+  // its height = screenWidth * 1.25. Surf-break cards are 160 wide with a
+  // 4:3 image and ~50px of text below.
+  const feedImageHeight = screenWidth * 1.25;
+  const breakImageHeight = (160 * 3) / 4;
+
   return (
     <View style={styles.wrap}>
       {/* Nearby Breaks */}
@@ -36,7 +42,11 @@ export default function HomeSkeleton() {
         <Block style={{ width: 220, height: 12, borderRadius: 4, marginBottom: 12 }} />
         <View style={styles.horizontalRow}>
           {Array.from({ length: 3 }).map((_, i) => (
-            <Block key={i} style={{ width: 160, height: 110, borderRadius: 12, marginRight: 12 }} />
+            <View key={i} style={{ width: 160, marginRight: 12 }}>
+              <Block style={{ width: 160, height: breakImageHeight, borderRadius: 12 }} />
+              <Block style={{ width: 130, height: 13, borderRadius: 4, marginTop: 6 }} />
+              <Block style={{ width: 90, height: 11, borderRadius: 4, marginTop: 4 }} />
+            </View>
           ))}
         </View>
       </View>
@@ -55,16 +65,23 @@ export default function HomeSkeleton() {
         </View>
       </View>
 
-      {/* Feed card */}
-      <View style={{ paddingHorizontal: 16, marginTop: 8 }}>
-        <View style={styles.feedHeader}>
-          <Block style={{ width: 36, height: 36, borderRadius: 18 }} />
-          <View style={{ marginLeft: 10, flex: 1 }}>
-            <Block style={{ width: '50%', height: 13, borderRadius: 4, marginBottom: 6 }} />
-            <Block style={{ width: '35%', height: 11, borderRadius: 4 }} />
+      {/* Feed card — header (avatar + 2 lines + ellipsis), edge-to-edge 4:5
+          portrait image, tapered dot pager. */}
+      <View style={{ marginTop: 4 }}>
+        <View style={[styles.feedHeader, { paddingHorizontal: 12, paddingVertical: 8 }]}>
+          <Block style={{ width: 40, height: 40, borderRadius: 20 }} />
+          <View style={{ marginLeft: 8, flex: 1 }}>
+            <Block style={{ width: '50%', height: 13, borderRadius: 4, marginBottom: 4 }} />
+            <Block style={{ width: '35%', height: 12, borderRadius: 4 }} />
           </View>
+          <Block style={{ width: 18, height: 4, borderRadius: 2 }} />
         </View>
-        <Block style={{ width: '100%', height: screenWidth * 0.7, borderRadius: 0, marginTop: 8 }} />
+        <Block style={{ width: '100%', height: feedImageHeight, borderRadius: 0 }} />
+        <View style={styles.dotsRow}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Block key={i} style={{ width: 6, height: 6, borderRadius: 3, marginHorizontal: 3 }} />
+          ))}
+        </View>
       </View>
     </View>
   );
@@ -75,4 +92,11 @@ const styles = StyleSheet.create({
   sectionWrap: { paddingHorizontal: 16, marginTop: 8, marginBottom: 16 },
   horizontalRow: { flexDirection: 'row' },
   feedHeader: { flexDirection: 'row', alignItems: 'center' },
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
 });
