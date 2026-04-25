@@ -104,6 +104,7 @@ export default function SessionDetailScreen() {
   const seenMediaRef = useRef(new Set<string>());
   const shouldReplaceRef = useRef(false);
   const nextTokenRef = useRef<string>('');
+  const prevInitialFingerprintRef = useRef<string | null>(null);
   const flatListRef = useRef<any>(null);
 
   // Photo viewer (lightbox) — windowed to avoid slow FlatList layout for large sessions
@@ -197,6 +198,7 @@ export default function SessionDetailScreen() {
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     seenMediaRef.current = new Set();
+    prevInitialFingerprintRef.current = null;
     try { await refetch(); } catch {}
     setRefreshing(false);
   }, [refetch]);
@@ -282,8 +284,16 @@ export default function SessionDetailScreen() {
   const taggedUsers = session?.tagged_users ?? [];
 
   // Load initial media
+  // Skip replace on metadata-only refetches (e.g., favorite toggle, tag updates) and on
+  // post-delete refetches where the optimistic handler has already pre-set the fingerprint.
+  // Only reset pagination/scroll when the actual first-page media changed (upload, server-side change).
   useEffect(() => {
     if (!activeGroupId && initialMedia.length > 0) {
+      const fingerprint = initialMedia.map((m: any) => m?.id).join(',');
+      if (fingerprint === prevInitialFingerprintRef.current && seenMediaRef.current.size > 0) {
+        return;
+      }
+      prevInitialFingerprintRef.current = fingerprint;
       seenMediaRef.current = new Set();
       const unique = initialMedia.filter((m: any) => {
         const key = m.id ?? m.thumbnail;
@@ -475,8 +485,20 @@ export default function SessionDetailScreen() {
             style: 'destructive',
             onPress: async () => {
               setIsProcessingAction(true);
+              const deletedIds = [...selectedPhotoIds];
+              const deletedSet = new Set(deletedIds);
               try {
-                await deleteSurfMedia({ sessionId: session.id, photos: selectedPhotoIds as any }).unwrap();
+                await deleteSurfMedia({ sessionId: session.id, photos: deletedIds as any }).unwrap();
+                // Optimistic local update — preserves scroll position and pages 2+.
+                // Pre-set the initial-load fingerprint to match what getSession will return
+                // after the SurfBreak tag invalidation refetch so the initial-load effect
+                // skips its replace step.
+                deletedIds.forEach((id) => seenMediaRef.current.delete(id));
+                setSessionMedia((prev) => {
+                  const next = prev.filter((m) => !deletedSet.has(m.id));
+                  prevInitialFingerprintRef.current = next.slice(0, FETCH_AMOUNT).map((m: any) => m?.id).join(',');
+                  return next;
+                });
                 Alert.alert('Deleted', `Deleted ${count} photo${count > 1 ? 's' : ''}.`);
                 cancelAction();
               } catch {
