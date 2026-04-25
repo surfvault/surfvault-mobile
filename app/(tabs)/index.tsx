@@ -12,6 +12,7 @@ import {
   TextInput,
   Keyboard,
 } from 'react-native';
+import { MenuView } from '@react-native-menu/menu';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useNavigation, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
@@ -38,6 +39,14 @@ import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
 
 type SearchType = 'surf_break' | 'user';
+type FeedType = 'discover' | 'following' | 'favorites' | 'boardroom';
+
+const FEED_OPTIONS: { value: FeedType; label: string; description: string; comingSoon?: boolean }[] = [
+  { value: 'discover', label: 'Discover', description: 'Latest sessions worldwide' },
+  { value: 'following', label: 'Following', description: 'Sessions from people you follow' },
+  { value: 'favorites', label: 'Favorites', description: 'Sessions at your favorited breaks' },
+  { value: 'boardroom', label: 'Boardroom', description: 'Custom surfboards near you', comingSoon: true },
+];
 
 // Module-level so the offset survives any remount (tab detach/attach cycles).
 let savedFeedOffset = 0;
@@ -64,6 +73,11 @@ export default function HomeScreen() {
   const { lat: userLat, lon: userLon, hasCoords } = useUserCoords();
 
   // ---- Viewability tracking ----
+  // Until the first non-empty viewability report arrives, treat every card as
+  // viewable. Otherwise tab re-focus / scroll restoration causes cards to mount
+  // with isViewable=false, then flip true on first report, retriggering
+  // fade-in animations — visible as a "flash twice" on every tab return.
+  const [hasViewabilityReport, setHasViewabilityReport] = useState(false);
   const [viewableIds, setViewableIds] = useState<Set<string>>(new Set());
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
@@ -72,8 +86,13 @@ export default function HomeScreen() {
     // "nothing visible" causes every card to flip isViewable → false → true,
     // which restarts every fade animation and looks like a flash.
     if (viewableItems.length === 0) return;
+    setHasViewabilityReport(true);
     setViewableIds(new Set(viewableItems.map((v) => v.key)));
   }).current;
+
+  // ---- Feed type (Discover / Following / Favorites / Boardroom) ----
+  const [feedType, setFeedType] = useState<FeedType>('discover');
+  const currentFeed = FEED_OPTIONS.find((f) => f.value === feedType) ?? FEED_OPTIONS[0];
 
   // ---- Discover Feed ----
   const [sessions, setSessions] = useState<any[]>([]);
@@ -118,14 +137,19 @@ export default function HomeScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: sessionsData, isLoading, isFetching, refetch: refetchSessions } = useGetLatestSessionsQuery({
-    userId: user?.id,
-    limit: 10,
-    continuationToken,
-  });
+  const feedQueryArg = feedType === 'following' || feedType === 'favorites' ? feedType : undefined;
+  const { data: sessionsData, currentData: sessionsCurrentData, isLoading, isFetching, refetch: refetchSessions } = useGetLatestSessionsQuery(
+    {
+      userId: user?.id,
+      limit: 10,
+      continuationToken,
+      feed: feedQueryArg,
+    },
+    { skip: feedType === 'boardroom' || ((feedType === 'following' || feedType === 'favorites') && !user?.id) }
+  );
 
   useEffect(() => {
-    const results = sessionsData?.results;
+    const results = sessionsCurrentData?.results;
     if (!results) return;
     const incoming = Array.isArray(results.sessions) ? results.sessions : [];
     const nextToken = results.continuationToken || '';
@@ -158,7 +182,7 @@ export default function HomeScreen() {
       return prev.concat(newItems);
     });
     isFetchingMoreRef.current = false;
-  }, [sessionsData]);
+  }, [sessionsCurrentData]);
 
   const isRefreshingRef = useRef(false);
   const handleRefresh = useCallback(async () => {
@@ -176,6 +200,47 @@ export default function HomeScreen() {
     isFetchingMoreRef.current = true;
     setContinuationToken(nextToken);
   }, [sessionsData]);
+
+  const handleFeedChange = useCallback((next: FeedType) => {
+    if (next === feedType) return;
+    seenIdsRef.current = new Set();
+    hasMoreRef.current = false;
+    isFetchingMoreRef.current = false;
+    setSessions([]);
+    setContinuationToken('');
+    setViewableIds(new Set());
+    setHasViewabilityReport(false);
+    savedFeedOffset = 0;
+    feedListRef.current?.scrollToOffset({ offset: 0, animated: false });
+    setFeedType(next);
+  }, [feedType]);
+
+  const feedMenuActions = useMemo(() => {
+    return [
+      {
+        id: 'discover' as FeedType,
+        title: 'Discover',
+        state: feedType === 'discover' ? ('on' as const) : undefined,
+      },
+      {
+        id: 'following' as FeedType,
+        title: 'Following',
+        state: feedType === 'following' ? ('on' as const) : undefined,
+        attributes: !user?.id ? { disabled: true } : undefined,
+      },
+      {
+        id: 'favorites' as FeedType,
+        title: 'Favorites',
+        state: feedType === 'favorites' ? ('on' as const) : undefined,
+        attributes: !user?.id ? { disabled: true } : undefined,
+      },
+      {
+        id: 'boardroom' as FeedType,
+        title: 'Boardroom (coming soon)',
+        state: feedType === 'boardroom' ? ('on' as const) : undefined,
+      },
+    ];
+  }, [feedType, user?.id]);
 
   // ---- Search overlay ----
   const [searchVisible, setSearchVisible] = useState(false);
@@ -554,8 +619,11 @@ export default function HomeScreen() {
     );
   }
 
-  // ---- Main discover feed ----
-  const showSkeleton = isLoading && sessions.length === 0;
+  // ---- Main feed ----
+  // Show skeleton whenever the current feed has no data yet — covers initial load
+  // and feed-switching (currentData becomes undefined during arg change).
+  const showSkeleton = feedType !== 'boardroom' && sessions.length === 0 && !sessionsCurrentData;
+  const showNearbySections = feedType === 'discover';
 
   return (
     <View className="flex-1 bg-white dark:bg-black" style={{ paddingTop: topInset }}>
@@ -566,27 +634,64 @@ export default function HomeScreen() {
             style={styles.headerLogo}
             contentFit="contain"
           />
-          <Text style={[styles.headerTitle, { color: isDark ? '#ffffff' : '#000000' }]}>
-            SurfVault
-          </Text>
+          <MenuView
+            shouldOpenOnLongPress={false}
+            actions={feedMenuActions as any}
+            onPressAction={({ nativeEvent }) => {
+              handleFeedChange(nativeEvent.event as FeedType);
+            }}
+          >
+            <View style={styles.feedTrigger}>
+              <Text style={[styles.feedTriggerText, { color: isDark ? '#ffffff' : '#000000' }]}>
+                {currentFeed.label}
+              </Text>
+              <Ionicons
+                name="chevron-down"
+                size={14}
+                color={isDark ? '#9ca3af' : '#6b7280'}
+                style={styles.feedTriggerCaret}
+              />
+            </View>
+          </MenuView>
         </View>
         <Pressable onPress={openSearch} hitSlop={8}>
           <Ionicons name="search-outline" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
         </Pressable>
       </View>
 
-      {showSkeleton ? <HomeSkeleton /> : (
+      {feedType === 'boardroom' ? (
+        <ScrollView
+          contentContainerStyle={styles.boardroomWrap}
+          refreshControl={<RefreshControl refreshing={false} onRefresh={() => {}} />}
+        >
+          <View style={[styles.boardroomIconWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+            <MaterialCommunityIcons name="tools" size={36} color={isDark ? '#9ca3af' : '#6b7280'} />
+          </View>
+          <Text style={[styles.boardroomTitle, { color: isDark ? '#ffffff' : '#111827' }]}>
+            Boardroom
+          </Text>
+          <View style={[styles.comingSoonPillLarge, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+            <Text style={[styles.comingSoonText, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+              Coming Soon
+            </Text>
+          </View>
+          <Text style={[styles.boardroomBody, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+            Check back later to find local shapers in your area.
+          </Text>
+        </ScrollView>
+      ) : showSkeleton ? <HomeSkeleton /> : (
       <FlatList
         ref={feedListRef}
           data={feedRows}
           keyExtractor={(row) => row.key}
           renderItem={({ item: row }) => {
+            const viewable = !hasViewabilityReport || viewableIds.has(row.key);
             if (row.type === 'ad') {
               return (
                 <SponsoredCard
                   ads={row.data}
                   placement="content"
-                  isViewable={viewableIds.has(row.key)}
+                  isViewable={viewable}
                 />
               );
             }
@@ -594,7 +699,7 @@ export default function HomeScreen() {
             return (
               <SessionCard
                 session={item}
-                isViewable={viewableIds.has(row.key)}
+                isViewable={viewable}
                 enableCarousel
                 onPress={() => {
                   const sid = item.session_id ?? item.id;
@@ -612,10 +717,11 @@ export default function HomeScreen() {
           // Initial scroll position; reference is frozen at mount via
           // useRef so re-renders don't reset the user's live scroll.
           contentOffset={initialContentOffset}
+          contentContainerStyle={sessions.length === 0 ? { flexGrow: 1 } : undefined}
           ListHeaderComponent={
             <>
               {/* Nearby Surf Breaks */}
-              {nearbyBreaks.length > 0 && (
+              {showNearbySections && nearbyBreaks.length > 0 && (
                 <View style={{ marginBottom: 24 }}>
                   <View style={{ paddingHorizontal: 16, marginBottom: 4 }}>
                     <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>
@@ -647,7 +753,7 @@ export default function HomeScreen() {
               )}
 
               {/* Nearby Photographers */}
-              {nearbyPhotographers.length > 0 && (
+              {showNearbySections && nearbyPhotographers.length > 0 && (
                 <View style={{ marginBottom: 24 }}>
                   <View style={{ paddingHorizontal: 16, marginBottom: 4 }}>
                     <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>
@@ -696,8 +802,30 @@ export default function HomeScreen() {
           }
           ListEmptyComponent={
             !isLoading ? (
-              <View className="items-center py-20">
-                <Text className="text-gray-400 dark:text-gray-600 text-base">No sessions yet</Text>
+              <View style={styles.emptyStateWrap}>
+                <View style={[styles.boardroomIconWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                  <MaterialCommunityIcons
+                    name={
+                      feedType === 'following'
+                        ? 'account-multiple-outline'
+                        : feedType === 'favorites'
+                        ? 'star-outline'
+                        : 'compass-outline'
+                    }
+                    size={36}
+                    color={isDark ? '#9ca3af' : '#6b7280'}
+                  />
+                </View>
+                <Text style={[styles.boardroomTitle, { color: isDark ? '#ffffff' : '#111827' }]}>
+                  No sessions yet
+                </Text>
+                <Text style={[styles.boardroomBody, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                  {feedType === 'following'
+                    ? 'Follow more photographers and surfers to see their latest sessions here.'
+                    : feedType === 'favorites'
+                    ? 'Favorite a break to see its latest sessions here.'
+                    : 'Check back later for new sessions in your area.'}
+                </Text>
               </View>
             ) : null
           }
@@ -808,13 +936,66 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerLogo: {
-    width: 64,
-    height: 64,
+    width: 72,
+    height: 72,
   },
-  headerTitle: {
-    fontSize: 17,
+  feedTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 2,
+  },
+  feedTriggerText: {
+    fontSize: 19,
     fontFamily: 'SurfVaultFont',
-    marginLeft: -8,
+  },
+  feedTriggerCaret: {
+    marginLeft: 6,
+  },
+  comingSoonPillLarge: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    marginTop: 6,
+  },
+  comingSoonText: {
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  boardroomWrap: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 80,
+  },
+  emptyStateWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 80,
+  },
+  boardroomIconWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  boardroomTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  boardroomBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 14,
+    maxWidth: 280,
   },
   nearbyTitle: { fontSize: 18, fontWeight: '700' },
   nearbySubtitle: { fontSize: 13, marginTop: 2 },

@@ -392,7 +392,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
               );
             }}
           />
-        ) : session.thumbnail ? (
+        ) : !useCarousel && session.thumbnail ? (
           <Pressable onPress={handlePress} style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}>
             <Image
               source={{ uri: session.thumbnail }}

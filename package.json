@@ -20,6 +20,7 @@
     "@gorhom/bottom-sheet": "^5.2.8",
     "@react-native-community/datetimepicker": "8.4.4",
     "@react-native-community/netinfo": "11.4.1",
+    "@react-native-menu/menu": "^2.0.0",
     "@reduxjs/toolkit": "^2.11.2",
     "babel-preset-expo": "^55.0.15",
     "dotenv": "^17.4.0",

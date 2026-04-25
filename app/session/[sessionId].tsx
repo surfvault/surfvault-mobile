@@ -870,7 +870,7 @@ export default function SessionDetailScreen() {
                 <Ionicons name="image-outline" size={12} color="#ffffff" />
               </View>
             )}
-            {!inActionMode && photoGroups.length > 0 && (
+            {photoGroups.length > 0 && (
               <View style={styles.groupDots}>
                 {photoGroups.map((g: any) => (
                   <View key={g.id} style={[styles.groupDot, { backgroundColor: g.color }]} />
@@ -916,7 +916,7 @@ export default function SessionDetailScreen() {
             renderItem={renderPhoto}
             numColumns={isLocked ? 1 : NUM_COLUMNS}
             key={isLocked ? 'locked' : 'grid'}
-            contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? 80 : 0 }}
+            contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? (sessionAction === 'group' || sessionAction === 'ungroup' ? 150 : 80) : 0 }}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             ListHeaderComponent={
               <View
@@ -981,18 +981,20 @@ export default function SessionDetailScreen() {
                 )}
 
                 {/* Group filter chips */}
-                {groups.length > 0 && (
+                {(groups.length > 0 || isOwner) && (
                   <View style={styles.groupChips}>
-                    <Pressable
-                      onPress={() => handleGroupFilter(null)}
-                      style={[styles.chip, {
-                        backgroundColor: !activeGroupId ? (isDark ? '#ffffff' : '#111827') : (isDark ? '#1f2937' : '#f3f4f6'),
-                      }]}
-                    >
-                      <Text style={[styles.chipText, {
-                        color: !activeGroupId ? (isDark ? '#111827' : '#ffffff') : (isDark ? '#d1d5db' : '#374151'),
-                      }]}>All</Text>
-                    </Pressable>
+                    {groups.length > 0 && (
+                      <Pressable
+                        onPress={() => handleGroupFilter(null)}
+                        style={[styles.chip, {
+                          backgroundColor: !activeGroupId ? (isDark ? '#ffffff' : '#111827') : (isDark ? '#1f2937' : '#f3f4f6'),
+                        }]}
+                      >
+                        <Text style={[styles.chipText, {
+                          color: !activeGroupId ? (isDark ? '#111827' : '#ffffff') : (isDark ? '#d1d5db' : '#374151'),
+                        }]}>All</Text>
+                      </Pressable>
+                    )}
                     {groups.map((group: any) => (
                       <Pressable
                         key={group.id}
@@ -1010,6 +1012,26 @@ export default function SessionDetailScreen() {
                         }]}>{group.name}</Text>
                       </Pressable>
                     ))}
+                    {isOwner && (
+                      <Pressable
+                        onPress={() => setGroupSheetVisible(true)}
+                        style={[styles.chip, {
+                          flexDirection: 'row', alignItems: 'center', gap: 4,
+                          backgroundColor: 'transparent',
+                          borderWidth: 1, borderStyle: 'dashed',
+                          borderColor: isDark ? '#4b5563' : '#9ca3af',
+                        }]}
+                      >
+                        <Ionicons
+                          name="add"
+                          size={14}
+                          color={isDark ? '#d1d5db' : '#6b7280'}
+                        />
+                        <Text style={[styles.chipText, {
+                          color: isDark ? '#d1d5db' : '#6b7280',
+                        }]}>{groups.length === 0 ? 'Create Group' : 'New'}</Text>
+                      </Pressable>
+                    )}
                   </View>
                 )}
 
@@ -1052,33 +1074,76 @@ export default function SessionDetailScreen() {
 
         {/* Bottom action bar */}
         {sessionAction && (
-          <View style={[styles.actionBar, {
-            backgroundColor: isDark ? ac.bgDark : ac.bg,
-            borderTopColor: isDark ? ac.borderDark : ac.border,
-          }]}>
-            <Pressable onPress={cancelAction} hitSlop={8}>
-              <Ionicons name="close" size={24} color={isDark ? ac.textDark : ac.text} />
-            </Pressable>
-            <Text style={[styles.actionBarCount, { color: isDark ? ac.textDark : ac.text }]}>
-              {selectedPhotoIds.length} photo{selectedPhotoIds.length !== 1 ? 's' : ''} selected
-            </Text>
-            {(sessionAction === 'group' || sessionAction === 'ungroup') ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxWidth: '60%' }}>
-                <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {groups.map((g: any) => (
-                    <Pressable
-                      key={g.id}
-                      onPress={() => handleGroupPhotoAction(g.id)}
-                      disabled={selectedPhotoIds.length === 0}
-                      style={[styles.groupPill, { opacity: selectedPhotoIds.length === 0 ? 0.4 : 1 }]}
-                    >
-                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: g.color }} />
-                      <Text style={styles.groupPillText}>{g.name}</Text>
-                    </Pressable>
-                  ))}
+          (sessionAction === 'group' || sessionAction === 'ungroup') ? (
+            <View style={[styles.actionBarTall, {
+              backgroundColor: isDark ? ac.bgDark : ac.bg,
+              borderTopColor: isDark ? ac.borderDark : ac.border,
+            }]}>
+              <View style={styles.actionBarTopRow}>
+                <Pressable onPress={cancelAction} hitSlop={8}>
+                  <Ionicons name="close" size={24} color={isDark ? ac.textDark : ac.text} />
+                </Pressable>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={[styles.actionBarCount, { color: isDark ? ac.textDark : ac.text }]}>
+                    {selectedPhotoIds.length} photo{selectedPhotoIds.length !== 1 ? 's' : ''} selected
+                  </Text>
+                  <Text style={[styles.actionBarHint, { color: isDark ? ac.textDark : ac.text }]}>
+                    {selectedPhotoIds.length === 0
+                      ? 'Select photos, then tap a group below'
+                      : `Tap a group to ${sessionAction === 'group' ? 'assign' : 'remove'}`}
+                  </Text>
                 </View>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.groupPillScroll}
+              >
+                {groups.map((g: any) => (
+                  <Pressable
+                    key={g.id}
+                    onPress={() => handleGroupPhotoAction(g.id)}
+                    disabled={selectedPhotoIds.length === 0}
+                    style={[styles.groupPillLg, {
+                      backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#ffffff',
+                      borderColor: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.08)',
+                      opacity: selectedPhotoIds.length === 0 ? 0.4 : 1,
+                    }]}
+                  >
+                    <View style={[styles.groupPillDotLg, { backgroundColor: g.color }]} />
+                    <Text style={[styles.groupPillTextLg, { color: isDark ? '#f3f4f6' : '#111827' }]}>
+                      {g.name}
+                    </Text>
+                  </Pressable>
+                ))}
+                {sessionAction === 'group' && (
+                  <Pressable
+                    onPress={() => setGroupSheetVisible(true)}
+                    style={[styles.groupPillLg, {
+                      backgroundColor: 'transparent',
+                      borderColor: isDark ? ac.textDark : ac.text,
+                      borderStyle: 'dashed',
+                    }]}
+                  >
+                    <Ionicons name="add" size={14} color={isDark ? ac.textDark : ac.text} />
+                    <Text style={[styles.groupPillTextLg, { color: isDark ? ac.textDark : ac.text }]}>
+                      New
+                    </Text>
+                  </Pressable>
+                )}
               </ScrollView>
-            ) : (
+            </View>
+          ) : (
+            <View style={[styles.actionBar, {
+              backgroundColor: isDark ? ac.bgDark : ac.bg,
+              borderTopColor: isDark ? ac.borderDark : ac.border,
+            }]}>
+              <Pressable onPress={cancelAction} hitSlop={8}>
+                <Ionicons name="close" size={24} color={isDark ? ac.textDark : ac.text} />
+              </Pressable>
+              <Text style={[styles.actionBarCount, { color: isDark ? ac.textDark : ac.text }]}>
+                {selectedPhotoIds.length} photo{selectedPhotoIds.length !== 1 ? 's' : ''} selected
+              </Text>
               <Pressable
                 onPress={handleConfirmAction}
                 disabled={selectedPhotoIds.length === 0 || isProcessingAction}
@@ -1095,8 +1160,8 @@ export default function SessionDetailScreen() {
                   }]}>Confirm</Text>
                 )}
               </Pressable>
-            )}
-          </View>
+            </View>
+          )
         )}
       </SafeAreaView>
 
@@ -1470,7 +1535,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14, paddingBottom: 34, borderTopWidth: 1,
   },
+  actionBarTall: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    paddingTop: 12, paddingBottom: 30, borderTopWidth: 1,
+  },
+  actionBarTopRow: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 10,
+  },
   actionBarCount: { fontSize: 14, fontWeight: '600' },
+  actionBarHint: { fontSize: 11, fontWeight: '500', marginTop: 2, opacity: 0.75 },
+  groupPillScroll: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 4 },
+  groupPillLg: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8,
+    borderWidth: 1,
+  },
+  groupPillDotLg: { width: 10, height: 10, borderRadius: 5 },
+  groupPillTextLg: { fontSize: 13, fontWeight: '600' },
   confirmBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 999 },
   confirmBtnText: { fontSize: 14, fontWeight: '600' },
   taggedBadge: {
