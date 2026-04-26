@@ -261,6 +261,8 @@ export default function ConversationDetailScreen() {
               contentContainerStyle={[styles.messagesList, { paddingTop: insets.top + 70 }]}
               showsVerticalScrollIndicator={false}
               inverted={false}
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              keyboardShouldPersistTaps="handled"
             />
           )}
 
