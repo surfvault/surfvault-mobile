@@ -33,6 +33,7 @@ import SessionCard from '../../src/components/SessionCard';
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
+import BoardroomFeed from '../../src/components/BoardroomFeed';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import HomeSkeleton from '../../src/components/HomeSkeleton';
 import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
@@ -45,7 +46,7 @@ const FEED_OPTIONS: { value: FeedType; label: string; description: string; comin
   { value: 'discover', label: 'Discover', description: 'Latest sessions worldwide' },
   { value: 'following', label: 'Following', description: 'Sessions from people you follow' },
   { value: 'favorites', label: 'Favorites', description: 'Sessions at your favorited breaks' },
-  { value: 'boardroom', label: 'Boardroom', description: 'Custom surfboards near you', comingSoon: true },
+  { value: 'boardroom', label: 'Boardroom', description: 'Custom surfboards near you' },
 ];
 
 // Module-level so the offset survives any remount (tab detach/attach cycles).
@@ -236,7 +237,7 @@ export default function HomeScreen() {
       },
       {
         id: 'boardroom' as FeedType,
-        title: 'Boardroom (coming soon)',
+        title: 'Boardroom',
         state: feedType === 'boardroom' ? ('on' as const) : undefined,
       },
     ];
@@ -651,6 +652,17 @@ export default function HomeScreen() {
                 color={isDark ? '#9ca3af' : '#6b7280'}
                 style={styles.feedTriggerCaret}
               />
+              {/* Caption is absolutely positioned so it hangs below without
+                  affecting the row height — keeps the label vertically
+                  centered with the logo + search icon across all feed types. */}
+              {feedType === 'boardroom' && typeof user?.surf_break_name === 'string' && user.surf_break_name ? (
+                <Text
+                  style={[styles.feedTriggerCaption, { color: isDark ? '#9ca3af' : '#6b7280' }]}
+                  numberOfLines={1}
+                >
+                  {user.surf_break_name as string}
+                </Text>
+              ) : null}
             </View>
           </MenuView>
         </View>
@@ -660,25 +672,7 @@ export default function HomeScreen() {
       </View>
 
       {feedType === 'boardroom' ? (
-        <ScrollView
-          contentContainerStyle={styles.boardroomWrap}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={() => {}} />}
-        >
-          <View style={[styles.boardroomIconWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            <MaterialCommunityIcons name="tools" size={36} color={isDark ? '#9ca3af' : '#6b7280'} />
-          </View>
-          <Text style={[styles.boardroomTitle, { color: isDark ? '#ffffff' : '#111827' }]}>
-            Boardroom
-          </Text>
-          <View style={[styles.comingSoonPillLarge, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            <Text style={[styles.comingSoonText, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-              Coming Soon
-            </Text>
-          </View>
-          <Text style={[styles.boardroomBody, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-            Check back later to find local shapers in your area.
-          </Text>
-        </ScrollView>
+        <BoardroomFeed isDark={isDark} />
       ) : showSkeleton ? <HomeSkeleton /> : (
       <FlatList
         ref={feedListRef}
@@ -943,6 +937,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 2,
+    position: 'relative',
   },
   feedTriggerText: {
     fontSize: 19,
@@ -951,24 +946,15 @@ const styles = StyleSheet.create({
   feedTriggerCaret: {
     marginLeft: 6,
   },
-  comingSoonPillLarge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 999,
-    marginTop: 6,
-  },
-  comingSoonText: {
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  boardroomWrap: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-    paddingVertical: 80,
+  feedTriggerCaption: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    fontSize: 9,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+    marginTop: 1,
+    maxWidth: 220,
   },
   emptyStateWrap: {
     flex: 1,
