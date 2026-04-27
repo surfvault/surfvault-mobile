@@ -23,7 +23,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
@@ -717,12 +717,12 @@ export default function SessionDetailScreen() {
     },
     {
       options: [
-        ...(session?.hide_location ? [] : [{
+        ...((session?.hide_location && !isOwner) ? [] : [{
           label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
           icon: isFavorited ? ('heart-dislike-outline' as const) : ('heart-outline' as const),
           onPress: handleFavorite,
         }]),
-        ...(session?.surf_break_identifier ? [{
+        ...((session?.surf_break_identifier && (!session?.hide_location || isOwner)) ? [{
           label: 'View Break' as const,
           icon: 'location-outline' as const,
           onPress: () => {
@@ -906,10 +906,17 @@ export default function SessionDetailScreen() {
     [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress, getPhotoKey, isDark]
   );
 
-  // Header subtitle
-  const subtitleParts: string[] = [];
-  if (showLocation) subtitleParts.push(session.surf_break_name);
-  if (session?.session_date) subtitleParts.push(formatDate(session.session_date));
+  // The break name renders as its own tappable link with a pin glyph, so the
+  // gray subtitle below the username only carries the date.
+  const sessionDateLabel = session?.session_date ? formatDate(session.session_date) : '';
+  const breakIsTappable = Boolean(showLocation && session?.surf_break_identifier);
+  const handleBreakPress = useCallback(() => {
+    if (!breakIsTappable) return;
+    const country = session.country_code ?? session.surf_break_country ?? '';
+    const reg = (session.region ?? session.surf_break_region) && (session.region ?? session.surf_break_region) !== '0'
+      ? (session.region ?? session.surf_break_region) : '0';
+    trackedPush(`/break/${country}/${reg}/${session.surf_break_identifier}` as any);
+  }, [breakIsTappable, session, trackedPush]);
 
   return (
     <>
@@ -954,49 +961,75 @@ export default function SessionDetailScreen() {
                     <UserAvatar
                       uri={session.user_picture}
                       name={session.user_name ?? sessionHandle}
-                      size={36}
+                      size={56}
                       verified={session.user_verified}
                     />
-                    <View style={{ marginLeft: 8, flex: 1 }}>
+                    <View style={{ marginLeft: 12, flex: 1 }}>
                       <View style={styles.nameRow}>
                         <Text style={[styles.photographerName, { color: isDark ? '#fff' : '#111827' }]}>
                           {session.user_name ?? sessionHandle}
                         </Text>
                         {session.user_type && (
-                          <View style={[styles.typePill, {
-                            backgroundColor: session.user_type === 'photographer'
-                              ? (isDark ? 'rgba(14, 165, 233, 0.15)' : '#f0f9ff')
-                              : (isDark ? 'rgba(139, 92, 246, 0.15)' : '#f5f3ff'),
-                            borderColor: session.user_type === 'photographer'
-                              ? (isDark ? 'rgba(14, 165, 233, 0.3)' : '#bae6fd')
-                              : (isDark ? 'rgba(139, 92, 246, 0.3)' : '#ddd6fe'),
-                          }]}>
-                            <Text style={[styles.typePillText, {
-                              color: session.user_type === 'photographer'
-                                ? (isDark ? '#38bdf8' : '#0284c7')
-                                : (isDark ? '#a78bfa' : '#7c3aed'),
-                            }]}>
-                              {session.user_type === 'photographer' ? 'Photographer' : 'Surfer'}
-                            </Text>
-                          </View>
+                          session.user_type === 'photographer' ? (
+                            <Ionicons name="camera-outline" size={14} color="#9ca3af" style={styles.typeIcon} />
+                          ) : (
+                            <MaterialCommunityIcons name="surfing" size={15} color="#9ca3af" style={styles.typeIcon} />
+                          )
                         )}
                         {(taggedUsers.length > 0 || isOwner) && (
                           <Pressable
                             onPress={(e) => { e.stopPropagation(); setTagSheetVisible(true); }}
-                            hitSlop={6}
-                            style={styles.taggedBadge}
+                            hitSlop={8}
+                            style={[
+                              styles.taggedBadge,
+                              taggedUsers.length > 0 && styles.taggedBadgeLarge,
+                            ]}
                           >
-                            <Ionicons name="people-outline" size={12} color={isDark ? '#9ca3af' : '#6b7280'} />
-                            {taggedUsers.length > 0 && (
-                              <Text style={[styles.taggedBadgeText, { color: isDark ? '#9ca3af' : '#6b7280' }]}>{taggedUsers.length}</Text>
-                            )}
+                            <Ionicons
+                              name="people-outline"
+                              size={taggedUsers.length > 0 ? 14 : 12}
+                              color={isDark ? '#9ca3af' : '#6b7280'}
+                            />
+                            {taggedUsers.length > 0 ? (
+                              <Text style={[styles.taggedBadgeText, styles.taggedBadgeTextLarge, { color: isDark ? '#9ca3af' : '#6b7280' }]}>{taggedUsers.length}</Text>
+                            ) : isOwner ? (
+                              <Text style={[styles.taggedBadgeText, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Tag Users</Text>
+                            ) : null}
                           </Pressable>
                         )}
                       </View>
-                      {subtitleParts.length > 0 && (
-                        <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                          {subtitleParts.join(' · ')}
-                        </Text>
+                      {(showLocation || sessionDateLabel) && (
+                        <View style={styles.subtitleRow}>
+                          {showLocation && (
+                            breakIsTappable ? (
+                              <Pressable
+                                onPress={(e) => { e.stopPropagation(); handleBreakPress(); }}
+                                hitSlop={12}
+                                style={styles.breakLink}
+                              >
+                                <Ionicons name="location" size={14} color={isDark ? '#e5e7eb' : '#374151'} />
+                                <Text style={[styles.breakLinkText, { color: isDark ? '#e5e7eb' : '#374151' }]} numberOfLines={1}>
+                                  {session.surf_break_name}
+                                </Text>
+                              </Pressable>
+                            ) : (
+                              <View style={styles.breakLink}>
+                                <Ionicons name="location-outline" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
+                                <Text style={[styles.breakLinkText, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+                                  {session.surf_break_name}
+                                </Text>
+                              </View>
+                            )
+                          )}
+                          {showLocation && sessionDateLabel && (
+                            <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}> · </Text>
+                          )}
+                          {sessionDateLabel && (
+                            <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                              {sessionDateLabel}
+                            </Text>
+                          )}
+                        </View>
                       )}
                     </View>
                   </Pressable>
@@ -1524,9 +1557,14 @@ const styles = StyleSheet.create({
   photographerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   photographerName: { fontSize: 14, fontWeight: '600' },
-  typePill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2, borderWidth: 1 },
-  typePillText: { fontSize: 10, fontWeight: '600' },
+  typeIcon: { marginLeft: 2 },
   subtitle: { fontSize: 12, marginTop: 1 },
+  subtitleRow: { flexDirection: 'row', alignItems: 'center', marginTop: 3 },
+  breakLink: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: '70%',
+    paddingVertical: 3, paddingRight: 4,
+  },
+  breakLinkText: { fontSize: 13, fontWeight: '600' },
   groupChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
   chip: { borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   chipText: { fontSize: 12, fontWeight: '500' },
@@ -1578,10 +1616,14 @@ const styles = StyleSheet.create({
   confirmBtnText: { fontSize: 14, fontWeight: '600' },
   taggedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 4,
-    paddingHorizontal: 5, paddingVertical: 2, borderRadius: 6,
+    paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6,
     backgroundColor: 'rgba(156,163,175,0.12)',
   },
+  taggedBadgeLarge: {
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, gap: 5,
+  },
   taggedBadgeText: { fontSize: 11, fontWeight: '600' },
+  taggedBadgeTextLarge: { fontSize: 13 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingTop: 8, paddingBottom: 34, maxHeight: '70%' },
   modalHandle: { width: 36, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 12 },

@@ -34,6 +34,7 @@ interface SessionCardProps {
   // Use the older 5:4 landscape thumbnail (the in-feed default is 4:5
   // portrait). Set on profile-list-tab usages so list rows stay compact.
   compact?: boolean;
+  hideFavoriteBreak?: boolean;
   onPress?: () => void;
   onDelete?: () => void;
   isViewable?: boolean;
@@ -120,7 +121,7 @@ type Slide =
   | { kind: 'photo'; url: string; id: string }
   | { kind: 'cta' };
 
-export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, compact = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, compact = false, hideFavoriteBreak = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
   const thumbAspect = compact ? 5 / 4 : 4 / 5;
   const router = useRouter();
   const trackedPush = useTrackedPush();
@@ -221,7 +222,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
     });
   }
 
-  if (showLocation && surfBreakId) {
+  if (showLocation && surfBreakId && !hideFavoriteBreak) {
     primaryOptions.push({
       label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
       icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',

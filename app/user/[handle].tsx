@@ -284,7 +284,7 @@ export default function UserProfileScreen() {
                   </Pressable>
                 );
               }
-              return <SessionCard session={item} hidePhotographer compact />;
+              return <SessionCard session={item} hidePhotographer compact hideFavoriteBreak />;
             }}
             ListHeaderComponent={
               <>

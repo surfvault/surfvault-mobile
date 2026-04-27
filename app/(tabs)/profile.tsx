@@ -59,7 +59,7 @@ export default function ProfileScreen() {
   const [updateMeta] = useUpdateUserMetaDataMutation();
   const { setTabBarVisible } = useTabBar();
 
-  const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'favorites'>('grid');
+  const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
 
   // Session long-press action sheet
@@ -237,18 +237,38 @@ export default function ProfileScreen() {
     { skip: !user?.handle }
   );
 
+  // Tagged-in sessions (separate paginated list)
+  const [taggedSessions, setTaggedSessions] = useState<any[]>([]);
+  const [taggedToken, setTaggedToken] = useState('');
+  const taggedSeenIdsRef = useRef(new Set<string>());
+  const taggedHasMoreRef = useRef(false);
+  const taggedFetchingMoreRef = useRef(false);
+
+  const { data: taggedData, isFetching: isFetchingTagged, refetch: refetchTagged } = useGetUserSessionsQuery(
+    { handle: user?.handle ?? '', selfFlag: true, tagged: true, limit: 10, continuationToken: taggedToken },
+    { skip: !user?.handle || activeTab !== 'tagged' }
+  );
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    setContinuationToken('');
-    await refetchSessions();
+    if (activeTab === 'tagged') {
+      setTaggedToken('');
+      await refetchTagged();
+    } else {
+      setContinuationToken('');
+      await refetchSessions();
+    }
     setRefreshing(false);
-  }, [refetchSessions]);
+  }, [activeTab, refetchSessions, refetchTagged]);
 
   // Reset sessions list when the current user changes (logout/login/switch user)
   useEffect(() => {
     seenIdsRef.current = new Set();
     setSessions([]);
     setContinuationToken('');
+    taggedSeenIdsRef.current = new Set();
+    setTaggedSessions([]);
+    setTaggedToken('');
   }, [user?.id]);
 
   useEffect(() => {
@@ -293,6 +313,47 @@ export default function ProfileScreen() {
     isFetchingMoreRef.current = true;
     setContinuationToken(nextToken);
   }, [sessionsData, isFetching]);
+
+  useEffect(() => {
+    const results = taggedData?.results;
+    if (!results) return;
+    const list = results.sessions ?? [];
+    const nextToken = results.continuationToken || '';
+    taggedHasMoreRef.current = Boolean(nextToken);
+
+    if (!taggedToken) {
+      taggedSeenIdsRef.current = new Set();
+      const unique = list.filter((s: any) => {
+        const key = s.session_id ?? s.id;
+        if (!key || taggedSeenIdsRef.current.has(key)) return false;
+        taggedSeenIdsRef.current.add(key);
+        return true;
+      });
+      setTaggedSessions(unique);
+    } else {
+      setTaggedSessions((prev) => {
+        const newItems: any[] = [];
+        for (const s of list) {
+          const key = s.session_id ?? s.id;
+          if (!key) continue;
+          if (!taggedSeenIdsRef.current.has(key)) {
+            taggedSeenIdsRef.current.add(key);
+            newItems.push(s);
+          }
+        }
+        return newItems.length ? prev.concat(newItems) : prev;
+      });
+    }
+    taggedFetchingMoreRef.current = false;
+  }, [taggedData]);
+
+  const handleLoadMoreTagged = useCallback(() => {
+    if (!taggedHasMoreRef.current || taggedFetchingMoreRef.current || isFetchingTagged) return;
+    const nextToken = taggedData?.results?.continuationToken;
+    if (!nextToken) return;
+    taggedFetchingMoreRef.current = true;
+    setTaggedToken(nextToken);
+  }, [taggedData, isFetchingTagged]);
 
   const handleToggleActive = useCallback(async () => {
     if (!user) return;
@@ -484,6 +545,9 @@ export default function ProfileScreen() {
         <Pressable onPress={() => setActiveTab('list')} style={[s.tabBtn, activeTab === 'list' && s.tabBtnActive]}>
           <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
+        <Pressable onPress={() => setActiveTab('tagged')} style={[s.tabBtn, activeTab === 'tagged' && s.tabBtnActive]}>
+          <Ionicons name={activeTab === 'tagged' ? 'pricetag' : 'pricetag-outline'} size={20} color={activeTab === 'tagged' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+        </Pressable>
         <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
           <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? '#ef4444' : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
@@ -518,12 +582,16 @@ export default function ProfileScreen() {
       </View>
 
       <FlatList
-        data={activeTab === 'favorites' ? favorites : sessions}
+        data={
+          activeTab === 'favorites' ? favorites
+          : activeTab === 'tagged'  ? taggedSessions
+          : sessions
+        }
         keyExtractor={(item) =>
           activeTab === 'favorites' ? item.surf_break_id : (item.session_id ?? item.id)
         }
         numColumns={activeTab === 'grid' ? 3 : 1}
-        key={activeTab === 'grid' ? 'grid' : 'list'}
+        key={activeTab === 'grid' ? 'grid' : 'rows'}
         renderItem={({ item }) => {
           if (activeTab === 'favorites') {
             const breakName = (item.surf_break_identifier ?? '').replaceAll('_', ' ');
@@ -610,6 +678,20 @@ export default function ProfileScreen() {
               </Pressable>
             );
           }
+          if (activeTab === 'tagged') {
+            return (
+              <SessionCard
+                session={item}
+                compact
+                showHiddenLocations
+                hideFavoriteBreak
+                onPress={() => {
+                  const sid = item.session_id ?? item.id;
+                  if (sid) trackedPush(`/session/${sid}` as any);
+                }}
+              />
+            );
+          }
           return (
             <SessionCard
               session={item}
@@ -617,6 +699,7 @@ export default function ProfileScreen() {
               compact
               showViewCount
               showHiddenLocations
+              hideFavoriteBreak
               onPress={() => {
                 const sid = item.session_id ?? item.id;
                 if (sid) trackedPush(`/session/${sid}` as any);
@@ -631,29 +714,41 @@ export default function ProfileScreen() {
         }}
         ListHeaderComponent={listHeader}
         ListEmptyComponent={
-          isFetching ? (
+          (activeTab === 'tagged' ? isFetchingTagged : isFetching) ? (
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
               <ActivityIndicator size="small" color={isDark ? '#6b7280' : '#9ca3af'} />
             </View>
           ) : (
             <View style={{ alignItems: 'center', paddingVertical: 40 }}>
               <Ionicons
-                name={activeTab === 'favorites' ? 'heart-outline' : 'camera-outline'}
+                name={
+                  activeTab === 'favorites' ? 'heart-outline'
+                  : activeTab === 'tagged'  ? 'pricetag-outline'
+                  : 'camera-outline'
+                }
                 size={40}
                 color={isDark ? '#374151' : '#d1d5db'}
               />
               <Text style={{ color: '#9ca3af', marginTop: 8, fontSize: 14 }}>
-                {activeTab === 'favorites' ? 'No favorites yet' : 'No sessions yet'}
+                {activeTab === 'favorites' ? 'No favorites yet'
+                : activeTab === 'tagged'  ? "You haven't been tagged in any sessions yet"
+                : 'No sessions yet'}
               </Text>
             </View>
           )
         }
         ListFooterComponent={
-          activeTab !== 'favorites' && isFetching && sessions.length > 0 ? (
+          activeTab === 'tagged' && isFetchingTagged && taggedSessions.length > 0 ? (
+            <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View>
+          ) : activeTab !== 'favorites' && activeTab !== 'tagged' && isFetching && sessions.length > 0 ? (
             <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View>
           ) : null
         }
-        onEndReached={activeTab === 'favorites' ? undefined : handleLoadMore}
+        onEndReached={
+          activeTab === 'favorites' ? undefined
+          : activeTab === 'tagged'  ? handleLoadMoreTagged
+          : handleLoadMore
+        }
         onEndReachedThreshold={0.5}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}

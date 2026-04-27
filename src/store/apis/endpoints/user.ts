@@ -23,13 +23,15 @@ const userApi = rootApi.injectEndpoints({
         selfFlag,
         limit,
         continuationToken,
+        tagged,
       }: {
         handle: string;
         selfFlag: boolean;
         limit?: number;
         continuationToken?: string;
+        tagged?: boolean;
       }) => ({
-        url: `/user/${handle}/sessions?self=${selfFlag}&limit=${limit ?? 10}&continuationToken=${continuationToken ?? ''}`,
+        url: `/user/${handle}/sessions?self=${selfFlag}&limit=${limit ?? 10}&continuationToken=${continuationToken ?? ''}${tagged ? '&tagged=true' : ''}`,
         method: 'GET',
       }),
     }),
