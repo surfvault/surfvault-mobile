@@ -187,7 +187,7 @@ export default function OnboardingScreen() {
             <TextInput
               value={handle}
               onChangeText={(text) => {
-                setHandle(text.toLowerCase().replace(/[^a-z0-9._-]/g, ''));
+                setHandle(text.replace(/[^a-zA-Z0-9._-]/g, ''));
                 setHandleError('');
               }}
               placeholder="your-handle"

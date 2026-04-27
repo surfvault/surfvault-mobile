@@ -49,6 +49,7 @@ export default function EditProfileScreen() {
   const [youtube, setYoutube] = useState('');
   const [website, setWebsite] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
+  const [userType, setUserType] = useState<'surfer' | 'photographer'>('surfer');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [profilePicUri, setProfilePicUri] = useState<string | null>(null);
@@ -70,7 +71,7 @@ export default function EditProfileScreen() {
   const { data: tagsData } = useGetPopularTagsQuery(undefined);
   const popularTags = (tagsData?.results?.tags ?? []).map((t: any) => t.tag ?? t);
 
-  const isPhotographer = (user?.type ?? (user as any)?.user_type) === 'photographer';
+  const isPhotographer = userType === 'photographer';
 
   // Initialize form from user data
   useEffect(() => {
@@ -82,6 +83,8 @@ export default function EditProfileScreen() {
       setYoutube((user.youtube as string) ?? '');
       setWebsite((user.website as string) ?? '');
       setIsPrivate(user.access === 'private');
+      const initialType = ((user as any)?.user_type ?? (user as any)?.type) === 'photographer' ? 'photographer' : 'surfer';
+      setUserType(initialType);
       setTags((user.tags as string[]) ?? []);
       setProfilePicUri(user.picture ?? null);
     }
@@ -141,6 +144,9 @@ export default function EditProfileScreen() {
     if (website !== (user.website ?? '')) metaData.website = website;
     if (isPrivate !== (user.access === 'private')) metaData.access = isPrivate ? 'private' : 'public';
 
+    const currentUserType = ((user as any)?.user_type ?? (user as any)?.type) === 'photographer' ? 'photographer' : 'surfer';
+    if (userType !== currentUserType) metaData.user_type = userType;
+
     const currentTags = (user.tags as string[]) ?? [];
     if (JSON.stringify(tags.sort()) !== JSON.stringify(currentTags.sort())) {
       metaData.tags = tags;
@@ -179,7 +185,7 @@ export default function EditProfileScreen() {
     }
 
     smartBack();
-  }, [user, name, bio, instagram, youtube, website, isPrivate, tags, handle, handleChanged, isHandleValid, handleExists, profilePicFile, updateMeta, updateHandle, smartBack]);
+  }, [user, name, bio, instagram, youtube, website, isPrivate, userType, tags, handle, handleChanged, isHandleValid, handleExists, profilePicFile, updateMeta, updateHandle, smartBack]);
 
   const inputStyle = (isDark: boolean) => [
     s.input,
@@ -234,7 +240,7 @@ export default function EditProfileScreen() {
               <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>Handle</Text>
               <TextInput
                 value={handle}
-                onChangeText={(t) => { setHandle(t.toLowerCase()); setHandleChanged(true); }}
+                onChangeText={(t) => { setHandle(t.replace(/[^a-zA-Z0-9._-]/g, '')); setHandleChanged(true); }}
                 placeholder="your-handle"
                 placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
                 autoCapitalize="none"
@@ -378,6 +384,44 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
+            {/* Profile Type */}
+            <View style={s.field}>
+              <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>I am a</Text>
+              <View style={s.typeRow}>
+                {(['surfer', 'photographer'] as const).map((t) => {
+                  const selected = userType === t;
+                  return (
+                    <Pressable
+                      key={t}
+                      onPress={() => setUserType(t)}
+                      style={[
+                        s.typeOption,
+                        {
+                          backgroundColor: selected
+                            ? (isDark ? 'rgba(14,165,233,0.15)' : '#eff6ff')
+                            : (isDark ? '#1f2937' : '#f3f4f6'),
+                          borderColor: selected ? '#0ea5e9' : (isDark ? '#374151' : '#e5e7eb'),
+                        },
+                      ]}
+                    >
+                      <Ionicons
+                        name={t === 'photographer' ? 'camera-outline' : 'water-outline'}
+                        size={18}
+                        color={selected ? '#0ea5e9' : (isDark ? '#9ca3af' : '#6b7280')}
+                      />
+                      <Text style={{
+                        fontSize: 14,
+                        fontWeight: '600',
+                        color: selected ? '#0ea5e9' : (isDark ? '#d1d5db' : '#374151'),
+                      }}>
+                        {t === 'photographer' ? 'Photographer' : 'Surfer'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
             {/* Privacy */}
             <View style={s.field}>
               <View style={s.switchRow}>
@@ -449,6 +493,11 @@ const s = StyleSheet.create({
     gap: 8,
   },
   socialInput: { flex: 1, fontSize: 15, paddingVertical: 10 },
+  typeRow: { flexDirection: 'row', gap: 8 },
+  typeOption: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderRadius: 10, borderWidth: 1, paddingVertical: 12, paddingHorizontal: 12,
+  },
   switchRow: { flexDirection: 'row', alignItems: 'center' },
   warningBox: {
     flexDirection: 'row', alignItems: 'flex-start',
