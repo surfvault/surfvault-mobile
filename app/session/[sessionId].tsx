@@ -717,11 +717,11 @@ export default function SessionDetailScreen() {
     },
     {
       options: [
-        {
+        ...(session?.hide_location ? [] : [{
           label: isFavorited ? 'Unfavorite Break' : 'Favorite Break',
-          icon: isFavorited ? 'heart-dislike-outline' : 'heart-outline',
+          icon: isFavorited ? ('heart-dislike-outline' as const) : ('heart-outline' as const),
           onPress: handleFavorite,
-        },
+        }]),
         ...(session?.surf_break_identifier ? [{
           label: 'View Break' as const,
           icon: 'location-outline' as const,
