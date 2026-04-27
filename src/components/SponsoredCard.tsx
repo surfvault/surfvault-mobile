@@ -19,6 +19,9 @@ interface Ad {
   id: string;
   ad_partner_id?: string;
   company_name?: string;
+  /** Partner logo (square avatar) — joined from ad_partners.logo_url by GET /ads.
+   * Used as the post-card avatar; falls back to media_url then a placeholder. */
+  partner_logo_url?: string | null;
   headline?: string;
   body?: string;
   media_url?: string;
@@ -120,7 +123,9 @@ export default function SponsoredCard({
 
   const partner = slides[0];
   const active = slides[activeIdx] || partner;
-  const avatarSource = partner.media_url;
+  // Prefer the partner's logo (set on AdPartnerProfile). Falls back to the
+  // first ad's media so old ads without a logo still render an avatar.
+  const avatarSource = partner.partner_logo_url || partner.media_url;
   const singleHero = active.hero_media_url || active.media_url;
 
   return (
