@@ -31,8 +31,15 @@ export {
 
 export { useGetCountriesQuery } from './apis/endpoints/country';
 
-export { useGetBoardroomShapersQuery } from './apis/endpoints/boardroom';
-export type { BoardroomShaper, BoardroomAd } from './apis/endpoints/boardroom';
+export {
+  useGetBoardroomShapersQuery,
+  useGetBoardroomShaperQuery,
+} from './apis/endpoints/boardroom';
+export type {
+  BoardroomShaper,
+  BoardroomShaperDetail,
+  BoardroomAd,
+} from './apis/endpoints/boardroom';
 
 export {
   useGetMapSearchContentQuery,

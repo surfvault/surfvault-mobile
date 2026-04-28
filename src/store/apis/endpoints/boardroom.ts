@@ -24,6 +24,9 @@ export interface BoardroomShaper {
   ads: BoardroomAd[];
 }
 
+/** Detail-page shape — same as feed shaper but no distance (no anchor point). */
+export interface BoardroomShaperDetail extends Omit<BoardroomShaper, 'distance_km'> {}
+
 const boardroomApi = rootApi.injectEndpoints({
   endpoints: (builder) => ({
     getBoardroomShapers: builder.query<
@@ -36,9 +39,19 @@ const boardroomApi = rootApi.injectEndpoints({
         method: 'GET',
       }),
     }),
+    getBoardroomShaper: builder.query<
+      { results: { shaper: BoardroomShaperDetail } },
+      { id: string }
+    >({
+      providesTags: [ApiTag.Boardroom],
+      query: ({ id }) => ({
+        url: `/boardroom/shapers/${id}`,
+        method: 'GET',
+      }),
+    }),
   }),
   overrideExisting: false,
 });
 
-export const { useGetBoardroomShapersQuery } = boardroomApi;
+export const { useGetBoardroomShapersQuery, useGetBoardroomShaperQuery } = boardroomApi;
 export { boardroomApi };

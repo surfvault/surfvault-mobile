@@ -25,9 +25,13 @@ import {
 import { useUser } from '../context/UserProvider';
 import { useUserCoords } from '../hooks/useUserCoords';
 import { setCoordinates } from '../store/slices/location';
-import { buildAdClickUrl, currentDevice } from '../helpers/adTracking';
+import { currentDevice } from '../helpers/adTracking';
+import { extractInstagramHandle, normalizeWebsite } from '../helpers/socialUrl';
+import { useTrackedPush } from '../context/NavigationContext';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetSection } from './ActionSheet';
+
+const MAX_INLINE_SLIDES = 6;
 
 type Props = {
   isDark: boolean;
@@ -209,16 +213,58 @@ export default function BoardroomFeed({ isDark }: Props) {
   );
 }
 
+type Slide =
+  | { kind: 'ad'; ad: BoardroomAd }
+  | { kind: 'cta'; count: number; noun: string };
+
+// Shared stat helper — count distinct boards via cta_label when every ad is
+// labeled, otherwise fall back to honest photo count. Mirrors the detail
+// page so the feed CTA and the detail header agree.
+function computeShaperStat(ads: BoardroomAd[]): { count: number; noun: string } {
+  if (!ads.length) return { count: 0, noun: 'boards' };
+  const allLabeled = ads.every((a) => a.cta_label?.trim());
+  if (!allLabeled) {
+    return { count: ads.length, noun: ads.length === 1 ? 'photo' : 'photos' };
+  }
+  const distinct = new Set(ads.map((a) => a.cta_label!.trim().toLowerCase())).size;
+  return { count: distinct, noun: distinct === 1 ? 'board' : 'boards' };
+}
+
 function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boolean }) {
   const [recordImpression] = useRecordAdImpressionMutation();
+  const trackedPush = useTrackedPush();
   const [width, setWidth] = useState(Dimensions.get('window').width);
   const [activeIdx, setActiveIdx] = useState(0);
   const [sheetVisible, setSheetVisible] = useState(false);
   const firedRef = useRef<Set<string>>(new Set());
 
-  const slides = shaper.ads;
+  // Cap inline carousel — partners with dozens of boards get a "See all N
+  // boards" CTA tile as the final slide that pushes to the shaper detail
+  // page. Keeps the feed scrollable and avoids preloading 50 images per card.
+  const slides: Slide[] = useMemo(() => {
+    if (shaper.ads.length <= MAX_INLINE_SLIDES) {
+      return shaper.ads.map((ad) => ({ kind: 'ad' as const, ad }));
+    }
+    const visible = shaper.ads.slice(0, MAX_INLINE_SLIDES);
+    const stat = computeShaperStat(shaper.ads);
+    return [
+      ...visible.map((ad) => ({ kind: 'ad' as const, ad })),
+      { kind: 'cta' as const, count: stat.count, noun: stat.noun },
+    ];
+  }, [shaper.ads]);
+
   const isCarousel = slides.length > 1;
-  const active = slides[activeIdx] ?? slides[0];
+  const activeSlide = slides[activeIdx] ?? slides[0];
+  // Primary "ad" reference for header/footer state. CTA slide falls back to
+  // the first ad so headers stay coherent while users sit on the CTA.
+  const active: BoardroomAd =
+    activeSlide?.kind === 'ad'
+      ? activeSlide.ad
+      : (shaper.ads[0] as BoardroomAd);
+
+  const openShaperDetail = useCallback(() => {
+    trackedPush(`/shaper/${shaper.id}` as any);
+  }, [trackedPush, shaper.id]);
 
   // Reset impression tracking when the slide set changes (e.g. partner refetch).
   useEffect(() => {
@@ -226,14 +272,15 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
     setActiveIdx(0);
   }, [shaper.id, slides.length]);
 
-  // Fire one impression per slide as it becomes the active page (or for the
-  // single-ad fallback when the card mounts).
+  // Fire one impression per ad slide as it becomes the active page. CTA slides
+  // are skipped (no ad to attribute the impression to).
   useEffect(() => {
     const target = slides[activeIdx];
-    if (!target?.id || firedRef.current.has(target.id)) return;
-    firedRef.current.add(target.id);
+    if (!target || target.kind !== 'ad') return;
+    if (firedRef.current.has(target.ad.id)) return;
+    firedRef.current.add(target.ad.id);
     recordImpression({
-      adId: target.id,
+      adId: target.ad.id,
       placement: 'content',
       device: currentDevice(),
     }).catch(() => { /* fire-and-forget */ });
@@ -246,17 +293,11 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
     if (typeof first.index === 'number') setActiveIdx(first.index);
   }).current;
 
-  const openClick = useCallback((slide: BoardroomAd) => {
-    // Tel CTAs short-circuit through Linking — no point round-tripping the
-    // click-tracker for a phone dial.
-    if (slide.cta_type === 'tel' && slide.click_url) {
-      const num = slide.click_url.startsWith('tel:') ? slide.click_url : `tel:${slide.click_url}`;
-      Linking.openURL(num).catch(() => {});
-      return;
-    }
-    const url = buildAdClickUrl(slide.id, { placement: 'content', device: currentDevice() });
-    Linking.openURL(url).catch(() => {});
-  }, []);
+  // Boardroom isn't an ad surface — board taps push into the shaper's gallery
+  // rather than opening the partner's website. Contact actions (call / IG /
+  // website) live on the detail page. We still record impressions so partners
+  // see how often their work was viewed; clicks aren't meaningful here.
+  const handleBoardPress = openShaperDetail;
 
   const handleCallPartner = useCallback(() => {
     if (!shaper.phone_number) return;
@@ -288,16 +329,41 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
     Linking.openURL(`mailto:support@surf-vault.com?subject=${subject}&body=${body}`).catch(() => {});
   }, [shaper.company_name, shaper.id, active?.id]);
 
+  // Mirror the detail page's action sheet so behaviour is consistent across
+  // surfaces. Contact actions derive from the same fields.
+  const firstClickUrl =
+    shaper.ads.find((a) => !!a.click_url && a.cta_type !== 'tel')?.click_url ?? null;
+  const igHandle = extractInstagramHandle(firstClickUrl);
+  const websiteUrl = igHandle ? null : normalizeWebsite(firstClickUrl);
+
   const sheetSections: ActionSheetSection[] = [];
+  const contactOptions = [];
   if (shaper.phone_number) {
-    sheetSections.push({
-      options: [{
-        label: `Call ${shaper.company_name}`,
-        icon: 'call-outline',
-        onPress: handleCallPartner,
-      }],
+    contactOptions.push({
+      label: `Call ${shaper.phone_number}`,
+      icon: 'call-outline' as const,
+      onPress: handleCallPartner,
     });
   }
+  if (igHandle) {
+    contactOptions.push({
+      label: `View @${igHandle} on Instagram`,
+      icon: 'logo-instagram' as const,
+      onPress: () => {
+        Linking.openURL(`https://instagram.com/${igHandle}`).catch(() => {});
+      },
+    });
+  }
+  if (websiteUrl) {
+    contactOptions.push({
+      label: 'View website',
+      icon: 'link-outline' as const,
+      onPress: () => {
+        Linking.openURL(websiteUrl).catch(() => {});
+      },
+    });
+  }
+  if (contactOptions.length) sheetSections.push({ options: contactOptions });
   sheetSections.push({
     options: [{
       label: 'Report',
@@ -309,9 +375,12 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
 
   return (
     <View style={styles.card} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-      {/* Header — partner identity */}
+      {/* Header — partner identity. Tapping anywhere on the avatar/name area
+          pushes to the shaper detail page. Consistent entry point regardless
+          of how many boards the shaper has (the in-carousel CTA tile only
+          appears when boards overflow MAX_INLINE_SLIDES). */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
+        <Pressable onPress={openShaperDetail} style={styles.headerLeft}>
           <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
             {shaper.logo_url ? (
               <Image source={{ uri: shaper.logo_url }} style={styles.avatarImg} contentFit="cover" />
@@ -334,7 +403,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
               {subtitle}
             </Text>
           </View>
-        </View>
+        </Pressable>
         <Pressable onPress={() => setSheetVisible(true)} hitSlop={8}>
           <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
         </Pressable>
@@ -354,17 +423,26 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             data={slides}
-            keyExtractor={(s) => s.id}
-            renderItem={({ item }) => (
-              <Pressable onPress={() => openClick(item)} style={{ width }}>
-                <SlideHero
-                  uri={item.hero_media_url || item.media_url || null}
-                  ctaLabel={item.cta_label}
-                  isDark={isDark}
-                  width={width}
-                />
-              </Pressable>
-            )}
+            keyExtractor={(s, i) => s.kind === 'ad' ? s.ad.id : `cta-${i}`}
+            renderItem={({ item }) => {
+              if (item.kind === 'cta') {
+                return (
+                  <Pressable onPress={openShaperDetail} style={{ width }}>
+                    <CtaTile count={item.count} noun={item.noun} isDark={isDark} width={width} />
+                  </Pressable>
+                );
+              }
+              return (
+                <Pressable onPress={() => handleBoardPress()} style={{ width }}>
+                  <SlideHero
+                    uri={item.ad.hero_media_url || item.ad.media_url || null}
+                    ctaLabel={item.ad.cta_label}
+                    isDark={isDark}
+                    width={width}
+                  />
+                </Pressable>
+              );
+            }}
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
           />
@@ -377,7 +455,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
               const isActive = i === activeIdx;
               return (
                 <View
-                  key={s.id}
+                  key={s.kind === 'ad' ? s.ad.id : `cta-${i}`}
                   style={{
                     width: size,
                     height: size,
@@ -392,7 +470,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
           </View>
         </View>
       ) : (
-        <Pressable onPress={() => openClick(active)}>
+        <Pressable onPress={handleBoardPress}>
           <SlideHero
             uri={active.hero_media_url || active.media_url || null}
             ctaLabel={active.cta_label}
@@ -405,7 +483,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
       {/* Body — optional longer description under the hero. Board name is
           shown as a pill overlay on the hero itself, not here. */}
       {active.body ? (
-        <Pressable onPress={() => openClick(active)} style={styles.footer}>
+        <Pressable onPress={handleBoardPress} style={styles.footer}>
           <Text
             style={[styles.body, { color: isDark ? '#d1d5db' : '#374151' }]}
             numberOfLines={2}
@@ -477,6 +555,49 @@ function SlideHero({
           </Text>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function CtaTile({
+  count,
+  noun,
+  isDark,
+  width,
+}: {
+  count: number;
+  noun: string;
+  isDark: boolean;
+  width: number;
+}) {
+  return (
+    <View
+      style={[
+        styles.thumb,
+        styles.ctaTile,
+        { width, backgroundColor: isDark ? '#0b0b0b' : '#f3f4f6' },
+      ]}
+    >
+      <View style={[styles.ctaIconWrap, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+        <Ionicons
+          name="grid-outline"
+          size={28}
+          color={isDark ? '#d1d5db' : '#374151'}
+        />
+      </View>
+      <Text style={[styles.ctaTitle, { color: isDark ? '#fff' : '#111827' }]}>
+        See all {count} {noun}
+      </Text>
+      <View style={styles.ctaHintRow}>
+        <Text style={[styles.ctaHint, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+          Tap to open
+        </Text>
+        <Ionicons
+          name="chevron-forward"
+          size={14}
+          color={isDark ? '#9ca3af' : '#6b7280'}
+        />
+      </View>
     </View>
   );
 }
@@ -586,6 +707,32 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 5,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ctaTile: {
+    gap: 10,
+    paddingHorizontal: 24,
+  },
+  ctaIconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  ctaTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  ctaHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  ctaHint: {
+    fontSize: 13,
+    fontWeight: '500',
   },
   footer: {
     paddingHorizontal: 12,

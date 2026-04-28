@@ -51,6 +51,10 @@ const FEED_OPTIONS: { value: FeedType; label: string; description: string; comin
 
 // Module-level so the offset survives any remount (tab detach/attach cycles).
 let savedFeedOffset = 0;
+// Same trick for the active feed type — useSmartBack does router.replace which
+// re-mounts the home tab, so without persistence boardroom users land on
+// discover when they back out of /shaper/[id] or any other top-level route.
+let savedFeedType: FeedType = 'discover';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -92,7 +96,7 @@ export default function HomeScreen() {
   }).current;
 
   // ---- Feed type (Discover / Following / Favorites / Boardroom) ----
-  const [feedType, setFeedType] = useState<FeedType>('discover');
+  const [feedType, setFeedType] = useState<FeedType>(savedFeedType);
   const currentFeed = FEED_OPTIONS.find((f) => f.value === feedType) ?? FEED_OPTIONS[0];
 
   // ---- Discover Feed ----
@@ -212,6 +216,7 @@ export default function HomeScreen() {
     setViewableIds(new Set());
     setHasViewabilityReport(false);
     savedFeedOffset = 0;
+    savedFeedType = next;
     feedListRef.current?.scrollToOffset({ offset: 0, animated: false });
     setFeedType(next);
   }, [feedType]);

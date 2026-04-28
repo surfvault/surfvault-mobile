@@ -14,6 +14,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRecordAdImpressionMutation } from '../store';
 import { buildAdClickUrl, currentDevice } from '../helpers/adTracking';
+import { useTrackedPush } from '../context/NavigationContext';
 
 interface Ad {
   id: string;
@@ -32,6 +33,10 @@ interface Ad {
   /** Server-computed flag: partner is within their target_radius_km of the
    * reference point (surf break on break pages; user coords otherwise). */
   is_local?: boolean;
+  /** Partner-level flag (joined from ad_partners.is_shaper). Shapers render a
+   * "Shaper" tag instead of "Sponsored" and tap into the in-app gallery
+   * (/shaper/{partner_id}) instead of opening the partner's website. */
+  is_shaper?: boolean;
 }
 
 interface SponsoredCardProps {
@@ -61,6 +66,7 @@ export default function SponsoredCard({
 }: SponsoredCardProps) {
   const isDark = useColorScheme() === 'dark';
   const [recordImpression] = useRecordAdImpressionMutation();
+  const trackedPush = useTrackedPush();
 
   const slides = useMemo<Ad[]>(() => {
     if (ads && ads.length) return ads.filter(Boolean);
@@ -115,9 +121,16 @@ export default function SponsoredCard({
   }).current;
 
   const openClick = useCallback((slide: Ad) => {
+    // Shapers route to the in-app gallery instead of the partner's external
+    // URL — the gallery is a richer destination (full board lineup + contact
+    // options) than dropping the user into Instagram.
+    if (slide.is_shaper && slide.ad_partner_id) {
+      trackedPush(`/shaper/${slide.ad_partner_id}` as any);
+      return;
+    }
     const url = buildAdClickUrl(slide.id, { placement, surfBreakId, device: currentDevice() });
     Linking.openURL(url).catch(() => { /* noop */ });
-  }, [placement, surfBreakId]);
+  }, [placement, surfBreakId, trackedPush]);
 
   if (!slides.length) return null;
 
@@ -145,9 +158,15 @@ export default function SponsoredCard({
               <Text style={[styles.companyName, { color: isDark ? '#ffffff' : '#111827' }]} numberOfLines={1}>
                 {partner.company_name || 'Local business'}
               </Text>
-              <View style={styles.sponsoredPill}>
-                <Text style={styles.sponsoredText}>Sponsored</Text>
-              </View>
+              {partner.is_shaper ? (
+                <View style={styles.shaperPill}>
+                  <Text style={styles.shaperText}>Shaper</Text>
+                </View>
+              ) : (
+                <View style={styles.sponsoredPill}>
+                  <Text style={styles.sponsoredText}>Sponsored</Text>
+                </View>
+              )}
               {active.is_local ? (
                 <View style={styles.localPill}>
                   <Ionicons name="location-sharp" size={9} color="#047857" />
@@ -297,6 +316,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: 'uppercase',
     color: '#6b7280',
+  },
+  shaperPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'rgba(245, 158, 11, 0.18)',
+  },
+  shaperText: {
+    fontSize: 9,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    color: '#b45309',
   },
   localPill: {
     flexDirection: 'row',
