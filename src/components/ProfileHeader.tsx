@@ -182,11 +182,13 @@ export default function ProfileHeader({
             <View style={[s.tagPill, s.typePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9' }]}>
               {userType === 'photographer' ? (
                 <Ionicons name="camera-outline" size={11} color={isDark ? '#d1d5db' : '#475569'} />
+              ) : userType === 'shaper' ? (
+                <MaterialCommunityIcons name="hammer-wrench" size={11} color={isDark ? '#d1d5db' : '#475569'} />
               ) : (
                 <MaterialCommunityIcons name="surfing" size={12} color={isDark ? '#d1d5db' : '#475569'} />
               )}
               <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#d1d5db' : '#475569' }}>
-                {userType === 'photographer' ? 'Photographer' : 'Surfer'}
+                {userType === 'photographer' ? 'Photographer' : userType === 'shaper' ? 'Shaper' : 'Surfer'}
               </Text>
             </View>
           )}

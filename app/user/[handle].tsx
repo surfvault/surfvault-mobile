@@ -35,6 +35,7 @@ import { useUserCoords } from '../../src/hooks/useUserCoords';
 import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
+import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -244,6 +245,21 @@ export default function UserProfileScreen() {
       <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <UserSkeleton />
+        ) : profile?.user_type === 'shaper' ? (
+          // Shapers don't have surf sessions — render their board gallery
+          // (using the new boards/board_photos schema) instead. Profile header
+          // stays the same; tabs are skipped since boards are the only content.
+          <FlatList
+            data={[1] as const}
+            keyExtractor={() => 'shaper-content'}
+            renderItem={() => <ShaperBoardsGrid handle={handle ?? ''} />}
+            ListHeaderComponent={
+              <>
+                <UserProfileHeader />
+              </>
+            }
+            showsVerticalScrollIndicator={false}
+          />
         ) : (
           <FlatList
             data={isLocked ? [] : sessions}

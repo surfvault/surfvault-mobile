@@ -33,12 +33,14 @@ export { useGetCountriesQuery } from './apis/endpoints/country';
 
 export {
   useGetBoardroomShapersQuery,
-  useGetBoardroomShaperQuery,
+  useGetFeaturedShaperBoardsNearQuery,
+  useGetShaperBoardsQuery,
 } from './apis/endpoints/boardroom';
 export type {
   BoardroomShaper,
-  BoardroomShaperDetail,
-  BoardroomAd,
+  FeaturedShaperBoard,
+  Board,
+  BoardPhoto,
 } from './apis/endpoints/boardroom';
 
 export {

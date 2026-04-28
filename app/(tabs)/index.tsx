@@ -26,6 +26,7 @@ import {
   useGetMapSearchContentQuery,
   useGetPopularTagsQuery,
   useGetAdsQuery,
+  useGetFeaturedShaperBoardsNearQuery,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
@@ -34,6 +35,7 @@ import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
 import BoardroomFeed from '../../src/components/BoardroomFeed';
+import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import HomeSkeleton from '../../src/components/HomeSkeleton';
 import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
@@ -294,13 +296,26 @@ export default function HomeScreen() {
     lon: hasCoords && userLon != null ? userLon : undefined,
     limit: 10,
   });
-  const feedAds = useMemo(
-    () => adsData?.results?.ads || [],
-    [adsData]
+  const { data: shaperBoardsData } = useGetFeaturedShaperBoardsNearQuery(
+    { lat: userLat as number, lon: userLon as number, limit: 10 },
+    { skip: !hasCoords || userLat == null || userLon == null }
   );
 
-  // Interleave ads using the shared cadence — matches web so both platforms
-  // show ads at the same feed positions.
+  // Combine paid ads + editorial shaper boards into a single promo stream the
+  // interleave helper can pace evenly. Each entry is tagged so the feed
+  // renderer can pick the right card component (ShaperFeedCard vs SponsoredCard).
+  const feedAds = useMemo(() => {
+    const ads = (adsData?.results?.ads || []).map((a: any) => ({ ...a, _kind: 'ad' as const }));
+    const shapers = (shaperBoardsData?.results?.boards || []).map((b: any) => ({
+      ...b,
+      id: b.board_id,
+      _kind: 'shaper' as const,
+    }));
+    return [...shapers, ...ads];
+  }, [adsData, shaperBoardsData]);
+
+  // Interleave ads + shaper boards using the shared cadence — matches web so
+  // both platforms render promo content at the same feed positions.
   const feedRows = useMemo(
     () => interleaveAds(sessions, feedAds) as FeedRow<any, any>[],
     [sessions, feedAds]
@@ -686,6 +701,13 @@ export default function HomeScreen() {
           renderItem={({ item: row }) => {
             const viewable = !hasViewabilityReport || viewableIds.has(row.key);
             if (row.type === 'ad') {
+              // Mixed promo stream — first entry's _kind picks the renderer.
+              // Shaper boards render as a single ShaperFeedCard (no carousel
+              // grouping), ads as a SponsoredCard partner-group carousel.
+              const first = row.data[0];
+              if (first?._kind === 'shaper') {
+                return <ShaperFeedCard board={first} />;
+              }
               return (
                 <SponsoredCard
                   ads={row.data}
