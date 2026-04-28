@@ -16,6 +16,7 @@ export const ApiTag = {
   Media: 'Media',
   AdPartners: 'AdPartners',
   AccessRequest: 'AccessRequest',
+  Boardroom: 'Boardroom',
 } as const;
 
 export type ApiTagType = (typeof ApiTag)[keyof typeof ApiTag];

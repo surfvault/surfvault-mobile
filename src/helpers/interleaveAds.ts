@@ -31,6 +31,12 @@ export function groupAdsByPartner<A extends { id: string; ad_partner_id?: string
  * every `every` items (defaults to AD_EVERY_N_ITEMS). Ads are grouped by
  * `ad_partner_id` so each feed slot renders as one swipeable carousel per
  * partner rather than N separate sponsored posts. Deterministic.
+ *
+ * After items are exhausted, any remaining ad groups append at the tail —
+ * partner content (especially shapers) is editorially relevant to surfers,
+ * so the feed shouldn't dead-end if there's still inventory the user hasn't
+ * seen. Empty `items` still returns `[]` so empty-state UIs render normally
+ * instead of an ads-only feed.
  */
 export function interleaveAds<T extends { id?: string; session_id?: string }, A extends { id: string; ad_partner_id?: string }>(
     items: T[],
@@ -56,6 +62,17 @@ export function interleaveAds<T extends { id?: string; session_id?: string }, A 
                 adCursor += 1;
             }
         }
+    }
+
+    // Tail: dump any remaining ad groups so partners with leftover inventory
+    // still get exposure when the feed runs out of sessions.
+    while (adCursor < groups.length) {
+        const group = groups[adCursor];
+        if (group.length) {
+            const keyBase = group[0].ad_partner_id ?? group[0].id;
+            out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
+        }
+        adCursor += 1;
     }
 
     return out;
