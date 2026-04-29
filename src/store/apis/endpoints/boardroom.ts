@@ -15,6 +15,9 @@ export interface Board {
   is_featured?: boolean;
   sort_order: number;
   photos: BoardPhoto[];
+  // Lifetime distinct (viewer × day) view count. Populated by
+  // getShaperBoards; falls back to 0 if not present (e.g. older API responses).
+  view_count?: number;
 }
 
 export interface BoardroomShaper {

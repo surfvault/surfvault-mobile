@@ -79,6 +79,7 @@ export {
 
 export {
   useCreateSurfSessionBookingMutation,
+  useCreateBoardViewReportMutation,
   useCreateSurfSessionViewReportMutation,
   useDeleteSurfSessionBookingMutation,
   useGetBookingSearchContentQuery,

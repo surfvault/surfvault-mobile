@@ -63,16 +63,10 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
 
-  // Shapers don't have surf sessions or break favorites in the same way —
-  // grid/list show their boards instead, and the favorites tab is hidden
-  // entirely. Tagged is still shown (shapers can be tagged in others' photos).
+  // Shapers don't have surf sessions — grid/list show their boards instead.
+  // Tagged + Favorites stay available so shapers can still favorite breaks
+  // they shoot near and see sessions they were tagged in.
   const isShaperSelf = user?.user_type === 'shaper';
-
-  // Bounce off the favorites tab if a shaper somehow lands on it (e.g. they
-  // were a photographer when the tab was last selected, then converted).
-  useEffect(() => {
-    if (isShaperSelf && activeTab === 'favorites') setActiveTab('grid');
-  }, [isShaperSelf, activeTab]);
 
   // Session long-press action sheet
   const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
@@ -560,11 +554,9 @@ export default function ProfileScreen() {
         <Pressable onPress={() => setActiveTab('tagged')} style={[s.tabBtn, activeTab === 'tagged' && s.tabBtnActive]}>
           <Ionicons name={activeTab === 'tagged' ? 'pricetag' : 'pricetag-outline'} size={20} color={activeTab === 'tagged' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
-        {!isShaperSelf && (
-          <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
-            <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? '#ef4444' : (isDark ? '#6b7280' : '#9ca3af')} />
-          </Pressable>
-        )}
+        <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
+          <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? '#ef4444' : (isDark ? '#6b7280' : '#9ca3af')} />
+        </Pressable>
       </View>
     </>
   );
@@ -676,23 +668,35 @@ export default function ProfileScreen() {
                 )}
                 {(item.view_count != null || item.photo_count > 0) && (
                   <View style={s.gridViewCount}>
-                    {item.view_count != null && (
-                      <>
-                        <Ionicons name="eye-outline" size={10} color="#fff" />
-                        <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
-                      </>
-                    )}
-                    {item.view_count != null && item.photo_count > 0 && (
-                      <Text style={s.gridViewCountText}> · </Text>
-                    )}
                     {item.photo_count > 0 && (
                       <>
                         <Ionicons name="images-outline" size={10} color="#fff" />
                         <Text style={s.gridViewCountText}>{formatCount(item.photo_count)}</Text>
                       </>
                     )}
+                    {item.photo_count > 0 && item.view_count != null && (
+                      <Text style={[s.gridViewCountText, { opacity: 0.7 }]}> · </Text>
+                    )}
+                    {item.view_count != null && (
+                      <>
+                        <Ionicons name="eye-outline" size={10} color="#fff" />
+                        <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
+                      </>
+                    )}
                   </View>
                 )}
+                {/* Bottom-right ellipsis — same chrome as shaper grid tile.
+                    Tap opens the existing session action sheet. */}
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleSessionLongPress(item);
+                  }}
+                  hitSlop={6}
+                  style={s.gridEllipsisBtn}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={14} color="#fff" />
+                </Pressable>
                 {(item.session_date || item.surf_break_name) && (
                   <View style={s.gridDate}>
                     {item.surf_break_name && (
@@ -942,17 +946,27 @@ const s = StyleSheet.create({
   activePulseDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444' },
   gridViewCount: {
     position: 'absolute', bottom: 4, left: 4,
-    flexDirection: 'row', alignItems: 'center', gap: 2,
-    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    // Match shaper grid + web SessionPreviewSection badge opacity for parity.
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
     paddingHorizontal: 5, paddingVertical: 2,
   },
   gridViewCountText: { fontSize: 10, fontWeight: '600', color: '#fff' },
   gridDate: {
     position: 'absolute', top: 4, left: 4,
-    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
     paddingHorizontal: 5, paddingVertical: 2,
   },
   gridDateText: { fontSize: 9, fontWeight: '600', color: '#fff' },
+  // Bottom-right ellipsis on session grid tiles — matches the shaper grid
+  // ellipsisBtn so any user_type's profile reads the same way.
+  gridEllipsisBtn: {
+    position: 'absolute', bottom: 4, right: 4,
+    width: 22, height: 22,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   noteSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
   noteSheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

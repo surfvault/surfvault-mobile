@@ -19,15 +19,26 @@ import * as ImagePicker from 'expo-image-picker';
 import ImageViewing from 'react-native-image-viewing';
 import {
   useGetShaperBoardsQuery,
+  useCreateBoardViewReportMutation,
   useCreateMyBoardPhotosMutation,
   useDeleteMyBoardMutation,
   type Board,
   type BoardPhoto,
 } from '../store';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
+import { getViewerHash } from '../helpers/viewerHash';
+import { useUser } from '../context/UserProvider';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetOption } from './ActionSheet';
 import BoardEditSheet from './shaper/BoardEditSheet';
+
+// Match SessionCard's formatCount so badges read the same way.
+const formatCount = (n: number): string => {
+  const v = Number(n) || 0;
+  if (v < 1000) return `${v}`;
+  if (v < 10000) return `${(v / 1000).toFixed(1)}k`;
+  return `${Math.round(v / 1000)}k`;
+};
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_COLS = 3;
@@ -69,11 +80,26 @@ export default function ShaperBoardsGrid({
   const [editingBoard, setEditingBoard] = useState<Board | null>(null);
   const [createMyBoardPhotos] = useCreateMyBoardPhotosMutation();
   const [deleteMyBoard] = useDeleteMyBoardMutation();
+  const [reportBoardView] = useCreateBoardViewReportMutation();
+  const { user } = useUser();
 
-  const openBoardLightbox = useCallback((board: Board, photoIndex: number) => {
+  // Dedup view reports per board within the current screen lifetime.
+  const reportedViewsRef = useRef<Set<string>>(new Set());
+
+  const openBoardLightbox = useCallback(async (board: Board, photoIndex: number) => {
     if (!board.photos.length) return;
     setViewerState({ photos: board.photos, index: photoIndex });
-  }, []);
+
+    // Track the view (skip self-views, and only once per board per screen
+    // lifetime — same dedup pattern as session views).
+    if (isSelf) return;
+    if (reportedViewsRef.current.has(board.id)) return;
+    reportedViewsRef.current.add(board.id);
+    try {
+      const hash = await getViewerHash((user as any)?.id);
+      reportBoardView({ boardId: board.id, viewerHash: hash }).unwrap().catch(() => { /* fire-and-forget */ });
+    } catch { /* fire-and-forget */ }
+  }, [isSelf, user, reportBoardView]);
 
   const openManageSheet = useCallback((board: Board) => {
     setActionTarget(board);
@@ -219,36 +245,82 @@ export default function ShaperBoardsGrid({
         </View>
       ) : (
         <View style={styles.gridWrap}>
-          {gridTiles(boards).map((t, idx) => (
-            <Pressable
-              key={t.board.id}
-              onPress={() => openBoardLightbox(t.board, 0)}
-              style={[
-                styles.tile,
-                {
-                  marginRight: (idx + 1) % GRID_COLS === 0 ? 0 : GRID_GAP,
-                  marginBottom: GRID_GAP,
-                },
-              ]}
-            >
-              <Image
-                source={{ uri: getBoardPhotoUrl(t.photo.s3_key) ?? undefined }}
-                style={styles.tileImg}
-                contentFit="cover"
-                transition={150}
-              />
-              <View style={styles.tileLabelWrap} pointerEvents="none">
-                <Text style={styles.tileLabelText} numberOfLines={1}>
-                  {t.board.name}
-                </Text>
-              </View>
-              {t.board.photos.length > 1 ? (
-                <View style={styles.multiPhotoBadge} pointerEvents="none">
-                  <Ionicons name="copy-outline" size={11} color="#fff" />
+          {gridTiles(boards).map((t, idx) => {
+            const photoCount = t.board.photos.length;
+            const viewCount = Number((t.board as any).view_count ?? 0);
+            return (
+              <View
+                key={t.board.id}
+                style={[
+                  styles.tile,
+                  {
+                    marginRight: (idx + 1) % GRID_COLS === 0 ? 0 : GRID_GAP,
+                    marginBottom: GRID_GAP,
+                  },
+                ]}
+              >
+                <Pressable
+                  onPress={() => openBoardLightbox(t.board, 0)}
+                  // Long-press is the management entry point on grid tiles
+                  // (only meaningful for self — non-self viewers get nothing).
+                  // Replaces the explicit bottom-right ellipsis so tiles read
+                  // cleaner.
+                  onLongPress={isSelf ? () => openManageSheet(t.board) : undefined}
+                  delayLongPress={350}
+                  style={StyleSheet.absoluteFillObject}
+                >
+                  <Image
+                    source={{ uri: getBoardPhotoUrl(t.photo.s3_key) ?? undefined }}
+                    style={styles.tileImg}
+                    contentFit="cover"
+                    transition={150}
+                  />
+                </Pressable>
+
+                {/* Top-left: name + dimensions (star icon when featured). */}
+                <View style={styles.topLeftLabel} pointerEvents="none">
+                  <View style={styles.topLeftRow}>
+                    {t.board.is_featured ? (
+                      <MaterialCommunityIcons name="star" size={10} color="#fcd34d" style={{ marginRight: 3 }} />
+                    ) : null}
+                    <Text style={styles.topLeftName} numberOfLines={1}>
+                      {t.board.name}
+                    </Text>
+                  </View>
+                  {t.board.dimensions ? (
+                    <Text style={styles.topLeftDims} numberOfLines={1}>
+                      {t.board.dimensions}
+                    </Text>
+                  ) : null}
                 </View>
-              ) : null}
-            </Pressable>
-          ))}
+
+                {/* Bottom-left: photo count · view count (matches SessionCard
+                    statsBadge pattern). */}
+                {(photoCount > 0 || viewCount > 0) ? (
+                  <View style={styles.statsBadge} pointerEvents="none">
+                    {photoCount > 0 ? (
+                      <>
+                        <Ionicons name="images-outline" size={10} color="#fff" />
+                        <Text style={styles.statsText}>{formatCount(photoCount)}</Text>
+                      </>
+                    ) : null}
+                    {photoCount > 0 && viewCount > 0 ? (
+                      <Text style={[styles.statsText, { opacity: 0.7 }]}> · </Text>
+                    ) : null}
+                    {viewCount > 0 ? (
+                      <>
+                        <Ionicons name="eye-outline" size={10} color="#fff" />
+                        <Text style={styles.statsText}>{formatCount(viewCount)}</Text>
+                      </>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {/* Long-press handles management for self (no explicit
+                    ellipsis on grid tiles — keeps the chrome clean). */}
+              </View>
+            );
+          })}
         </View>
       )}
 
@@ -497,30 +569,53 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  tileLabelWrap: {
+  // ---- Tile overlays (top-left name, bottom-left stats, bottom-right ellipsis) ----
+  topLeftLabel: {
     position: 'absolute',
     top: 4,
     left: 4,
+    // Cap at 90% so long names truncate cleanly via numberOfLines={1} but the
+    // pill itself only spans the actual text — not the whole tile width.
     maxWidth: '90%',
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 3,
   },
-  tileLabelText: {
+  topLeftRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  topLeftName: {
     color: '#fff',
     fontSize: 10,
-    fontWeight: '600',
+    fontWeight: '700',
+    flexShrink: 1,
   },
-  multiPhotoBadge: {
+  topLeftDims: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 9,
+    fontWeight: '500',
+    marginTop: 1,
+  },
+  statsBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
+    bottom: 4,
+    left: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
     backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 4,
-    paddingHorizontal: 4,
+    borderRadius: 6,
+    paddingHorizontal: 5,
     paddingVertical: 2,
   },
+  statsText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
 
   // ---- List mode (SessionCard-style) ----
   card: {

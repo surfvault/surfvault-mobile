@@ -31,7 +31,10 @@ import {
   useSaveSurfMediaMutation,
 } from '../../src/store';
 import { useUpload } from '../../src/context/UploadContext';
-import UploadBoard from '../../src/components/UploadBoard';
+import {
+  useCreateMyBoardMutation,
+  useCreateMyBoardPhotosMutation,
+} from '../../src/store';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PREVIEW_SIZE = (SCREEN_WIDTH - 48 - 8) / 4; // 4 columns with gaps
@@ -67,6 +70,12 @@ export default function CreateSessionScreen() {
   const requireAuth = useRequireAuth();
   const { setTabBarVisible } = useTabBar();
 
+  // Shapers reuse this same screen (photo picker + thumbnail grid + Create
+  // button) but with board-specific metadata fields and a different submit
+  // handler that hits /boards. Branch here so the rest of the component can
+  // keep its session hooks running unconditionally.
+  const isShaper = (user as any)?.user_type === 'shaper';
+
   // Form state
   const [sessionName, setSessionName] = useState('');
   const [selectedBreak, setSelectedBreak] = useState<any>(null);
@@ -78,6 +87,15 @@ export default function CreateSessionScreen() {
   const [notifyFollowers, setNotifyFollowers] = useState(true);
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Board form state — only used when isShaper. Featured toggle lives on the
+  // profile, not here. See app/(tabs)/profile.tsx + ShaperBoardsGrid.
+  const [boardName, setBoardName] = useState('');
+  const [boardType, setBoardType] = useState<string | undefined>(undefined);
+  const [boardDimensions, setBoardDimensions] = useState('');
+  const [boardDescription, setBoardDescription] = useState('');
+  const [createMyBoard] = useCreateMyBoardMutation();
+  const [createMyBoardPhotos] = useCreateMyBoardPhotosMutation();
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -151,10 +169,74 @@ export default function CreateSessionScreen() {
   const clearFiles = useCallback(() => setFiles([]), []);
 
   // Validate
-  const canSubmit = sessionName.trim() && selectedBreak && files.length > 0 && !isSubmitting;
+  const canSubmit = isShaper
+    ? !!boardName.trim() && !isSubmitting
+    : !!sessionName.trim() && !!selectedBreak && files.length > 0 && !isSubmitting;
+
+  // Shaper-only board create flow. Uses the same `files` state populated by
+  // the existing photo picker — board photos are public-read so we can PUT
+  // straight to S3 via presigned URLs without OPFS staging.
+  const handleCreateBoard = useCallback(async () => {
+    if (!boardName.trim()) {
+      Alert.alert('Name required', 'Please enter a board name.');
+      return;
+    }
+    if (!requireAuth()) return;
+    setIsSubmitting(true);
+    try {
+      const boardRes = await createMyBoard({
+        name: boardName.trim(),
+        board_type: boardType ?? null,
+        dimensions: boardDimensions.trim() || null,
+        description: boardDescription.trim() || null,
+        is_featured: false,
+      }).unwrap();
+      const boardId = boardRes?.results?.boardId;
+      if (!boardId) throw new Error('Missing boardId in response');
+
+      if (files.length) {
+        const presigned = await createMyBoardPhotos({
+          boardId,
+          payload: {
+            files: files.map((f) => ({
+              file_uuid: generateUUID(),
+              file_type: f.type || 'image/jpeg',
+            })),
+          },
+        }).unwrap();
+        const photos = presigned?.results?.photos ?? [];
+        await Promise.all(
+          photos.map(async (p: any, i: number) => {
+            const f = files[i];
+            const blob = await (await fetch(f.uri)).blob();
+            await fetch(p.url, {
+              method: 'PUT',
+              headers: { 'Content-Type': f.type || 'image/jpeg' },
+              body: blob,
+            });
+          })
+        );
+      }
+
+      // Reset and let the user keep browsing while followers receive the
+      // newBoard notification server-side.
+      setBoardName('');
+      setBoardType(undefined);
+      setBoardDimensions('');
+      setBoardDescription('');
+      setFiles([]);
+      Alert.alert('Board created', `"${boardName.trim()}" is live.`);
+    } catch (err: any) {
+      Alert.alert('Create failed', err?.data?.message || err?.message || 'Try again');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [boardName, boardType, boardDimensions, boardDescription, files, requireAuth, createMyBoard, createMyBoardPhotos]);
 
   // Submit
   const handleCreateSession = useCallback(async () => {
+    // Shapers branch through the simpler board flow.
+    if (isShaper) return handleCreateBoard();
     if (!canSubmit) return;
     if (!requireAuth()) return;
 
@@ -263,18 +345,11 @@ export default function CreateSessionScreen() {
     );
   }
 
-  // Shapers go through the board-creation flow instead of session upload.
-  // Branch in JSX (not before hooks) so the rest of the component can keep
-  // its session hooks running unconditionally.
-  if ((user as any)?.user_type === 'shaper') {
-    return <UploadBoard />;
-  }
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>New Session</Text>
+        <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>{isShaper ? 'New Board' : 'New Session'}</Text>
         <Pressable
           onPress={handleCreateSession}
           disabled={!canSubmit}
@@ -289,7 +364,97 @@ export default function CreateSessionScreen() {
       </View>
 
       <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        {/* Session Name */}
+        {/* Board fields — shaper-only. */}
+        {isShaper && (
+          <>
+            <View style={styles.fieldWrap}>
+              <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Board Name</Text>
+              <TextInput
+                value={boardName}
+                onChangeText={setBoardName}
+                placeholder="The Salt Stick"
+                placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                maxLength={120}
+                style={[styles.textInput, {
+                  backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+                  color: isDark ? '#fff' : '#111827',
+                }]}
+              />
+            </View>
+
+            <View style={styles.fieldWrap}>
+              <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Type</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+                {[
+                  { label: 'Shortboard', value: 'shortboard' },
+                  { label: 'Longboard', value: 'longboard' },
+                  { label: 'Fish', value: 'fish' },
+                  { label: 'Midlength', value: 'midlength' },
+                  { label: 'Gun', value: 'gun' },
+                  { label: 'Foamie', value: 'foamie' },
+                  { label: 'Other', value: 'other' },
+                ].map((opt) => {
+                  const active = boardType === opt.value;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => setBoardType(active ? undefined : opt.value)}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 999,
+                        borderWidth: StyleSheet.hairlineWidth,
+                        backgroundColor: active ? '#0ea5e9' : (isDark ? '#1f2937' : '#f3f4f6'),
+                        borderColor: active ? '#0ea5e9' : (isDark ? '#374151' : '#e5e7eb'),
+                      }}
+                    >
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: active ? '#fff' : (isDark ? '#d1d5db' : '#374151') }}>
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            <View style={styles.fieldWrap}>
+              <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Dimensions</Text>
+              <TextInput
+                value={boardDimensions}
+                onChangeText={setBoardDimensions}
+                placeholder='5&apos;10" x 19" x 2 1/2"'
+                placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                maxLength={60}
+                style={[styles.textInput, {
+                  backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+                  color: isDark ? '#fff' : '#111827',
+                }]}
+              />
+            </View>
+
+            <View style={styles.fieldWrap}>
+              <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Description</Text>
+              <TextInput
+                value={boardDescription}
+                onChangeText={setBoardDescription}
+                placeholder="What this board is built for…"
+                placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                maxLength={500}
+                multiline
+                style={[styles.textInput, {
+                  height: 100,
+                  paddingVertical: 10,
+                  textAlignVertical: 'top',
+                  backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+                  color: isDark ? '#fff' : '#111827',
+                }]}
+              />
+            </View>
+          </>
+        )}
+
+        {/* Session Name — session-only. */}
+        {!isShaper && (
         <View style={styles.fieldWrap}>
           <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Session Name</Text>
           <TextInput
@@ -303,8 +468,10 @@ export default function CreateSessionScreen() {
             }]}
           />
         </View>
+        )}
 
-        {/* Surf Break */}
+        {/* Surf Break + Date + Hide Location + Notify Followers — session-only. */}
+        {!isShaper && (<>
         <View style={styles.fieldWrap}>
           <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151' }]}>Surf Break</Text>
           {selectedBreak ? (
@@ -375,6 +542,7 @@ export default function CreateSessionScreen() {
             trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
           />
         </View>
+        </>)}
 
         {/* Photos */}
         <View style={styles.fieldWrap}>

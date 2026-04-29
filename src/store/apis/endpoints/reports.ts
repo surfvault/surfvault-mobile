@@ -61,6 +61,15 @@ const reportsApi = rootApi.injectEndpoints({
         body: { sessionId, viewerHash },
       }),
     }),
+    createBoardViewReport: builder.mutation({
+      // No invalidate — view counts on the gallery refetch on their own
+      // cadence and stale-by-a-second is fine.
+      query: ({ boardId, viewerHash }: { boardId: string; viewerHash: string }) => ({
+        url: '/reports/board-view',
+        method: 'POST',
+        body: { boardId, viewerHash },
+      }),
+    }),
     createSurfSessionBooking: builder.mutation({
       invalidatesTags: [ApiTag.Reports],
       query: ({
@@ -91,6 +100,7 @@ const reportsApi = rootApi.injectEndpoints({
 });
 
 export const {
+  useCreateBoardViewReportMutation,
   useCreateSurfSessionViewReportMutation,
   useGetLifetimeVaultStatisticsQuery,
   useGetSurfSessionViewsQuery,
