@@ -38,6 +38,7 @@ import {
 import { useTabBar } from '../../src/context/TabBarContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
 import SessionCard from '../../src/components/SessionCard';
+import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
@@ -61,6 +62,17 @@ export default function ProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
+
+  // Shapers don't have surf sessions or break favorites in the same way —
+  // grid/list show their boards instead, and the favorites tab is hidden
+  // entirely. Tagged is still shown (shapers can be tagged in others' photos).
+  const isShaperSelf = user?.user_type === 'shaper';
+
+  // Bounce off the favorites tab if a shaper somehow lands on it (e.g. they
+  // were a photographer when the tab was last selected, then converted).
+  useEffect(() => {
+    if (isShaperSelf && activeTab === 'favorites') setActiveTab('grid');
+  }, [isShaperSelf, activeTab]);
 
   // Session long-press action sheet
   const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
@@ -234,7 +246,7 @@ export default function ProfileScreen() {
 
   const { data: sessionsData, isFetching, refetch: refetchSessions } = useGetUserSessionsQuery(
     { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken },
-    { skip: !user?.handle }
+    { skip: !user?.handle || isShaperSelf }
   );
 
   // Tagged-in sessions (separate paginated list)
@@ -548,9 +560,11 @@ export default function ProfileScreen() {
         <Pressable onPress={() => setActiveTab('tagged')} style={[s.tabBtn, activeTab === 'tagged' && s.tabBtnActive]}>
           <Ionicons name={activeTab === 'tagged' ? 'pricetag' : 'pricetag-outline'} size={20} color={activeTab === 'tagged' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
-        <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
-          <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? '#ef4444' : (isDark ? '#6b7280' : '#9ca3af')} />
-        </Pressable>
+        {!isShaperSelf && (
+          <Pressable onPress={() => setActiveTab('favorites')} style={[s.tabBtn, activeTab === 'favorites' && s.tabBtnActive]}>
+            <Ionicons name={activeTab === 'favorites' ? 'heart' : 'heart-outline'} size={22} color={activeTab === 'favorites' ? '#ef4444' : (isDark ? '#6b7280' : '#9ca3af')} />
+          </Pressable>
+        )}
       </View>
     </>
   );
@@ -581,6 +595,25 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {isShaperSelf && (activeTab === 'grid' || activeTab === 'list') ? (
+        // Shaper grid/list shows boards instead of sessions. Wrap the regular
+        // listHeader (ProfileHeader + tab bar) in a ScrollView and render
+        // ShaperBoardsGrid below — RTK Query dedupes the boards fetch across
+        // tab toggles, so switching grid↔list doesn't re-fetch.
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {listHeader}
+          {user?.handle ? (
+            <ShaperBoardsGrid handle={user.handle} mode={activeTab} isSelf />
+          ) : null}
+        </ScrollView>
+      ) : (
       <FlatList
         data={
           activeTab === 'favorites' ? favorites
@@ -753,6 +786,7 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}
       />
+      )}
 
       {/* Status note editor */}
       {showNoteEditor && (

@@ -26,7 +26,8 @@ import {
   useGetMapSearchContentQuery,
   useGetPopularTagsQuery,
   useGetAdsQuery,
-  useGetFeaturedShaperBoardsNearQuery,
+  useGetBoardroomShapersQuery,
+  useGetShapersFromFollowingQuery,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
@@ -78,6 +79,25 @@ export default function HomeScreen() {
   const coords = useSelector((state: any) => state.location.coordinates);
   // Also request on first home visit if the user never opened the map tab
   const { lat: userLat, lon: userLon, hasCoords } = useUserCoords();
+
+  // Shaper feed anchors on the user's home break first (custom shapers are
+  // bought near where you surf, not where you stand) and falls back to device
+  // GPS — same logic as BoardroomFeed. Without this fallback, users who have
+  // a home break but no GPS permission would see an empty shaper stream on
+  // Discover even though Boardroom shows them just fine.
+  const breakCoords = (user?.surf_break_coordinates ?? null) as
+    | { lat?: number | string; lon?: number | string }
+    | null;
+  const parseCoord = (v: unknown): number | null => {
+    if (v == null) return null;
+    const n = typeof v === 'number' ? v : parseFloat(String(v));
+    return Number.isFinite(n) ? n : null;
+  };
+  const breakLat = parseCoord(breakCoords?.lat);
+  const breakLon = parseCoord(breakCoords?.lon);
+  const shaperLat = breakLat ?? userLat;
+  const shaperLon = breakLon ?? userLon;
+  const hasShaperCoords = shaperLat != null && shaperLon != null;
 
   // ---- Viewability tracking ----
   // Until the first non-empty viewability report arrives, treat every card as
@@ -296,23 +316,32 @@ export default function HomeScreen() {
     lon: hasCoords && userLon != null ? userLon : undefined,
     limit: 10,
   });
-  const { data: shaperBoardsData } = useGetFeaturedShaperBoardsNearQuery(
-    { lat: userLat as number, lon: userLon as number, limit: 10 },
-    { skip: !hasCoords || userLat == null || userLon == null }
+  // Discover: nearby shapers (anyone, sorted by distance).
+  // Following: shapers the user follows (filtered server-side).
+  // Favorites + Boardroom don't include shapers in the interleave today.
+  const { data: nearbyShapersData } = useGetBoardroomShapersQuery(
+    { lat: shaperLat as number, lon: shaperLon as number, limit: 10 },
+    { skip: !hasShaperCoords || feedType !== 'discover' }
+  );
+  const { data: followedShapersData } = useGetShapersFromFollowingQuery(
+    { lat: shaperLat as number, lon: shaperLon as number, limit: 10 },
+    { skip: !hasShaperCoords || !user?.id || feedType !== 'following' }
   );
 
-  // Combine paid ads + editorial shaper boards into a single promo stream the
-  // interleave helper can pace evenly. Each entry is tagged so the feed
-  // renderer can pick the right card component (ShaperFeedCard vs SponsoredCard).
+  // Pick the active shaper stream by feedType. Combined into a single promo
+  // pool with paid ads — one slot per shaper (featured boards swipe inside
+  // the card) so a prolific shaper can't dominate. Sessions still drive the
+  // cadence (one promo per AD_EVERY_N_ITEMS items).
   const feedAds = useMemo(() => {
     const ads = (adsData?.results?.ads || []).map((a: any) => ({ ...a, _kind: 'ad' as const }));
-    const shapers = (shaperBoardsData?.results?.boards || []).map((b: any) => ({
-      ...b,
-      id: b.board_id,
+    const activeShapersData =
+      feedType === 'following' ? followedShapersData : nearbyShapersData;
+    const shapers = (activeShapersData?.results?.shapers || []).map((s: any) => ({
+      ...s,
       _kind: 'shaper' as const,
     }));
     return [...shapers, ...ads];
-  }, [adsData, shaperBoardsData]);
+  }, [adsData, nearbyShapersData, followedShapersData, feedType]);
 
   // Interleave ads + shaper boards using the shared cadence — matches web so
   // both platforms render promo content at the same feed positions.
@@ -702,11 +731,12 @@ export default function HomeScreen() {
             const viewable = !hasViewabilityReport || viewableIds.has(row.key);
             if (row.type === 'ad') {
               // Mixed promo stream — first entry's _kind picks the renderer.
-              // Shaper boards render as a single ShaperFeedCard (no carousel
-              // grouping), ads as a SponsoredCard partner-group carousel.
+              // Shapers render as a single ShaperFeedCard (one card per
+              // shaper, with their featured boards swipeable inside);
+              // ads render as a SponsoredCard partner-group carousel.
               const first = row.data[0];
               if (first?._kind === 'shaper') {
-                return <ShaperFeedCard board={first} />;
+                return <ShaperFeedCard shaper={first} />;
               }
               return (
                 <SponsoredCard

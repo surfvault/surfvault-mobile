@@ -59,8 +59,11 @@ export default function OnboardingScreen() {
   const [handleError, setHandleError] = useState('');
 
   // Type step
-  const [userType, setUserType] = useState<'surfer' | 'photographer' | null>(null);
+  const [userType, setUserType] = useState<'surfer' | 'photographer' | 'shaper' | null>(null);
   const [isPublic, setIsPublic] = useState(true);
+  // Shapers are always public — they're discoverable content. The toggle is
+  // hidden when shaper is picked, and we force-send isPublic: true.
+  const isShaper = userType === 'shaper';
 
   // Picture step
   const [profilePicUri, setProfilePicUri] = useState<string | null>(null);
@@ -99,7 +102,10 @@ export default function OnboardingScreen() {
   const onSubmitType = useCallback(async () => {
     if (!userType) return;
     try {
-      await updateType({ type: userType, isPublic }).unwrap();
+      // Shapers are forced public regardless of the toggle's last value
+      // (the backend also enforces this — belt + suspenders).
+      const effectiveIsPublic = userType === 'shaper' ? true : isPublic;
+      await updateType({ type: userType, isPublic: effectiveIsPublic }).unwrap();
       setStep('picture');
     } catch {
       Alert.alert('Error', 'Failed to save. Please try again.');
@@ -287,41 +293,72 @@ export default function OnboardingScreen() {
             </View>
           </Pressable>
 
-          <Text style={[s.sectionLabel, { color: textColor, marginTop: 24 }]}>Profile visibility</Text>
+          <Pressable
+            onPress={() => setUserType('shaper')}
+            style={[
+              s.optionCard,
+              { backgroundColor: cardBg, borderColor: userType === 'shaper' ? '#0ea5e9' : cardBorder },
+              userType === 'shaper' && s.optionCardSelected,
+            ]}
+          >
+            <View style={s.optionRow}>
+              <View style={[s.optionIconWrap, { backgroundColor: userType === 'shaper' ? '#e0f2fe' : (isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9') }]}>
+                <MaterialCommunityIcons name="hammer-wrench" size={24} color={userType === 'shaper' ? '#0ea5e9' : mutedColor} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.optionTitle, { color: textColor }]}>Shaper</Text>
+                <Text style={[s.optionDescription, { color: mutedColor }]}>
+                  Showcase the boards I build to nearby surfers
+                </Text>
+              </View>
+              {userType === 'shaper' && <Ionicons name="checkmark-circle" size={22} color="#0ea5e9" />}
+            </View>
+          </Pressable>
 
-          <View style={s.toggleRow}>
-            <Pressable
-              onPress={() => setIsPublic(true)}
-              style={[
-                s.toggleBtn,
-                {
-                  backgroundColor: isPublic ? '#0ea5e9' : inputBg,
-                },
-              ]}
-            >
-              <View style={s.toggleInner}>
-                <Ionicons name="globe-outline" size={16} color={isPublic ? '#fff' : mutedColor} />
-                <Text style={[s.toggleText, { color: isPublic ? '#fff' : textColor }]}>Public</Text>
-              </View>
-            </Pressable>
-            <Pressable
-              onPress={() => setIsPublic(false)}
-              style={[
-                s.toggleBtn,
-                {
-                  backgroundColor: !isPublic ? '#0ea5e9' : inputBg,
-                },
-              ]}
-            >
-              <View style={s.toggleInner}>
-                <Ionicons name="lock-closed-outline" size={16} color={!isPublic ? '#fff' : mutedColor} />
-                <Text style={[s.toggleText, { color: !isPublic ? '#fff' : textColor }]}>Private</Text>
-              </View>
-            </Pressable>
-          </View>
+          {/* Shaper profiles are always public — Boardroom + Discover need
+              them visible to be useful. Hide the toggle entirely when shaper
+              is selected and surface a short hint instead. */}
+          {!isShaper && (
+            <Text style={[s.sectionLabel, { color: textColor, marginTop: 24 }]}>Profile visibility</Text>
+          )}
+
+          {!isShaper && (
+            <View style={s.toggleRow}>
+              <Pressable
+                onPress={() => setIsPublic(true)}
+                style={[
+                  s.toggleBtn,
+                  {
+                    backgroundColor: isPublic ? '#0ea5e9' : inputBg,
+                  },
+                ]}
+              >
+                <View style={s.toggleInner}>
+                  <Ionicons name="globe-outline" size={16} color={isPublic ? '#fff' : mutedColor} />
+                  <Text style={[s.toggleText, { color: isPublic ? '#fff' : textColor }]}>Public</Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => setIsPublic(false)}
+                style={[
+                  s.toggleBtn,
+                  {
+                    backgroundColor: !isPublic ? '#0ea5e9' : inputBg,
+                  },
+                ]}
+              >
+                <View style={s.toggleInner}>
+                  <Ionicons name="lock-closed-outline" size={16} color={!isPublic ? '#fff' : mutedColor} />
+                  <Text style={[s.toggleText, { color: !isPublic ? '#fff' : textColor }]}>Private</Text>
+                </View>
+              </Pressable>
+            </View>
+          )}
 
           <Text style={[s.hintText, { color: mutedColor, marginTop: 8 }]}>
-            {isPublic
+            {isShaper
+              ? 'Shaper profiles are always public so nearby surfers can find your boards in Discover and Boardroom.'
+              : isPublic
               ? 'Your sessions will be visible to everyone. You can still hide the location of individual sessions if you wish.'
               : 'Your profile is still discoverable, but users must request access to view your sessions and photos.'}
           </Text>

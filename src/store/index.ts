@@ -35,6 +35,12 @@ export {
   useGetBoardroomShapersQuery,
   useGetFeaturedShaperBoardsNearQuery,
   useGetShaperBoardsQuery,
+  useGetShapersFromFollowingQuery,
+  useCreateMyBoardMutation,
+  useUpdateMyBoardMutation,
+  useDeleteMyBoardMutation,
+  useCreateMyBoardPhotosMutation,
+  useDeleteMyBoardPhotoMutation,
 } from './apis/endpoints/boardroom';
 export type {
   BoardroomShaper,

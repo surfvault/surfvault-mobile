@@ -87,6 +87,58 @@ const boardroomApi = rootApi.injectEndpoints({
         method: 'GET',
       }),
     }),
+    /** Shapers the caller follows, with their featured boards inlined.
+     * Used in the Following feed — ONE slot per shaper (their featured
+     * boards swipe inside the card) so a prolific shaper can't dominate. */
+    getShapersFromFollowing: builder.query<
+      { results: { shapers: BoardroomShaper[] } },
+      { lat: number; lon: number; limit?: number }
+    >({
+      providesTags: [ApiTag.Boardroom, ApiTag.Follow],
+      query: ({ lat, lon, limit = 30 }) => ({
+        url: `/shapers/from-following?lat=${lat}&lon=${lon}&limit=${limit}`,
+        method: 'GET',
+      }),
+    }),
+
+    // ---- Self-service mutations (shaper manages own boards) ----
+
+    createMyBoard: builder.mutation<
+      { results: { success: boolean; boardId: string; shaperId: string } },
+      { name: string; board_type?: string | null; dimensions?: string | null; description?: string | null; is_featured?: boolean }
+    >({
+      invalidatesTags: [ApiTag.Boardroom],
+      query: (payload) => ({ url: `/boards`, method: 'POST', body: payload }),
+    }),
+    updateMyBoard: builder.mutation<
+      { results: { success: boolean; boardId: string } },
+      { boardId: string; payload: Record<string, any> }
+    >({
+      invalidatesTags: [ApiTag.Boardroom],
+      query: ({ boardId, payload }) => ({ url: `/boards/${boardId}`, method: 'PATCH', body: payload }),
+    }),
+    deleteMyBoard: builder.mutation<
+      { results: { success: boolean; boardId: string } },
+      { boardId: string }
+    >({
+      invalidatesTags: [ApiTag.Boardroom],
+      query: ({ boardId }) => ({ url: `/boards/${boardId}`, method: 'DELETE' }),
+    }),
+    // Intentionally NO invalidatesTags — same race-with-S3-PUT reason as
+    // admin's createBoardPhotos. Caller refetches manually after PUTs land.
+    createMyBoardPhotos: builder.mutation<
+      { results: { photos: Array<{ id: string; file_uuid: string; s3_key: string; url: string; media_url: string; sort_order: number }> } },
+      { boardId: string; payload: { files: Array<{ file_uuid: string; file_type: string }> } }
+    >({
+      query: ({ boardId, payload }) => ({ url: `/boards/${boardId}/photos`, method: 'POST', body: payload }),
+    }),
+    deleteMyBoardPhoto: builder.mutation<
+      { results: { success: boolean; photoId: string } },
+      { photoId: string }
+    >({
+      invalidatesTags: [ApiTag.Boardroom],
+      query: ({ photoId }) => ({ url: `/board-photos/${photoId}`, method: 'DELETE' }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -95,5 +147,11 @@ export const {
   useGetBoardroomShapersQuery,
   useGetFeaturedShaperBoardsNearQuery,
   useGetShaperBoardsQuery,
+  useGetShapersFromFollowingQuery,
+  useCreateMyBoardMutation,
+  useUpdateMyBoardMutation,
+  useDeleteMyBoardMutation,
+  useCreateMyBoardPhotosMutation,
+  useDeleteMyBoardPhotoMutation,
 } = boardroomApi;
 export { boardroomApi };

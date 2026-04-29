@@ -112,7 +112,9 @@ function TabsInner() {
       <Tabs.Screen
         name="upload"
         options={{
-          title: 'Session',
+          // Center tab is the "make new content" affordance. Surfers/photographers
+          // upload Sessions; Shapers upload Boards. Same `+` glyph, different label.
+          title: (user as any)?.user_type === 'shaper' ? 'Board' : 'Session',
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'add-circle' : 'add-circle-outline'} size={size + 2} color={color} />
           ),

@@ -31,6 +31,7 @@ import {
   useSaveSurfMediaMutation,
 } from '../../src/store';
 import { useUpload } from '../../src/context/UploadContext';
+import UploadBoard from '../../src/components/UploadBoard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PREVIEW_SIZE = (SCREEN_WIDTH - 48 - 8) / 4; // 4 columns with gaps
@@ -260,6 +261,13 @@ export default function CreateSessionScreen() {
         </View>
       </SafeAreaView>
     );
+  }
+
+  // Shapers go through the board-creation flow instead of session upload.
+  // Branch in JSX (not before hooks) so the rest of the component can keep
+  // its session hooks running unconditionally.
+  if ((user as any)?.user_type === 'shaper') {
+    return <UploadBoard />;
   }
 
   return (

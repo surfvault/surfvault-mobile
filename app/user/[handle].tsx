@@ -247,15 +247,31 @@ export default function UserProfileScreen() {
           <UserSkeleton />
         ) : profile?.user_type === 'shaper' ? (
           // Shapers don't have surf sessions — render their board gallery
-          // (using the new boards/board_photos schema) instead. Profile header
-          // stays the same; tabs are skipped since boards are the only content.
+          // (using the new boards/board_photos schema). Grid/List tabs share
+          // the same activeTab state used for non-shaper profiles since
+          // both modes are 'grid' | 'list'. Tagged is intentionally skipped
+          // here — it's only on the self-profile tab page (per spec).
           <FlatList
             data={[1] as const}
             keyExtractor={() => 'shaper-content'}
-            renderItem={() => <ShaperBoardsGrid handle={handle ?? ''} />}
+            renderItem={() => (
+              <ShaperBoardsGrid
+                handle={handle ?? ''}
+                mode={activeTab}
+                isSelf={!!currentUser?.handle && handle === currentUser.handle}
+              />
+            )}
             ListHeaderComponent={
               <>
                 <UserProfileHeader />
+                <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+                  <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                  <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                </View>
               </>
             }
             showsVerticalScrollIndicator={false}
