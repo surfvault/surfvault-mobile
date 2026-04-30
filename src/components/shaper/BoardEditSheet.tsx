@@ -19,7 +19,11 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useUpdateMyBoardMutation, type Board } from '../../store';
 import { useKeyboardVisible } from '../../hooks/useKeyboardVisible';
 
-const MAX_FEATURED_BOARDS = 3;
+// Keep in lockstep with `MAX_FEATURED_BOARDS_PER_SHAPER` in
+// surfvault-api/services/boards/handler.ts. Carousels in Boardroom +
+// Discover show up to 9 board slides before the trailing "View Shaper's
+// Bay" CTA — so a shaper can fill every slot before the CTA.
+const MAX_FEATURED_BOARDS = 9;
 
 const BOARD_TYPE_OPTIONS = [
   { label: 'Shortboard', value: 'shortboard' },

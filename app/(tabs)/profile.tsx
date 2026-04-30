@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useNavigation } from 'expo-router';
+import { useDispatch } from 'react-redux';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,8 @@ import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 import {
   useGetUserQuery,
   useGetUserSessionsQuery,
+  ApiTag,
+  rootApi,
   useGetUserFavoritesQuery,
   useGetSurfBreaksQuery,
   useUpdateUserMetaDataMutation,
@@ -52,6 +55,7 @@ const formatCount = (n: number): string => {
 export default function ProfileScreen() {
   const router = useRouter();
   const trackedPush = useTrackedPush();
+  const dispatch = useDispatch();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
@@ -260,12 +264,16 @@ export default function ProfileScreen() {
     if (activeTab === 'tagged') {
       setTaggedToken('');
       await refetchTagged();
+    } else if (isShaperSelf && (activeTab === 'grid' || activeTab === 'list')) {
+      // Shapers don't have sessions to refetch — bust the boards cache so
+      // ShaperBoardsGrid's getShaperBoards query refires.
+      dispatch(rootApi.util.invalidateTags([ApiTag.Boardroom]));
     } else {
       setContinuationToken('');
       await refetchSessions();
     }
     setRefreshing(false);
-  }, [activeTab, refetchSessions, refetchTagged]);
+  }, [activeTab, isShaperSelf, refetchSessions, refetchTagged, dispatch]);
 
   // Reset sessions list when the current user changes (logout/login/switch user)
   useEffect(() => {

@@ -26,7 +26,7 @@ import {
   useGetMapSearchContentQuery,
   useGetPopularTagsQuery,
   useGetAdsQuery,
-  useGetBoardroomShapersQuery,
+  useGetLatestShapersQuery,
   useGetShapersFromFollowingQuery,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
@@ -316,16 +316,19 @@ export default function HomeScreen() {
     lon: hasCoords && userLon != null ? userLon : undefined,
     limit: 10,
   });
-  // Discover: nearby shapers (anyone, sorted by distance).
-  // Following: shapers the user follows (filtered server-side).
-  // Favorites + Boardroom don't include shapers in the interleave today.
-  const { data: nearbyShapersData } = useGetBoardroomShapersQuery(
-    { lat: shaperLat as number, lon: shaperLon as number, limit: 10 },
-    { skip: !hasShaperCoords || feedType !== 'discover' }
+  // Discover: latest shapers (anyone, sorted by latest featured-board
+  // activity — the freshest upload bubbles to the top).
+  // Following: shapers the viewer follows, same activity-based sort.
+  // Favorites + Boardroom don't include shapers in this interleave.
+  // No lat/lon plumbing — shaper location comes from `users.surf_break_id`
+  // server-side now, not from device GPS.
+  const { data: nearbyShapersData } = useGetLatestShapersQuery(
+    { limit: 10 },
+    { skip: feedType !== 'discover' }
   );
   const { data: followedShapersData } = useGetShapersFromFollowingQuery(
-    { lat: shaperLat as number, lon: shaperLon as number, limit: 10 },
-    { skip: !hasShaperCoords || !user?.id || feedType !== 'following' }
+    { limit: 10 },
+    { skip: !user?.id || feedType !== 'following' }
   );
 
   // Pick the active shaper stream by feedType. Combined into a single promo

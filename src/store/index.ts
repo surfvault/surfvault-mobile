@@ -19,6 +19,9 @@ setupListeners(store.dispatch);
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
 
+export { rootApi } from './apis/rootApi';
+export { ApiTag } from './apis/rootApi';
+
 // Re-export all hooks from endpoints
 export {
   useGetConversationsQuery,
@@ -33,19 +36,23 @@ export { useGetCountriesQuery } from './apis/endpoints/country';
 
 export {
   useGetBoardroomShapersQuery,
-  useGetFeaturedShaperBoardsNearQuery,
+  useGetLatestShapersQuery,
+  useGetShapersForSurfBreakQuery,
   useGetShaperBoardsQuery,
   useGetShapersFromFollowingQuery,
+  useGetBoardQuery,
   useCreateMyBoardMutation,
   useUpdateMyBoardMutation,
   useDeleteMyBoardMutation,
   useCreateMyBoardPhotosMutation,
   useDeleteMyBoardPhotoMutation,
+  useUpdateBoardThumbnailMutation,
+  useReportBoardMutation,
 } from './apis/endpoints/boardroom';
 export type {
   BoardroomShaper,
-  FeaturedShaperBoard,
   Board,
+  BoardDetail,
   BoardPhoto,
 } from './apis/endpoints/boardroom';
 

@@ -14,48 +14,40 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import { useDispatch } from 'react-redux';
 import {
   useGetBoardroomShapersQuery,
   type BoardroomShaper,
   type Board,
 } from '../store';
 import { useUser } from '../context/UserProvider';
-import { useUserCoords } from '../hooks/useUserCoords';
-import { setCoordinates } from '../store/slices/location';
 import { useTrackedPush } from '../context/NavigationContext';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetSection } from './ActionSheet';
+import { pickThumbnailPhoto } from './ShaperBoardsGrid';
 
-const MAX_INLINE_SLIDES = 6;
+// Cap matches the backend featured-board limit (9). The trailing "Shaper
+// Bay" CTA slide is a permanent fixture (not an overflow indicator) so the
+// path back to the shaper's profile is always one swipe past the last
+// board. A shaper with 9 featured boards renders 10 slides total.
+const MAX_INLINE_SLIDES = 9;
 
 type Props = {
   isDark: boolean;
 };
 
 export default function BoardroomFeed({ isDark }: Props) {
-  const dispatch = useDispatch();
   const { user } = useUser();
-  const { lat: deviceLat, lon: deviceLon } = useUserCoords();
 
-  // Anchor to the user's home surf break — custom shapers are bought near
-  // where you surf, not where you happen to be standing.
-  const breakCoords = (user?.surf_break_coordinates ?? null) as
-    | { lat?: number | string; lon?: number | string }
-    | null;
-  const parseCoord = (v: unknown): number | null => {
-    if (v == null) return null;
-    const n = typeof v === 'number' ? v : parseFloat(String(v));
-    return Number.isFinite(n) ? n : null;
-  };
-  const breakLat = parseCoord(breakCoords?.lat);
-  const breakLon = parseCoord(breakCoords?.lon);
-
-  const lat = breakLat ?? deviceLat;
-  const lon = breakLon ?? deviceLon;
-  const hasCoords = lat != null && lon != null;
+  // Anchor to the viewer's home surf break (`users.surf_break_id`). The
+  // server resolves it to lat/lon and sorts shapers by distance, NULLS LAST
+  // so shapers without a break show up at the bottom. When the viewer hasn't
+  // set a home break (or isn't logged in), the server falls back to the
+  // latest-activity sort — same as the Discover feed.
+  const viewerSurfBreakId =
+    typeof (user as any)?.surf_break_id === 'string'
+      ? ((user as any).surf_break_id as string)
+      : null;
 
   const breakName =
     typeof user?.surf_break_name === 'string' ? (user.surf_break_name as string) : null;
@@ -63,15 +55,13 @@ export default function BoardroomFeed({ isDark }: Props) {
     typeof user?.surf_break_region === 'string' ? (user.surf_break_region as string) : null;
   const breakCountry =
     typeof user?.surf_break_country === 'string' ? (user.surf_break_country as string) : null;
-  const usingBreak = breakLat != null && breakLon != null && !!breakName;
-  const breakSubtitle = usingBreak
+  const breakSubtitle = breakName
     ? [breakName, breakRegion?.replaceAll('_', ' '), breakCountry].filter(Boolean).join(' · ')
     : null;
 
-  const { data, isLoading, isFetching, refetch } = useGetBoardroomShapersQuery(
-    { lat: lat as number, lon: lon as number },
-    { skip: !hasCoords }
-  );
+  const { data, isLoading, isFetching, refetch } = useGetBoardroomShapersQuery({
+    viewerSurfBreakId,
+  });
 
   const shapers = useMemo<BoardroomShaper[]>(
     () => data?.results?.shapers ?? [],
@@ -80,61 +70,10 @@ export default function BoardroomFeed({ isDark }: Props) {
 
   const [refreshing, setRefreshing] = useState(false);
   const handleRefresh = useCallback(async () => {
-    if (!hasCoords) return;
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
-  }, [hasCoords, refetch]);
-
-  const handleEnableLocation = useCallback(async () => {
-    try {
-      const existing = await Location.getForegroundPermissionsAsync();
-      let status = existing.status;
-      if (status !== 'granted' && existing.canAskAgain) {
-        const req = await Location.requestForegroundPermissionsAsync();
-        status = req.status;
-      }
-      if (status !== 'granted') return;
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      dispatch(
-        setCoordinates({ lat: loc.coords.latitude, lon: loc.coords.longitude })
-      );
-    } catch {
-      /* noop */
-    }
-  }, [dispatch]);
-
-  if (!hasCoords) {
-    return (
-      <ScrollView
-        contentContainerStyle={styles.centerWrap}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={() => {}} />}
-      >
-        <View style={[styles.iconWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-          <MaterialCommunityIcons
-            name="map-marker-radius-outline"
-            size={36}
-            color={isDark ? '#9ca3af' : '#6b7280'}
-          />
-        </View>
-        <Text style={[styles.title, { color: isDark ? '#fff' : '#111827' }]}>
-          Find local shapers
-        </Text>
-        <Text style={[styles.body, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-          Boardroom uses your location to surface custom surfboard shapers in your area.
-        </Text>
-        <Pressable
-          onPress={handleEnableLocation}
-          style={[styles.cta, { backgroundColor: isDark ? '#0ea5e9' : '#0284c7' }]}
-        >
-          <Ionicons name="location-outline" size={16} color="#fff" />
-          <Text style={styles.ctaText}>Use my location</Text>
-        </Pressable>
-      </ScrollView>
-    );
-  }
+  }, [refetch]);
 
   if (isLoading) {
     return (
@@ -158,7 +97,7 @@ export default function BoardroomFeed({ isDark }: Props) {
           />
         </View>
         <Text style={[styles.title, { color: isDark ? '#fff' : '#111827' }]}>
-          No shapers nearby
+          {viewerSurfBreakId ? 'No shapers nearby' : 'No shapers yet'}
         </Text>
         {breakSubtitle ? (
           <View
@@ -181,7 +120,9 @@ export default function BoardroomFeed({ isDark }: Props) {
           </View>
         ) : null}
         <Text style={[styles.body, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-          We don't have any custom shapers listed in your area yet. Check back soon — we're adding more all the time.
+          {viewerSurfBreakId
+            ? "We don't have any custom shapers listed in your area yet. Check back soon — we're adding more all the time."
+            : 'Set a home break in your profile to see shapers near you. Until then, this feed shows the latest uploads.'}
         </Text>
       </ScrollView>
     );
@@ -216,13 +157,13 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
   const [activeIdx, setActiveIdx] = useState(0);
   const [sheetVisible, setSheetVisible] = useState(false);
 
-  // One slide per featured BOARD (showing its first photo). Multi-photo
-  // browsing happens on the shaper's profile gallery, not in the feed card.
+  // One slide per featured BOARD (showing its thumbnail), then ALWAYS a
+  // trailing "Shaper Bay" CTA slide. Multi-photo browsing happens on the
+  // shaper's profile gallery, not in the feed card.
   const slides: Slide[] = useMemo(() => {
-    const boards = shaper.featured_boards ?? [];
-    const visible = boards.slice(0, MAX_INLINE_SLIDES);
-    const items: Slide[] = visible.map((b) => ({ kind: 'board' as const, board: b }));
-    if (boards.length > MAX_INLINE_SLIDES) items.push({ kind: 'cta' });
+    const boards = (shaper.featured_boards ?? []).slice(0, MAX_INLINE_SLIDES);
+    const items: Slide[] = boards.map((b) => ({ kind: 'board' as const, board: b }));
+    if (boards.length > 0) items.push({ kind: 'cta' });
     return items;
   }, [shaper.featured_boards]);
 
@@ -305,7 +246,14 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
     }],
   });
 
-  const subtitle = `${formatDistance(shaper.distance_km)} away`;
+  // Subtitle priority:
+  //   1. Distance — when the viewer has a home break and the shaper has one too
+  //   2. Shaper's surf break name — when distance unavailable but break is set
+  //   3. Empty string — neither known (rare; backend usually populates one)
+  const subtitle =
+    shaper.distance_km != null
+      ? `${formatDistance(shaper.distance_km)} away`
+      : shaper.surf_break_name ?? '';
 
   return (
     <View style={styles.card} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -360,7 +308,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
                   </Pressable>
                 );
               }
-              const photoUri = getBoardPhotoUrl(item.board.photos[0]?.s3_key);
+              const photoUri = getBoardPhotoUrl(pickThumbnailPhoto(item.board)?.s3_key);
               return (
                 <Pressable onPress={openShaperProfile} style={{ width }}>
                   <SlideHero
@@ -404,7 +352,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
       ) : activeBoard ? (
         <Pressable onPress={openShaperProfile}>
           <SlideHero
-            uri={getBoardPhotoUrl(activeBoard.photos[0]?.s3_key)}
+            uri={getBoardPhotoUrl(pickThumbnailPhoto(activeBoard)?.s3_key)}
             boardName={activeBoard.name}
             isDark={isDark}
             width={width}
@@ -476,34 +424,74 @@ function SlideHero({
   );
 }
 
+// Shared "Shaper Bay" CTA. Mirrors `CtaSlide` in `ShaperFeedCard.tsx`
+// pixel-for-pixel — amber circle + tools icon + title + description + amber
+// "Open profile" pill — so the trailing-slide affordance reads identically
+// across Boardroom, mobile Discover, and web Discover. Kept as a sibling of
+// `CtaSlide` rather than imported because BoardroomFeed's hero has its own
+// 4:5 wrapper styles (`styles.thumb` + `styles.ctaTile`) that the Discover
+// version doesn't need.
 function CtaTile({ isDark, width }: { isDark: boolean; width: number }) {
   return (
     <View
       style={[
         styles.thumb,
-        styles.ctaTile,
-        { width, backgroundColor: isDark ? '#0b0b0b' : '#f3f4f6' },
+        {
+          width,
+          backgroundColor: isDark ? '#0b0b0b' : '#f8fafc',
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
       ]}
     >
-      <View style={[styles.ctaIconWrap, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
-        <Ionicons
-          name="grid-outline"
-          size={28}
-          color={isDark ? '#d1d5db' : '#374151'}
-        />
+      <View
+        style={{
+          width: 56,
+          height: 56,
+          borderRadius: 28,
+          backgroundColor: 'rgba(245, 158, 11, 0.18)',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <MaterialCommunityIcons name="hammer-wrench" size={24} color="#b45309" />
       </View>
-      <Text style={[styles.ctaTitle, { color: isDark ? '#fff' : '#111827' }]}>
-        See full lineup
+      <Text
+        style={{
+          marginTop: 14,
+          fontSize: 15,
+          fontWeight: '700',
+          color: isDark ? '#fff' : '#111827',
+        }}
+      >
+        Shaper Bay
       </Text>
-      <View style={styles.ctaHintRow}>
-        <Text style={[styles.ctaHint, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-          Tap to open
-        </Text>
-        <Ionicons
-          name="chevron-forward"
-          size={14}
-          color={isDark ? '#9ca3af' : '#6b7280'}
-        />
+      <Text
+        style={{
+          marginTop: 4,
+          fontSize: 12,
+          color: isDark ? '#9ca3af' : '#6b7280',
+          textAlign: 'center',
+          paddingHorizontal: 32,
+        }}
+        numberOfLines={2}
+      >
+        See the full board lineup, dimensions, and contact info.
+      </Text>
+      <View
+        style={{
+          marginTop: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 4,
+          paddingHorizontal: 14,
+          paddingVertical: 8,
+          borderRadius: 999,
+          backgroundColor: '#d97706',
+        }}
+      >
+        <Text style={{ color: '#fff', fontSize: 13, fontWeight: '600' }}>Open profile</Text>
+        <Ionicons name="chevron-forward" size={14} color="#fff" />
       </View>
     </View>
   );
@@ -554,20 +542,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
   },
-  cta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 999,
-    marginTop: 24,
-  },
-  ctaText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
   card: {
     marginBottom: 16,
   },
@@ -614,32 +588,6 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 5,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  ctaTile: {
-    gap: 10,
-    paddingHorizontal: 24,
-  },
-  ctaIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  ctaTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  ctaHintRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  ctaHint: {
-    fontSize: 13,
-    fontWeight: '500',
   },
   dotsRow: {
     flexDirection: 'row',

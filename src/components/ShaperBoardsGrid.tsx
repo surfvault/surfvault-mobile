@@ -6,31 +6,28 @@ import {
   StyleSheet,
   Dimensions,
   ActivityIndicator,
-  Modal,
   FlatList,
   Alert,
+  Platform,
+  Share,
   useColorScheme,
   type LayoutChangeEvent,
   type ViewToken,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import ImageViewing from 'react-native-image-viewing';
 import {
   useGetShaperBoardsQuery,
-  useCreateBoardViewReportMutation,
-  useCreateMyBoardPhotosMutation,
   useDeleteMyBoardMutation,
   type Board,
   type BoardPhoto,
 } from '../store';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
-import { getViewerHash } from '../helpers/viewerHash';
-import { useUser } from '../context/UserProvider';
+import { useTrackedPush } from '../context/NavigationContext';
+import { useRequireAuth } from '../hooks/useRequireAuth';
 import ActionSheet from './ActionSheet';
-import type { ActionSheetOption } from './ActionSheet';
-import BoardEditSheet from './shaper/BoardEditSheet';
+import type { ActionSheetSection } from './ActionSheet';
+import ReportBoardSheet from './ReportBoardSheet';
 
 // Match SessionCard's formatCount so badges read the same way.
 const formatCount = (n: number): string => {
@@ -70,82 +67,39 @@ export default function ShaperBoardsGrid({
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { data, isLoading, isError, refetch } = useGetShaperBoardsQuery({ handle });
+  const trackedPush = useTrackedPush();
+  const requireAuth = useRequireAuth();
 
   const boards = useMemo<Board[]>(() => data?.results?.boards ?? [], [data]);
-  const featuredCount = boards.filter((b) => b.is_featured).length;
-  const [viewerState, setViewerState] = useState<{ photos: BoardPhoto[]; index: number } | null>(null);
 
-  // Management state — only used when isSelf
+  // Quick-actions state. `actionTarget` is set for both self (Share +
+  // Delete) and non-self (Share + Report) — the section list in
+  // `actionSections` branches on `isSelf`. Edit / Add photos / View live
+  // on the dedicated board detail page; this sheet is intentionally slim.
+  // View tracking happens on the detail page mount, not here.
   const [actionTarget, setActionTarget] = useState<Board | null>(null);
-  const [editingBoard, setEditingBoard] = useState<Board | null>(null);
-  const [createMyBoardPhotos] = useCreateMyBoardPhotosMutation();
+  const [reportBoardId, setReportBoardId] = useState<string | null>(null);
   const [deleteMyBoard] = useDeleteMyBoardMutation();
-  const [reportBoardView] = useCreateBoardViewReportMutation();
-  const { user } = useUser();
 
-  // Dedup view reports per board within the current screen lifetime.
-  const reportedViewsRef = useRef<Set<string>>(new Set());
-
-  const openBoardLightbox = useCallback(async (board: Board, photoIndex: number) => {
-    if (!board.photos.length) return;
-    setViewerState({ photos: board.photos, index: photoIndex });
-
-    // Track the view (skip self-views, and only once per board per screen
-    // lifetime — same dedup pattern as session views).
-    if (isSelf) return;
-    if (reportedViewsRef.current.has(board.id)) return;
-    reportedViewsRef.current.add(board.id);
-    try {
-      const hash = await getViewerHash((user as any)?.id);
-      reportBoardView({ boardId: board.id, viewerHash: hash }).unwrap().catch(() => { /* fire-and-forget */ });
-    } catch { /* fire-and-forget */ }
-  }, [isSelf, user, reportBoardView]);
+  // Tap on a tile / list-mode photo opens the dedicated board detail page —
+  // SEO-friendly URL, board-level page-mount view tracking, parity with
+  // session detail. Index is currently ignored on the detail page (the page
+  // itself drives lightbox state) but reserved for future deep-linking.
+  const openBoardDetail = useCallback((board: Board, _photoIndex: number = 0) => {
+    if (!board?.id) return;
+    trackedPush(`/board/${board.id}` as any);
+  }, [trackedPush]);
 
   const openManageSheet = useCallback((board: Board) => {
     setActionTarget(board);
   }, []);
 
-  const handleAddPhotos = useCallback(async (board: Board) => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'SurfVault needs photo library access to upload board photos.');
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      quality: 0.85,
-    });
-    if (result.canceled) return;
+  const handleShareBoard = useCallback(async (board: Board) => {
+    const shareUrl = `https://app.surf-vault.com/${handle}/boards/${board.id}`;
     try {
-      const presigned = await createMyBoardPhotos({
-        boardId: board.id,
-        payload: {
-          files: result.assets.map((a) => ({
-            file_uuid: cryptoRandomUUID(),
-            file_type: a.mimeType ?? 'image/jpeg',
-          })),
-        },
-      }).unwrap();
-      const photos = presigned?.results?.photos ?? [];
-      await Promise.all(
-        photos.map(async (p: any, i: number) => {
-          const asset = result.assets[i];
-          const blob = await (await fetch(asset.uri)).blob();
-          await fetch(p.url, {
-            method: 'PUT',
-            headers: { 'Content-Type': asset.mimeType ?? 'image/jpeg' },
-            body: blob,
-          });
-        })
-      );
-      // Manual refetch only AFTER PUTs land — see admin.js note on why
-      // createBoardPhotos doesn't auto-invalidate.
-      refetch();
-    } catch (err: any) {
-      Alert.alert('Upload failed', err?.data?.message || err?.message || 'Try again');
-    }
-  }, [createMyBoardPhotos, refetch]);
+      await Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+    } catch { /* user cancelled */ }
+  }, [handle]);
 
   const handleDeleteBoard = useCallback((board: Board) => {
     Alert.alert(
@@ -168,40 +122,64 @@ export default function ShaperBoardsGrid({
     );
   }, [deleteMyBoard]);
 
-  const actionOptions: ActionSheetOption[] = useMemo(() => {
+  // Quick-actions sheet — long-press on the profile gallery is a *quick*
+  // entry point, NOT the full management surface. The board-detail page is
+  // where Edit / Add photos / View live; this sheet only exposes Share and
+  // (for owners) Delete. Each action gets its own section so the visual
+  // weight matches importance — "Delete board" should never share a row
+  // with the casual "Share" affordance.
+  const actionSections: ActionSheetSection[] = useMemo(() => {
     if (!actionTarget) return [];
     const board = actionTarget;
-    return [
+    const sections: ActionSheetSection[] = [
       {
-        label: 'Edit board',
-        icon: 'create-outline',
-        iconLibrary: 'ionicons',
-        onPress: () => {
-          setActionTarget(null);
-          setEditingBoard(board);
-        },
-      },
-      {
-        label: 'Add photos',
-        icon: 'images-outline',
-        iconLibrary: 'ionicons',
-        onPress: () => {
-          setActionTarget(null);
-          handleAddPhotos(board);
-        },
-      },
-      {
-        label: 'Delete board',
-        destructive: true,
-        icon: 'trash-outline',
-        iconLibrary: 'ionicons',
-        onPress: () => {
-          setActionTarget(null);
-          handleDeleteBoard(board);
-        },
+        options: [
+          {
+            label: 'Share',
+            icon: 'share-outline',
+            iconLibrary: 'ionicons',
+            onPress: () => {
+              setActionTarget(null);
+              handleShareBoard(board);
+            },
+          },
+        ],
       },
     ];
-  }, [actionTarget, handleAddPhotos, handleDeleteBoard]);
+    if (isSelf) {
+      sections.push({
+        options: [
+          {
+            label: 'Delete Board',
+            destructive: true,
+            icon: 'trash-outline',
+            iconLibrary: 'ionicons',
+            onPress: () => {
+              setActionTarget(null);
+              handleDeleteBoard(board);
+            },
+          },
+        ],
+      });
+    } else {
+      sections.push({
+        options: [
+          {
+            label: 'Report Board',
+            destructive: true,
+            icon: 'flag-outline',
+            iconLibrary: 'ionicons',
+            onPress: () => {
+              setActionTarget(null);
+              if (!requireAuth()) return;
+              setReportBoardId(board.id);
+            },
+          },
+        ],
+      });
+    }
+    return sections;
+  }, [actionTarget, isSelf, handleShareBoard, handleDeleteBoard, requireAuth]);
 
   if (isLoading) {
     return (
@@ -221,13 +199,6 @@ export default function ShaperBoardsGrid({
     );
   }
 
-  const lightboxImages = viewerState
-    ? viewerState.photos
-        .map((p) => getBoardPhotoUrl(p.s3_key))
-        .filter((u): u is string => !!u)
-        .map((uri) => ({ uri }))
-    : [];
-
   return (
     <View>
       {mode === 'list' ? (
@@ -237,7 +208,8 @@ export default function ShaperBoardsGrid({
               key={board.id}
               board={board}
               isDark={isDark}
-              onPhotoPress={(idx) => openBoardLightbox(board, idx)}
+              onPhotoPress={(idx) => openBoardDetail(board, idx)}
+              onLongPress={() => openManageSheet(board)}
               isSelf={isSelf}
               onManagePress={() => openManageSheet(board)}
             />
@@ -247,7 +219,10 @@ export default function ShaperBoardsGrid({
         <View style={styles.gridWrap}>
           {gridTiles(boards).map((t, idx) => {
             const photoCount = t.board.photos.length;
-            const viewCount = Number((t.board as any).view_count ?? 0);
+            // View count is owner-only — mirrors the session pattern. A
+            // visiting surfer doesn't need (or want) to see how many times
+            // a stranger's board has been viewed.
+            const viewCount = isSelf ? Number((t.board as any).view_count ?? 0) : 0;
             return (
               <View
                 key={t.board.id}
@@ -260,12 +235,12 @@ export default function ShaperBoardsGrid({
                 ]}
               >
                 <Pressable
-                  onPress={() => openBoardLightbox(t.board, 0)}
-                  // Long-press is the management entry point on grid tiles
-                  // (only meaningful for self — non-self viewers get nothing).
-                  // Replaces the explicit bottom-right ellipsis so tiles read
-                  // cleaner.
-                  onLongPress={isSelf ? () => openManageSheet(t.board) : undefined}
+                  onPress={() => openBoardDetail(t.board, 0)}
+                  // Long-press is the quick-actions entry point on grid tiles.
+                  // Self gets manage actions (Edit / Add photos / Delete);
+                  // non-self gets Share + Report. Either way the option list
+                  // is built by `actionOptions`.
+                  onLongPress={() => openManageSheet(t.board)}
                   delayLongPress={350}
                   style={StyleSheet.absoluteFillObject}
                 >
@@ -324,56 +299,43 @@ export default function ShaperBoardsGrid({
         </View>
       )}
 
-      <Modal
-        visible={viewerState !== null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setViewerState(null)}
-      >
-        {viewerState ? (
-          <ImageViewing
-            images={lightboxImages}
-            imageIndex={viewerState.index}
-            visible
-            onRequestClose={() => setViewerState(null)}
-          />
-        ) : null}
-      </Modal>
+      {/* Quick-actions sheet — long-press on tile or list-card ellipsis.
+          Both self and non-self get a sheet; the section list branches
+          internally (Share + Delete for owners, Share + Report for
+          viewers). Header carries a thumbnail of the board so it reads
+          like the session photoSheet on the same product. */}
+      <ActionSheet
+        visible={actionTarget !== null}
+        sections={actionSections}
+        header={
+          actionTarget
+            ? {
+                title: actionTarget.name,
+                // Match the body subtitle on the board detail page:
+                // "<Type> · <Dimensions>" so the same shape reads across
+                // surfaces. Falls back to a single segment when only one is
+                // set, then to "Board" when neither is.
+                subtitle: (() => {
+                  const parts = [
+                    actionTarget.board_type ? capitalize(actionTarget.board_type) : null,
+                    actionTarget.dimensions || null,
+                  ].filter(Boolean) as string[];
+                  return parts.length ? parts.join(' · ') : 'Board';
+                })(),
+                imageUri: getBoardPhotoUrl(pickThumbnailPhoto(actionTarget)?.s3_key) ?? undefined,
+              }
+            : undefined
+        }
+        onClose={() => setActionTarget(null)}
+      />
 
-      {isSelf && (
-        <>
-          <ActionSheet
-            visible={actionTarget !== null}
-            options={actionOptions}
-            header={
-              actionTarget
-                ? { title: actionTarget.name, subtitle: 'Manage board' }
-                : undefined
-            }
-            onClose={() => setActionTarget(null)}
-          />
-          <BoardEditSheet
-            visible={editingBoard !== null}
-            board={editingBoard}
-            featuredCount={featuredCount}
-            onClose={() => setEditingBoard(null)}
-          />
-        </>
-      )}
+      <ReportBoardSheet
+        visible={reportBoardId !== null}
+        boardId={reportBoardId ?? undefined}
+        onClose={() => setReportBoardId(null)}
+      />
     </View>
   );
-}
-
-// crypto.randomUUID isn't reliably available in React Native runtimes.
-// Falls back to a v4-shape generator for client-side keys.
-function cryptoRandomUUID(): string {
-  // @ts-ignore - some RN runtimes expose this
-  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
 }
 
 // Mirrors SessionCard's chrome: header (name + subtitle + ellipsis) →
@@ -384,16 +346,29 @@ function BoardListCard({
   board,
   isDark,
   onPhotoPress,
+  onLongPress,
   isSelf = false,
   onManagePress,
 }: {
   board: Board;
   isDark: boolean;
   onPhotoPress: (idx: number) => void;
+  onLongPress?: () => void;
   isSelf?: boolean;
   onManagePress?: () => void;
 }) {
-  const photos = board.photos ?? [];
+  // Promote the owner-selected thumbnail to the first slide of the carousel.
+  // Without this, the list-view carousel shows photos in `sort_order` and
+  // ignores `thumbnail_photo_id` — so the lead image disagrees with the grid
+  // tile (which DOES use `pickThumbnailPhoto`). Memoized so identity is
+  // stable across re-renders and `FlatList` doesn't churn its cells.
+  const photos = useMemo(() => {
+    const list = board.photos ?? [];
+    if (!board.thumbnail_photo_id) return list;
+    const idx = list.findIndex((p) => p.id === board.thumbnail_photo_id);
+    if (idx <= 0) return list; // not present, or already first
+    return [list[idx], ...list.slice(0, idx), ...list.slice(idx + 1)];
+  }, [board.photos, board.thumbnail_photo_id]);
   const useCarousel = photos.length > 1;
   const [slideWidth, setSlideWidth] = useState(0);
   const [activeSlide, setActiveSlide] = useState(0);
@@ -478,7 +453,12 @@ function BoardListCard({
             renderItem={({ item, index }) => {
               const slideStyle = { width: slideWidth, aspectRatio: thumbAspect };
               return (
-                <Pressable onPress={() => onPhotoPress(index)} style={slideStyle}>
+                <Pressable
+                  onPress={() => onPhotoPress(index)}
+                  onLongPress={onLongPress}
+                  delayLongPress={350}
+                  style={slideStyle}
+                >
                   <Image
                     source={{ uri: getBoardPhotoUrl(item.s3_key) ?? undefined }}
                     style={slideStyle}
@@ -492,6 +472,8 @@ function BoardListCard({
         ) : !useCarousel && photos[0] ? (
           <Pressable
             onPress={() => onPhotoPress(0)}
+            onLongPress={onLongPress}
+            delayLongPress={350}
             style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}
           >
             <Image
@@ -533,16 +515,32 @@ function BoardListCard({
   );
 }
 
-// Flatten boards to tile entries — one tile per first photo of each board.
-// (Multi-photo browsing happens in the lightbox; the gallery reads cleaner
-// at one-per-board.)
+// Flatten boards to tile entries — one tile per board, using the board's
+// chosen thumbnail photo (`thumbnail_photo_id`) when present, otherwise the
+// first photo by sort_order. Multi-photo browsing lives on the dedicated
+// /board/{id} page.
 function gridTiles(boards: Board[]): { board: Board; photo: BoardPhoto }[] {
   const out: { board: Board; photo: BoardPhoto }[] = [];
   for (const b of boards) {
-    const first = b.photos[0];
-    if (first) out.push({ board: b, photo: first });
+    const thumb = pickThumbnailPhoto(b);
+    if (thumb) out.push({ board: b, photo: thumb });
   }
   return out;
+}
+
+/**
+ * Pick the thumbnail photo for a board: prefer the owner-set
+ * `thumbnail_photo_id`, fall back to first photo by sort_order. Exported so
+ * other tile/feed renderers can stay consistent (same word as on the
+ * session side, where photos are picked from `thumbnail_photo_id`).
+ */
+export function pickThumbnailPhoto(board: Board): BoardPhoto | undefined {
+  const photos = board.photos ?? [];
+  if (board.thumbnail_photo_id) {
+    const found = photos.find((p) => p.id === board.thumbnail_photo_id);
+    if (found) return found;
+  }
+  return photos[0];
 }
 
 function capitalize(s: string): string {
