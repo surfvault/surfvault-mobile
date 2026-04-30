@@ -569,7 +569,13 @@ export default function HomeScreen() {
                                 <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
                               </>
                             )}
-                            {userType && userType !== 'photographer' && (
+                            {userType === 'shaper' && (
+                              <>
+                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
+                                <MaterialCommunityIcons name="hammer" size={13} color="#f59e0b" />
+                              </>
+                            )}
+                            {userType && userType !== 'photographer' && userType !== 'shaper' && (
                               <>
                                 <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
                                 <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
