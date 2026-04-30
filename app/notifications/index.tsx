@@ -41,6 +41,7 @@ const getNotifIcon = (type: string): { name: string; color: string } => {
     case 'surfBreakUpload': return { name: 'location-outline', color: '#0ea5e9' };
     case 'taggedInSurfSession': return { name: 'pricetag-outline', color: '#8b5cf6' };
     case 'photographerActive': return { name: 'pulse-outline', color: '#10b981' };
+    case 'newBoard': return { name: 'hammer-outline', color: '#f59e0b' };
     case 'newFollower': return { name: 'person-add-outline', color: '#f59e0b' };
     case 'userAccessRequest': return { name: 'lock-open-outline', color: '#ef4444' };
     case 'userAccessRequestApproval': return { name: 'checkmark-circle-outline', color: '#22c55e' };
@@ -56,6 +57,7 @@ const getNotifTitle = (n: any): string => {
     case 'surfBreakUpload': return n.resource_surfbreak?.name?.replaceAll('_', ' ') ?? 'Surf Break Upload';
     case 'taggedInSurfSession': return 'Photos Available';
     case 'photographerActive': return n.resource_user?.handle ?? 'Photographer Active';
+    case 'newBoard': return n.resource_user?.handle ?? 'New Board';
     case 'newFollower': return 'New Follower';
     case 'userAccessRequest': return 'Access Request';
     case 'userAccessRequestApproval': return 'Access Approved';
@@ -169,7 +171,8 @@ export default function NotificationsScreen() {
     // Navigate based on type
     switch (n.resource_type) {
       case 'photographerUpload':
-      case 'photographerActive': {
+      case 'photographerActive':
+      case 'newBoard': {
         const handle = n.resource_user?.handle;
         if (handle) trackedPush(`/user/${handle}` as any);
         break;

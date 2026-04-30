@@ -11,6 +11,7 @@ import {
   Platform,
   Dimensions,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,6 +28,7 @@ import {
   useGetAdsQuery,
   useGetAccessRequestQuery,
   useRequestAccessToUserMutation,
+  useDeleteSessionMutation,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
@@ -35,6 +37,7 @@ import { useUserCoords } from '../../src/hooks/useUserCoords';
 import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
+import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -55,6 +58,31 @@ export default function UserProfileScreen() {
   const isFetchingMoreRef = useRef(false);
 
   const isSelf = currentUser?.handle === handle;
+
+  // Self-only: tile ellipsis confirms delete via the existing session
+  // mutation. Mirrors the chrome of the shaper grid ellipsis.
+  const [deleteSession] = useDeleteSessionMutation();
+  const handleDeleteOwnSession = useCallback((sid: string, name?: string) => {
+    if (!sid) return;
+    Alert.alert(
+      'Delete session?',
+      `${name ? `"${name}"` : 'This session'} and all its photos will be permanently removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteSession({ sessionId: sid, force: false }).unwrap();
+            } catch (err: any) {
+              Alert.alert('Delete failed', err?.data?.message || err?.message || 'Try again');
+            }
+          },
+        },
+      ],
+    );
+  }, [deleteSession]);
 
   // Profile data
   const { data: userData, isLoading, refetch: refetchUser } = useGetUserQuery({
@@ -244,6 +272,37 @@ export default function UserProfileScreen() {
       <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <UserSkeleton />
+        ) : profile?.user_type === 'shaper' ? (
+          // Shapers don't have surf sessions — render their board gallery
+          // (using the new boards/board_photos schema). Grid/List tabs share
+          // the same activeTab state used for non-shaper profiles since
+          // both modes are 'grid' | 'list'. Tagged is intentionally skipped
+          // here — it's only on the self-profile tab page (per spec).
+          <FlatList
+            data={[1] as const}
+            keyExtractor={() => 'shaper-content'}
+            renderItem={() => (
+              <ShaperBoardsGrid
+                handle={handle ?? ''}
+                mode={activeTab}
+                isSelf={!!currentUser?.handle && handle === currentUser.handle}
+              />
+            )}
+            ListHeaderComponent={
+              <>
+                <UserProfileHeader />
+                <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+                  <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                  <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                </View>
+              </>
+            }
+            showsVerticalScrollIndicator={false}
+          />
         ) : (
           <FlatList
             data={isLocked ? [] : sessions}
@@ -280,6 +339,24 @@ export default function UserProfileScreen() {
                           </Text>
                         )}
                       </View>
+                    )}
+                    {item.photo_count > 0 && (
+                      <View style={styles.gridPhotoBadge} pointerEvents="none">
+                        <Ionicons name="images-outline" size={10} color="#fff" />
+                        <Text style={styles.gridPhotoBadgeText}>{item.photo_count}</Text>
+                      </View>
+                    )}
+                    {isSelf && (
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleDeleteOwnSession(item.session_id ?? item.id, item.session_name);
+                        }}
+                        hitSlop={6}
+                        style={styles.gridEllipsisBtn}
+                      >
+                        <Ionicons name="ellipsis-horizontal" size={14} color="#fff" />
+                      </Pressable>
                     )}
                   </Pressable>
                 );
@@ -393,9 +470,26 @@ const styles = StyleSheet.create({
   tabBtnActive: { borderBottomWidth: 2, borderBottomColor: '#111827' },
   gridDate: {
     position: 'absolute', top: 4, left: 4,
-    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
     paddingHorizontal: 5, paddingVertical: 2,
     maxWidth: '90%',
   },
   gridDateText: { fontSize: 9, fontWeight: '600', color: '#fff' },
+  // Bottom-left photo count badge — same chrome as the shaper grid badge
+  // so any user_type's profile tiles read consistently.
+  gridPhotoBadge: {
+    position: 'absolute', bottom: 4, left: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
+    paddingHorizontal: 5, paddingVertical: 2,
+  },
+  gridPhotoBadgeText: { fontSize: 10, fontWeight: '600', color: '#fff' },
+  // Bottom-right ellipsis (self only). Matches shaper grid ellipsisBtn.
+  gridEllipsisBtn: {
+    position: 'absolute', bottom: 4, right: 4,
+    width: 22, height: 22,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+  },
 });

@@ -2,6 +2,7 @@ import { View, Text, Pressable, StyleSheet, Linking, ActivityIndicator } from 'r
 import { useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
+import { useGetShaperBoardsQuery } from '../store';
 
 const isNoteActive = (setAt?: string): boolean => {
   if (!setAt) return false;
@@ -57,6 +58,15 @@ export default function ProfileHeader({
   const router = useRouter();
   const hasActiveNote = !!profile?.status_note && isNoteActive(profile?.status_note_set_at);
   const userType = profile?.user_type ?? profile?.type;
+  const isShaper = userType === 'shaper';
+  // For shapers we replace the spots stat with their board count. RTK Query
+  // dedupes against the same handle, so this re-uses the gallery's fetch
+  // (no extra network call when the boards grid is also mounted).
+  const { data: shaperBoardsData } = useGetShaperBoardsQuery(
+    { handle: profile?.handle ?? '' },
+    { skip: !isShaper || !profile?.handle }
+  );
+  const boardsCount = shaperBoardsData?.results?.boards?.length ?? 0;
   const storagePct = storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0;
 
   const formatStorage = (gb: number): string => {
@@ -138,9 +148,11 @@ export default function ProfileHeader({
               <View style={s.statsRow}>
                 <View style={s.statItem}>
                   <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
-                    {profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0}
+                    {isShaper
+                      ? boardsCount
+                      : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
                   </Text>
-                  <Text style={s.statLabel}>spots</Text>
+                  <Text style={s.statLabel}>{isShaper ? 'boards' : 'spots'}</Text>
                 </View>
                 <Pressable
                   onPress={statsTappable ? () => onViewStats?.('followers') : undefined}
@@ -182,11 +194,13 @@ export default function ProfileHeader({
             <View style={[s.tagPill, s.typePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9' }]}>
               {userType === 'photographer' ? (
                 <Ionicons name="camera-outline" size={11} color={isDark ? '#d1d5db' : '#475569'} />
+              ) : userType === 'shaper' ? (
+                <MaterialCommunityIcons name="hammer-wrench" size={11} color={isDark ? '#d1d5db' : '#475569'} />
               ) : (
                 <MaterialCommunityIcons name="surfing" size={12} color={isDark ? '#d1d5db' : '#475569'} />
               )}
               <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#d1d5db' : '#475569' }}>
-                {userType === 'photographer' ? 'Photographer' : 'Surfer'}
+                {userType === 'photographer' ? 'Photographer' : userType === 'shaper' ? 'Shaper' : 'Surfer'}
               </Text>
             </View>
           )}

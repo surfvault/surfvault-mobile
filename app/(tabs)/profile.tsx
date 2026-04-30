@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useNavigation } from 'expo-router';
+import { useDispatch } from 'react-redux';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,8 @@ import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 import {
   useGetUserQuery,
   useGetUserSessionsQuery,
+  ApiTag,
+  rootApi,
   useGetUserFavoritesQuery,
   useGetSurfBreaksQuery,
   useUpdateUserMetaDataMutation,
@@ -38,6 +41,7 @@ import {
 import { useTabBar } from '../../src/context/TabBarContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
 import SessionCard from '../../src/components/SessionCard';
+import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
@@ -51,6 +55,7 @@ const formatCount = (n: number): string => {
 export default function ProfileScreen() {
   const router = useRouter();
   const trackedPush = useTrackedPush();
+  const dispatch = useDispatch();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
@@ -61,6 +66,11 @@ export default function ProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
+
+  // Shapers don't have surf sessions — grid/list show their boards instead.
+  // Tagged + Favorites stay available so shapers can still favorite breaks
+  // they shoot near and see sessions they were tagged in.
+  const isShaperSelf = user?.user_type === 'shaper';
 
   // Session long-press action sheet
   const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
@@ -234,7 +244,7 @@ export default function ProfileScreen() {
 
   const { data: sessionsData, isFetching, refetch: refetchSessions } = useGetUserSessionsQuery(
     { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken },
-    { skip: !user?.handle }
+    { skip: !user?.handle || isShaperSelf }
   );
 
   // Tagged-in sessions (separate paginated list)
@@ -254,12 +264,16 @@ export default function ProfileScreen() {
     if (activeTab === 'tagged') {
       setTaggedToken('');
       await refetchTagged();
+    } else if (isShaperSelf && (activeTab === 'grid' || activeTab === 'list')) {
+      // Shapers don't have sessions to refetch — bust the boards cache so
+      // ShaperBoardsGrid's getShaperBoards query refires.
+      dispatch(rootApi.util.invalidateTags([ApiTag.Boardroom]));
     } else {
       setContinuationToken('');
       await refetchSessions();
     }
     setRefreshing(false);
-  }, [activeTab, refetchSessions, refetchTagged]);
+  }, [activeTab, isShaperSelf, refetchSessions, refetchTagged, dispatch]);
 
   // Reset sessions list when the current user changes (logout/login/switch user)
   useEffect(() => {
@@ -581,6 +595,25 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {isShaperSelf && (activeTab === 'grid' || activeTab === 'list') ? (
+        // Shaper grid/list shows boards instead of sessions. Wrap the regular
+        // listHeader (ProfileHeader + tab bar) in a ScrollView and render
+        // ShaperBoardsGrid below — RTK Query dedupes the boards fetch across
+        // tab toggles, so switching grid↔list doesn't re-fetch.
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {listHeader}
+          {user?.handle ? (
+            <ShaperBoardsGrid handle={user.handle} mode={activeTab} isSelf />
+          ) : null}
+        </ScrollView>
+      ) : (
       <FlatList
         data={
           activeTab === 'favorites' ? favorites
@@ -643,23 +676,35 @@ export default function ProfileScreen() {
                 )}
                 {(item.view_count != null || item.photo_count > 0) && (
                   <View style={s.gridViewCount}>
-                    {item.view_count != null && (
-                      <>
-                        <Ionicons name="eye-outline" size={10} color="#fff" />
-                        <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
-                      </>
-                    )}
-                    {item.view_count != null && item.photo_count > 0 && (
-                      <Text style={s.gridViewCountText}> · </Text>
-                    )}
                     {item.photo_count > 0 && (
                       <>
                         <Ionicons name="images-outline" size={10} color="#fff" />
                         <Text style={s.gridViewCountText}>{formatCount(item.photo_count)}</Text>
                       </>
                     )}
+                    {item.photo_count > 0 && item.view_count != null && (
+                      <Text style={[s.gridViewCountText, { opacity: 0.7 }]}> · </Text>
+                    )}
+                    {item.view_count != null && (
+                      <>
+                        <Ionicons name="eye-outline" size={10} color="#fff" />
+                        <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
+                      </>
+                    )}
                   </View>
                 )}
+                {/* Bottom-right ellipsis — same chrome as shaper grid tile.
+                    Tap opens the existing session action sheet. */}
+                <Pressable
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleSessionLongPress(item);
+                  }}
+                  hitSlop={6}
+                  style={s.gridEllipsisBtn}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={14} color="#fff" />
+                </Pressable>
                 {(item.session_date || item.surf_break_name) && (
                   <View style={s.gridDate}>
                     {item.surf_break_name && (
@@ -753,6 +798,7 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         showsVerticalScrollIndicator={false}
       />
+      )}
 
       {/* Status note editor */}
       {showNoteEditor && (
@@ -908,17 +954,27 @@ const s = StyleSheet.create({
   activePulseDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#ef4444' },
   gridViewCount: {
     position: 'absolute', bottom: 4, left: 4,
-    flexDirection: 'row', alignItems: 'center', gap: 2,
-    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    // Match shaper grid + web SessionPreviewSection badge opacity for parity.
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
     paddingHorizontal: 5, paddingVertical: 2,
   },
   gridViewCountText: { fontSize: 10, fontWeight: '600', color: '#fff' },
   gridDate: {
     position: 'absolute', top: 4, left: 4,
-    backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
     paddingHorizontal: 5, paddingVertical: 2,
   },
   gridDateText: { fontSize: 9, fontWeight: '600', color: '#fff' },
+  // Bottom-right ellipsis on session grid tiles — matches the shaper grid
+  // ellipsisBtn so any user_type's profile reads the same way.
+  gridEllipsisBtn: {
+    position: 'absolute', bottom: 4, right: 4,
+    width: 22, height: 22,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   noteSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
   noteSheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

@@ -615,7 +615,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    // Match the shaper grid + web SessionPreviewSection badge opacity so all
+    // session/board cards read with the same chrome.
+    backgroundColor: 'rgba(0,0,0,0.55)',
     borderRadius: 10,
     paddingHorizontal: 7,
     paddingVertical: 3,

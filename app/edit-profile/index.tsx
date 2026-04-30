@@ -49,7 +49,6 @@ export default function EditProfileScreen() {
   const [youtube, setYoutube] = useState('');
   const [website, setWebsite] = useState('');
   const [isPrivate, setIsPrivate] = useState(false);
-  const [userType, setUserType] = useState<'surfer' | 'photographer'>('surfer');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [profilePicUri, setProfilePicUri] = useState<string | null>(null);
@@ -71,7 +70,13 @@ export default function EditProfileScreen() {
   const { data: tagsData } = useGetPopularTagsQuery(undefined);
   const popularTags = (tagsData?.results?.tags ?? []).map((t: any) => t.tag ?? t);
 
+  // Read directly from the server record. user_type isn't editable from this
+  // screen — switching types isn't a valid product transition for end users.
+  const userType = (user as any)?.user_type ?? (user as any)?.type;
   const isPhotographer = userType === 'photographer';
+  // Shapers are always public; the access toggle is hidden for them and
+  // enforced server-side in services/user/handler.ts.
+  const isShaper = userType === 'shaper';
 
   // Initialize form from user data
   useEffect(() => {
@@ -83,8 +88,6 @@ export default function EditProfileScreen() {
       setYoutube((user.youtube as string) ?? '');
       setWebsite((user.website as string) ?? '');
       setIsPrivate(user.access === 'private');
-      const initialType = ((user as any)?.user_type ?? (user as any)?.type) === 'photographer' ? 'photographer' : 'surfer';
-      setUserType(initialType);
       setTags((user.tags as string[]) ?? []);
       setProfilePicUri(user.picture ?? null);
     }
@@ -144,9 +147,6 @@ export default function EditProfileScreen() {
     if (website !== (user.website ?? '')) metaData.website = website;
     if (isPrivate !== (user.access === 'private')) metaData.access = isPrivate ? 'private' : 'public';
 
-    const currentUserType = ((user as any)?.user_type ?? (user as any)?.type) === 'photographer' ? 'photographer' : 'surfer';
-    if (userType !== currentUserType) metaData.user_type = userType;
-
     const currentTags = (user.tags as string[]) ?? [];
     if (JSON.stringify(tags.sort()) !== JSON.stringify(currentTags.sort())) {
       metaData.tags = tags;
@@ -185,7 +185,7 @@ export default function EditProfileScreen() {
     }
 
     smartBack();
-  }, [user, name, bio, instagram, youtube, website, isPrivate, userType, tags, handle, handleChanged, isHandleValid, handleExists, profilePicFile, updateMeta, updateHandle, smartBack]);
+  }, [user, name, bio, instagram, youtube, website, isPrivate, tags, handle, handleChanged, isHandleValid, handleExists, profilePicFile, updateMeta, updateHandle, smartBack]);
 
   const inputStyle = (isDark: boolean) => [
     s.input,
@@ -384,68 +384,32 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Profile Type */}
-            <View style={s.field}>
-              <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>I am a</Text>
-              <View style={s.typeRow}>
-                {(['surfer', 'photographer'] as const).map((t) => {
-                  const selected = userType === t;
-                  return (
-                    <Pressable
-                      key={t}
-                      onPress={() => setUserType(t)}
-                      style={[
-                        s.typeOption,
-                        {
-                          backgroundColor: selected
-                            ? (isDark ? 'rgba(14,165,233,0.15)' : '#eff6ff')
-                            : (isDark ? '#1f2937' : '#f3f4f6'),
-                          borderColor: selected ? '#0ea5e9' : (isDark ? '#374151' : '#e5e7eb'),
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={t === 'photographer' ? 'camera-outline' : 'water-outline'}
-                        size={18}
-                        color={selected ? '#0ea5e9' : (isDark ? '#9ca3af' : '#6b7280')}
-                      />
-                      <Text style={{
-                        fontSize: 14,
-                        fontWeight: '600',
-                        color: selected ? '#0ea5e9' : (isDark ? '#d1d5db' : '#374151'),
-                      }}>
-                        {t === 'photographer' ? 'Photographer' : 'Surfer'}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-
-            {/* Privacy */}
-            <View style={s.field}>
-              <View style={s.switchRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151', marginBottom: 0 }]}>Private Account</Text>
-                  <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af', marginTop: 2 }}>
-                    Only approved users can view your sessions
-                  </Text>
+            {/* Privacy — hidden for shapers (always public). */}
+            {!isShaper && (
+              <View style={s.field}>
+                <View style={s.switchRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151', marginBottom: 0 }]}>Private Account</Text>
+                    <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af', marginTop: 2 }}>
+                      Only approved users can view your sessions
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isPrivate}
+                    onValueChange={setIsPrivate}
+                    trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
+                  />
                 </View>
-                <Switch
-                  value={isPrivate}
-                  onValueChange={setIsPrivate}
-                  trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
-                />
+                {isPrivate !== (user?.access === 'private') && (
+                  <View style={[s.warningBox, { backgroundColor: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.2)' : '#fde68a' }]}>
+                    <Ionicons name="warning-outline" size={16} color="#f59e0b" />
+                    <Text style={{ fontSize: 12, color: '#92400e', flex: 1, marginLeft: 6 }}>
+                      Changing access triggers a migration of your photos. This can take several minutes.
+                    </Text>
+                  </View>
+                )}
               </View>
-              {isPrivate !== (user?.access === 'private') && (
-                <View style={[s.warningBox, { backgroundColor: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.2)' : '#fde68a' }]}>
-                  <Ionicons name="warning-outline" size={16} color="#f59e0b" />
-                  <Text style={{ fontSize: 12, color: '#92400e', flex: 1, marginLeft: 6 }}>
-                    Changing access triggers a migration of your photos. This can take several minutes.
-                  </Text>
-                </View>
-              )}
-            </View>
+            )}
 
             <View style={{ height: 40 }} />
           </ScrollView>

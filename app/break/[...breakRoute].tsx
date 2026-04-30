@@ -22,10 +22,12 @@ import {
   useGetSurfBreakSessionsQuery,
   useUpdateUserFavoritesMutation,
   useGetAdsQuery,
+  useGetShapersForSurfBreakQuery,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
+import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
 import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
 
@@ -81,10 +83,31 @@ export default function SurfBreakDetailScreen() {
     [adsData]
   );
 
-  // Interleave sessions + ads using the shared cadence (same on web + mobile).
+  // Local shapers — region match (or country fallback when this break has
+  // no region). Same _kind: 'ad' | 'shaper' tagging convention as Discover
+  // so the renderer can dispatch on the first entry of each promo slot.
+  const { data: shapersForBreakData } = useGetShapersForSurfBreakQuery(
+    { breakId: breakData?.id ?? '', limit: 10 },
+    { skip: !breakData?.id }
+  );
+  const breakShapers = useMemo(
+    () => shapersForBreakData?.results?.shapers || [],
+    [shapersForBreakData]
+  );
+
+  // Combined promo stream: shapers + ads share the same AD_EVERY_N_ITEMS
+  // cadence. Tagging each entry with `_kind` lets `interleaveAds` group
+  // by partner_id while still letting the renderer dispatch per slot.
+  const feedAds = useMemo(() => {
+    const ads = breakAds.map((a: any) => ({ ...a, _kind: 'ad' as const }));
+    const shapers = breakShapers.map((s: any) => ({ ...s, _kind: 'shaper' as const }));
+    return [...shapers, ...ads];
+  }, [breakAds, breakShapers]);
+
+  // Interleave sessions + (ads | shapers) using the shared cadence.
   const feedRows = useMemo(
-    () => interleaveAds(sessions, breakAds) as FeedRow<any, any>[],
-    [sessions, breakAds]
+    () => interleaveAds(sessions, feedAds) as FeedRow<any, any>[],
+    [sessions, feedAds]
   );
 
   useEffect(() => {
@@ -188,6 +211,13 @@ export default function SurfBreakDetailScreen() {
             keyExtractor={(row) => row.key}
             renderItem={({ item: row }) => {
               if (row.type === 'ad') {
+                // Mixed promo stream — first entry's `_kind` picks the
+                // renderer (shaper card vs partner ad carousel). Same
+                // pattern Discover uses in app/(tabs)/index.tsx.
+                const first = row.data[0];
+                if (first?._kind === 'shaper') {
+                  return <ShaperFeedCard shaper={first} />;
+                }
                 return (
                   <SponsoredCard
                     ads={row.data}
