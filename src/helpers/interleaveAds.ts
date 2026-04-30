@@ -44,8 +44,23 @@ export function interleaveAds<T extends { id?: string; session_id?: string }, A 
     every: number = AD_EVERY_N_ITEMS,
     itemKey: (t: T, idx: number) => string = (t, i) => t.id ?? (t as any).session_id ?? `item-${i}`
 ): Array<FeedRow<T, A>> {
+    return interleavePromoGroups(items, groupAdsByPartner(ads), every, itemKey);
+}
+
+/**
+ * Lower-level interleave that takes already-grouped promo slots. Use this when
+ * the caller wants explicit control over slot ordering (e.g. alternating paid
+ * ads with shaper editorial content), since `groupAdsByPartner` collapses
+ * by `ad_partner_id` and would otherwise merge same-partner ads into the
+ * earliest slot, breaking any pre-built alternation.
+ */
+export function interleavePromoGroups<T extends { id?: string; session_id?: string }, A extends { id: string; ad_partner_id?: string }>(
+    items: T[],
+    groups: A[][],
+    every: number = AD_EVERY_N_ITEMS,
+    itemKey: (t: T, idx: number) => string = (t, i) => t.id ?? (t as any).session_id ?? `item-${i}`
+): Array<FeedRow<T, A>> {
     if (!items?.length) return [];
-    const groups = groupAdsByPartner(ads);
     const out: Array<FeedRow<T, A>> = [];
     let adCursor = 0;
 
@@ -64,8 +79,8 @@ export function interleaveAds<T extends { id?: string; session_id?: string }, A 
         }
     }
 
-    // Tail: dump any remaining ad groups so partners with leftover inventory
-    // still get exposure when the feed runs out of sessions.
+    // Tail: dump any remaining promo groups so partners with leftover
+    // inventory still get exposure when the feed runs out of sessions.
     while (adCursor < groups.length) {
         const group = groups[adCursor];
         if (group.length) {
@@ -75,5 +90,24 @@ export function interleaveAds<T extends { id?: string; session_id?: string }, A 
         adCursor += 1;
     }
 
+    return out;
+}
+
+/**
+ * Zip two promo-group streams together so they alternate slot-by-slot. Used
+ * to mix paid ad groups with shaper editorial entries at the same cadence —
+ * each side gets every-other slot, so neither can crowd the other out.
+ * `primary` takes the first slot when both are non-empty.
+ */
+export function zipPromoGroups<A extends { id: string; ad_partner_id?: string }>(
+    primary: A[][],
+    secondary: A[][]
+): A[][] {
+    const out: A[][] = [];
+    const max = Math.max(primary.length, secondary.length);
+    for (let i = 0; i < max; i++) {
+        if (i < primary.length) out.push(primary[i]);
+        if (i < secondary.length) out.push(secondary[i]);
+    }
     return out;
 }

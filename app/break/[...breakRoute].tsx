@@ -29,7 +29,12 @@ import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
-import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
+import {
+  groupAdsByPartner,
+  interleavePromoGroups,
+  zipPromoGroups,
+  type FeedRow,
+} from '../../src/helpers/interleaveAds';
 
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -96,17 +101,19 @@ export default function SurfBreakDetailScreen() {
   );
 
   // Combined promo stream: shapers + ads share the same AD_EVERY_N_ITEMS
-  // cadence. Tagging each entry with `_kind` lets `interleaveAds` group
-  // by partner_id while still letting the renderer dispatch per slot.
+  // cadence, alternating slot-by-slot (ad-first) so neither side crowds the
+  // other out. Each `_kind` tag lets the renderer dispatch per slot.
   const feedAds = useMemo(() => {
     const ads = breakAds.map((a: any) => ({ ...a, _kind: 'ad' as const }));
     const shapers = breakShapers.map((s: any) => ({ ...s, _kind: 'shaper' as const }));
-    return [...shapers, ...ads];
+    const adGroups = groupAdsByPartner(ads);
+    const shaperGroups = shapers.map((s: any) => [s]);
+    return zipPromoGroups(adGroups, shaperGroups);
   }, [breakAds, breakShapers]);
 
-  // Interleave sessions + (ads | shapers) using the shared cadence.
+  // Interleave sessions + alternating (ad | shaper) groups at shared cadence.
   const feedRows = useMemo(
-    () => interleaveAds(sessions, feedAds) as FeedRow<any, any>[],
+    () => interleavePromoGroups(sessions, feedAds) as FeedRow<any, any>[],
     [sessions, feedAds]
   );
 

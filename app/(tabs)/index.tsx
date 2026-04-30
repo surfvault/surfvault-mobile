@@ -39,7 +39,12 @@ import BoardroomFeed from '../../src/components/BoardroomFeed';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import HomeSkeleton from '../../src/components/HomeSkeleton';
-import { interleaveAds, type FeedRow } from '../../src/helpers/interleaveAds';
+import {
+  groupAdsByPartner,
+  interleavePromoGroups,
+  zipPromoGroups,
+  type FeedRow,
+} from '../../src/helpers/interleaveAds';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
 
 type SearchType = 'surf_break' | 'user';
@@ -334,7 +339,8 @@ export default function HomeScreen() {
   // Pick the active shaper stream by feedType. Combined into a single promo
   // pool with paid ads — one slot per shaper (featured boards swipe inside
   // the card) so a prolific shaper can't dominate. Sessions still drive the
-  // cadence (one promo per AD_EVERY_N_ITEMS items).
+  // cadence (one promo per AD_EVERY_N_ITEMS items). Ads and shapers
+  // alternate (ad-first) so neither side crowds the other out of the cadence.
   const feedAds = useMemo(() => {
     const ads = (adsData?.results?.ads || []).map((a: any) => ({ ...a, _kind: 'ad' as const }));
     const activeShapersData =
@@ -343,13 +349,15 @@ export default function HomeScreen() {
       ...s,
       _kind: 'shaper' as const,
     }));
-    return [...shapers, ...ads];
+    const adGroups = groupAdsByPartner(ads);
+    const shaperGroups = shapers.map((s: any) => [s]);
+    return zipPromoGroups(adGroups, shaperGroups);
   }, [adsData, nearbyShapersData, followedShapersData, feedType]);
 
-  // Interleave ads + shaper boards using the shared cadence — matches web so
-  // both platforms render promo content at the same feed positions.
+  // Interleave alternating ad/shaper groups into the session feed at the
+  // shared cadence — matches web so both platforms place promos identically.
   const feedRows = useMemo(
-    () => interleaveAds(sessions, feedAds) as FeedRow<any, any>[],
+    () => interleavePromoGroups(sessions, feedAds) as FeedRow<any, any>[],
     [sessions, feedAds]
   );
 
