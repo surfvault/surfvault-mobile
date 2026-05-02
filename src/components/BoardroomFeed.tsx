@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -36,8 +36,24 @@ type Props = {
   isDark: boolean;
 };
 
-export default function BoardroomFeed({ isDark }: Props) {
+export type BoardroomFeedHandle = {
+  scrollToTop: () => void;
+};
+
+const BoardroomFeed = forwardRef<BoardroomFeedHandle, Props>(function BoardroomFeed(
+  { isDark },
+  ref
+) {
   const { user } = useUser();
+  const listRef = useRef<FlatList<BoardroomShaper>>(null);
+  const emptyScrollRef = useRef<ScrollView>(null);
+
+  useImperativeHandle(ref, () => ({
+    scrollToTop: () => {
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      emptyScrollRef.current?.scrollTo({ y: 0, animated: true });
+    },
+  }), []);
 
   // Anchor to the viewer's home surf break (`users.surf_break_id`). The
   // server resolves it to lat/lon and sorts shapers by distance, NULLS LAST
@@ -86,6 +102,7 @@ export default function BoardroomFeed({ isDark }: Props) {
   if (shapers.length === 0) {
     return (
       <ScrollView
+        ref={emptyScrollRef}
         contentContainerStyle={styles.centerWrap}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
@@ -130,6 +147,7 @@ export default function BoardroomFeed({ isDark }: Props) {
 
   return (
     <FlatList
+      ref={listRef}
       data={shapers}
       keyExtractor={(s) => s.id}
       renderItem={({ item }) => <ShaperCard shaper={item} isDark={isDark} />}
@@ -145,7 +163,9 @@ export default function BoardroomFeed({ isDark }: Props) {
       }
     />
   );
-}
+});
+
+export default BoardroomFeed;
 
 type Slide =
   | { kind: 'board'; board: Board }

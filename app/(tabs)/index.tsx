@@ -35,7 +35,7 @@ import SessionCard from '../../src/components/SessionCard';
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
-import BoardroomFeed from '../../src/components/BoardroomFeed';
+import BoardroomFeed, { type BoardroomFeedHandle } from '../../src/components/BoardroomFeed';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import HomeSkeleton from '../../src/components/HomeSkeleton';
@@ -133,6 +133,7 @@ export default function HomeScreen() {
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
   const feedListRef = useRef<FlatList<any>>(null);
+  const boardroomRef = useRef<BoardroomFeedHandle>(null);
   // Frozen at mount so re-renders never push a new contentOffset prop into
   // the ScrollView (which on iOS would reset the user's current scroll).
   const initialContentOffset = useRef({ x: 0, y: savedFeedOffset }).current;
@@ -162,6 +163,7 @@ export default function HomeScreen() {
       if ((navigation as any).isFocused?.()) {
         savedFeedOffset = 0;
         feedListRef.current?.scrollToOffset({ offset: 0, animated: true });
+        boardroomRef.current?.scrollToTop();
       }
     });
     return unsub;
@@ -738,7 +740,7 @@ export default function HomeScreen() {
       </View>
 
       {feedType === 'boardroom' ? (
-        <BoardroomFeed isDark={isDark} />
+        <BoardroomFeed ref={boardroomRef} isDark={isDark} />
       ) : showSkeleton ? <HomeSkeleton /> : (
       <FlatList
         ref={feedListRef}
