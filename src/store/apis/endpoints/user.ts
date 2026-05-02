@@ -1,4 +1,5 @@
 import { ApiTag, rootApi } from '../rootApi';
+// LinkedAccount tag covers the per-user list of linked sibling profiles.
 
 const userApi = rootApi.injectEndpoints({
   endpoints: (builder) => ({
@@ -100,6 +101,57 @@ const userApi = rootApi.injectEndpoints({
       query: () => ({
         url: '/user/clear-push-token',
         method: 'PATCH',
+      }),
+    }),
+    // Multi-account-aware device registration. Replaces updateUserPushToken
+    // for new builds; the legacy mutation is kept above so older OTA-loaded
+    // bundles still work during the rollout window.
+    registerDevice: builder.mutation({
+      query: ({
+        deviceId,
+        expoPushToken,
+        platform,
+      }: {
+        deviceId: string;
+        expoPushToken: string;
+        platform: 'ios' | 'android';
+      }) => ({
+        url: '/user/register-device',
+        method: 'PATCH',
+        body: { deviceId, expoPushToken, platform },
+      }),
+    }),
+    unregisterDevice: builder.mutation({
+      query: ({ deviceId }: { deviceId: string }) => ({
+        url: '/user/unregister-device',
+        method: 'PATCH',
+        body: { deviceId },
+      }),
+    }),
+    getLinkedAccounts: builder.query({
+      providesTags: [ApiTag.LinkedAccount],
+      query: () => ({
+        url: '/user/linked-accounts',
+        method: 'GET',
+      }),
+    }),
+    linkAccount: builder.mutation({
+      invalidatesTags: [ApiTag.LinkedAccount],
+      // The bearer token MUST be the newly-authenticated account's token —
+      // the API uses that to identify the new side, and `previousUserId` is
+      // the side already in the user's switcher. Caller temporarily swaps
+      // the auth_token before firing this mutation.
+      query: ({ previousUserId }: { previousUserId: string }) => ({
+        url: '/user/linked-accounts',
+        method: 'POST',
+        body: { previousUserId },
+      }),
+    }),
+    unlinkAccount: builder.mutation({
+      invalidatesTags: [ApiTag.LinkedAccount],
+      query: ({ linkedUserId }: { linkedUserId: string }) => ({
+        url: `/user/linked-accounts/${linkedUserId}`,
+        method: 'DELETE',
       }),
     }),
     updateUserRecentSearches: builder.mutation({
@@ -222,6 +274,11 @@ export const {
   useUpdateUserRecentSearchesMutation,
   useRequestAccountDeletionMutation,
   useCancelAccountDeletionMutation,
+  useRegisterDeviceMutation,
+  useUnregisterDeviceMutation,
+  useGetLinkedAccountsQuery,
+  useLinkAccountMutation,
+  useUnlinkAccountMutation,
 } = userApi;
 
 export { userApi };

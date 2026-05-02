@@ -12,12 +12,14 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Auth0Provider } from 'react-native-auth0';
 import { Provider as ReduxProvider } from 'react-redux';
 import Constants from 'expo-constants';
-import { store, useGetSelfQuery, useUpdateUserPushTokenMutation } from '../src/store';
+import { store, useGetSelfQuery, useRegisterDeviceMutation } from '../src/store';
 import { AuthProvider, useAuth } from '../src/context/AuthProvider';
+import { LinkedAccountsProvider, useLinkedAccounts } from '../src/context/LinkedAccountsContext';
 import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
+import { getOrCreateDeviceId, getDevicePlatform } from '../src/helpers/deviceId';
 import UploadProgressPill from '../src/components/UploadProgressPill';
 import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
 import NotificationPrimingModal from '../src/components/NotificationPrimingModal';
@@ -65,22 +67,39 @@ function AppShell() {
 
   // Push token registration — kept fresh against OS-initiated APNs rotation.
   // Runs on mount, on foreground, and on `addPushTokenListener` events. Only
-  // writes to the server when the token actually changes.
-  const [updatePushToken] = useUpdateUserPushTokenMutation();
-  const lastSyncedToken = useRef<string | null>(null);
+  // writes to the server when the token or active account changes.
+  //
+  // Multi-account: each registration is keyed by (active userId, deviceId),
+  // so when the user switches accounts on this device we must re-register so
+  // the server has a row for the now-active profile too. Other linked
+  // accounts on this device keep their existing rows untouched — they each
+  // got their own register call when they were last active.
+  const [registerDevice] = useRegisterDeviceMutation();
+  const lastSyncedKey = useRef<string | null>(null);
+  const { activeUserId } = useLinkedAccounts();
 
   const syncToken = useCallback(
     async (token: string) => {
-      if (!token || token === lastSyncedToken.current) return;
+      if (!token || !user?.id) return;
+      const key = `${user.id}:${token}`;
+      if (key === lastSyncedKey.current) return;
       try {
-        await updatePushToken({ expoPushToken: token }).unwrap();
-        lastSyncedToken.current = token;
+        const deviceId = await getOrCreateDeviceId();
+        const platform = getDevicePlatform();
+        await registerDevice({ deviceId, expoPushToken: token, platform }).unwrap();
+        lastSyncedKey.current = key;
       } catch (e) {
         console.warn('Failed to sync push token:', e);
       }
     },
-    [updatePushToken]
+    [registerDevice, user?.id]
   );
+
+  // Reset the dedup key when the active account changes so the next token
+  // sync re-registers under the new identity.
+  useEffect(() => {
+    lastSyncedKey.current = null;
+  }, [activeUserId]);
 
   const registerPushToken = useCallback(async () => {
     if (!user?.id || !Device.isDevice) return;
@@ -118,11 +137,34 @@ function AppShell() {
     return () => sub.remove();
   }, [syncToken]);
 
-  // Handle notification tap deep linking
+  // Handle notification tap deep linking. Multi-account: pushes for any
+  // linked account on this device may arrive while a different account is
+  // active — `targetUserId` in the payload tells us which profile the
+  // notification was addressed to. Switch first, then route, so the
+  // destination screen renders under the right identity.
+  const { switchTo, accounts } = useLinkedAccounts();
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const subscription = Notifications.addNotificationResponseReceivedListener(async (response) => {
       const data = response.notification.request.content.data;
       if (!data?.screen) return;
+
+      const targetUserId: string | undefined =
+        typeof data.targetUserId === 'string' ? data.targetUserId : undefined;
+      if (targetUserId && targetUserId !== activeUserId) {
+        // Only switch if we actually have a linked account matching the target.
+        // Pre-multi-account installs receiving a multi-account-payload push
+        // (rare, dual-write window) just route under the current identity.
+        const known = accounts.some((a) => a.userId === targetUserId);
+        if (known) {
+          const ok = await switchTo(targetUserId);
+          if (!ok) {
+            // Token expired — open the manage-accounts page so the user can
+            // re-authenticate before the deep-link is meaningful.
+            router.push('/manage-accounts' as any);
+            return;
+          }
+        }
+      }
 
       switch (data.screen) {
         case 'notifications':
@@ -147,7 +189,7 @@ function AppShell() {
     });
 
     return () => subscription.remove();
-  }, [router]);
+  }, [router, switchTo, accounts, activeUserId]);
 
   useEffect(() => {
     if (isLoading) return;
@@ -221,13 +263,15 @@ export default function RootLayout() {
       <NavigationProvider>
         <Auth0Provider domain={auth0Domain} clientId={auth0ClientId}>
           <ReduxProvider store={store}>
-            <AuthProvider>
-              <ActionSheetProvider useCustomActionSheet>
-                <UploadProvider>
-                  <AppShell />
-                </UploadProvider>
-              </ActionSheetProvider>
-            </AuthProvider>
+            <LinkedAccountsProvider>
+              <AuthProvider>
+                <ActionSheetProvider useCustomActionSheet>
+                  <UploadProvider>
+                    <AppShell />
+                  </UploadProvider>
+                </ActionSheetProvider>
+              </AuthProvider>
+            </LinkedAccountsProvider>
           </ReduxProvider>
         </Auth0Provider>
       </NavigationProvider>

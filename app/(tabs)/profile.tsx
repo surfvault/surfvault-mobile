@@ -25,6 +25,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
+import { useLinkedAccounts } from '../../src/context/LinkedAccountsContext';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 import {
   useGetUserQuery,
@@ -66,6 +67,12 @@ export default function ProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
+  const { accounts: linkedAccounts, activeUserId, switchTo: switchLinkedAccount } =
+    useLinkedAccounts();
+  // Sibling profiles linked on this device, excluding the active one.
+  const siblingAccounts = linkedAccounts.filter((a) => a.userId !== activeUserId);
+  const hasSiblings = siblingAccounts.length > 0;
 
   // Shapers don't have surf sessions — grid/list show their boards instead.
   // Tagged + Favorites stay available so shapers can still favorite breaks
@@ -401,17 +408,17 @@ export default function ProfileScreen() {
     {
       options: [
         {
-          label: 'Edit Profile',
-          icon: 'create-outline',
-          onPress: () => trackedPush('/edit-profile'),
-        },
-        {
           label: 'Share Profile',
           icon: 'share-outline',
           onPress: () => {
             const shareUrl = `https://app.surf-vault.com/${user?.handle}`;
             Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
           },
+        },
+        {
+          label: 'Edit Profile',
+          icon: 'create-outline',
+          onPress: () => trackedPush('/edit-profile'),
         },
       ],
     },
@@ -421,6 +428,15 @@ export default function ProfileScreen() {
           label: 'Manage Favorites',
           icon: 'heart-outline',
           onPress: () => trackedPush('/manage-favorites'),
+        },
+      ],
+    },
+    {
+      options: [
+        {
+          label: 'Manage Accounts',
+          icon: 'people-outline',
+          onPress: () => trackedPush('/manage-accounts'),
         },
         {
           label: 'Account',
@@ -573,9 +589,22 @@ export default function ProfileScreen() {
     <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
       {/* Header */}
       <View style={s.header}>
-        <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
-          {user?.handle ?? ''}
-        </Text>
+        {hasSiblings ? (
+          <Pressable
+            onPress={() => setAccountSwitcherVisible(true)}
+            hitSlop={6}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+          >
+            <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
+              {user?.handle ?? ''}
+            </Text>
+            <Ionicons name="chevron-down" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+          </Pressable>
+        ) : (
+          <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
+            {user?.handle ?? ''}
+          </Text>
+        )}
         <View style={s.headerRight}>
           <Pressable onPress={() => trackedPush('/notifications' as any)} hitSlop={8}>
             <View>
@@ -893,6 +922,64 @@ export default function ProfileScreen() {
         visible={menuVisible}
         sections={menuSections}
         onClose={() => setMenuVisible(false)}
+      />
+
+      {/* Quick switcher — active account (with checkmark) + siblings + manage entry. */}
+      <ActionSheet
+        visible={accountSwitcherVisible}
+        sections={[
+          {
+            options: [
+              // Active account first so the user sees their current identity at
+              // the top with the checkmark indicator. Tapping it is a no-op
+              // (other than dismissing the sheet).
+              ...(linkedAccounts
+                .filter((a) => a.userId === activeUserId)
+                .map((acct) => ({
+                  label: acct.handle ?? acct.name ?? acct.email ?? 'Account',
+                  subtitle: acct.userType ?? undefined,
+                  imageUri: acct.picture ?? undefined,
+                  icon: acct.picture ? undefined : ('person-circle-outline' as const),
+                  trailingCheckmark: true,
+                  onPress: () => setAccountSwitcherVisible(false),
+                }))),
+              ...siblingAccounts.map((acct) => ({
+                label: acct.handle ?? acct.name ?? acct.email ?? 'Account',
+                subtitle:
+                  acct.status === 'expired'
+                    ? 'Tap to re-authenticate'
+                    : (acct.userType ?? undefined),
+                imageUri: acct.picture ?? undefined,
+                icon: acct.picture
+                  ? undefined
+                  : (acct.status === 'expired'
+                      ? ('alert-circle-outline' as const)
+                      : ('person-circle-outline' as const)),
+                onPress: () => {
+                  setAccountSwitcherVisible(false);
+                  if (acct.status === 'expired') {
+                    trackedPush('/manage-accounts' as any);
+                    return;
+                  }
+                  switchLinkedAccount(acct.userId);
+                },
+              })),
+            ],
+          },
+          {
+            options: [
+              {
+                label: 'Manage Accounts' as const,
+                icon: 'people-outline' as const,
+                onPress: () => {
+                  setAccountSwitcherVisible(false);
+                  trackedPush('/manage-accounts' as any);
+                },
+              },
+            ],
+          },
+        ]}
+        onClose={() => setAccountSwitcherVisible(false)}
       />
 
       <ActionSheet

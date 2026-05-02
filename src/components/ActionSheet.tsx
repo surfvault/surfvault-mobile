@@ -23,6 +23,17 @@ export interface ActionSheetOption {
   onPress: () => void;
   icon?: IoniconsName | MaterialCommunityIconsName;
   iconLibrary?: 'ionicons' | 'material-community';
+  /**
+   * If set, renders the image (typically a profile picture) in place of the
+   * icon slot. Falls back to `icon` if the image fails to load.
+   */
+  imageUri?: string | null;
+  /** Optional secondary line under the label (e.g. user_type pill text). */
+  subtitle?: string;
+  /** Renders an active checkmark on the right side of the row. */
+  trailingCheckmark?: boolean;
+  /** Centers the label text horizontally and suppresses the icon slot. */
+  centered?: boolean;
 }
 
 export interface ActionSheetSection {
@@ -125,6 +136,20 @@ export default function ActionSheet({ visible, options, sections, title, header,
   }, [handleClose]);
 
   const renderIcon = (opt: ActionSheetOption, color: string) => {
+    // Image takes precedence over icon — used for profile pictures in the
+    // account switcher. The View wrapper preserves consistent sizing with
+    // icon-style rows so labels stay vertically aligned across mixed rows.
+    if (opt.imageUri) {
+      return (
+        <View style={styles.iconWrap}>
+          <Image
+            source={{ uri: opt.imageUri }}
+            style={{ width: 36, height: 36, borderRadius: 18 }}
+            contentFit="cover"
+          />
+        </View>
+      );
+    }
     if (!opt.icon) return null;
     const iconBg = opt.destructive
       ? (isDark ? 'rgba(255,59,48,0.12)' : 'rgba(255,59,48,0.08)')
@@ -224,25 +249,69 @@ export default function ActionSheet({ visible, options, sections, title, header,
                       pressed && { backgroundColor: pressedBg(isDark) },
                     ]}
                   >
-                    <View style={styles.rowContent}>
-                      {renderIcon(opt, itemColor)}
-                      <Text
-                        style={[
-                          styles.rowText,
-                          { color: itemColor },
-                          opt.destructive && styles.rowTextDestructive,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {opt.label}
-                      </Text>
+                    <View
+                      style={[
+                        styles.rowContent,
+                        opt.centered && { justifyContent: 'center' },
+                      ]}
+                    >
+                      {!opt.centered && renderIcon(opt, itemColor)}
+                      {opt.subtitle ? (
+                        // Two-line variant: stack label + subtitle. Wrapper
+                        // takes flex:1 so the row layout matches the
+                        // single-line variant.
+                        <View style={{ flex: 1 }}>
+                          <Text
+                            style={[
+                              styles.rowText,
+                              { color: itemColor },
+                              opt.destructive && styles.rowTextDestructive,
+                              opt.centered && { textAlign: 'center' },
+                              { flex: undefined },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {opt.label}
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              color: isDark ? '#9ca3af' : '#6b7280',
+                              marginTop: 2,
+                              textTransform: 'capitalize',
+                              textAlign: opt.centered ? 'center' : 'left',
+                            }}
+                            numberOfLines={1}
+                          >
+                            {opt.subtitle}
+                          </Text>
+                        </View>
+                      ) : (
+                        // Single-line variant: keep the original direct-child
+                        // Text so vertical alignment matches every other
+                        // ActionSheet usage in the app exactly.
+                        <Text
+                          style={[
+                            styles.rowText,
+                            { color: itemColor },
+                            opt.destructive && styles.rowTextDestructive,
+                            opt.centered && { textAlign: 'center' },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {opt.label}
+                        </Text>
+                      )}
+                      {!opt.centered && opt.trailingCheckmark ? (
+                        <Ionicons name="checkmark" size={20} color="#0ea5e9" style={{ marginLeft: 8 }} />
+                      ) : null}
                     </View>
                     {!isLast && (
                       <View
                         style={[
                           styles.separator,
                           { backgroundColor: isDark ? '#38383a' : '#e5e5ea' },
-                          opt.icon ? { marginLeft: 52 } : undefined,
+                          (opt.icon || opt.imageUri) ? { marginLeft: 52 } : undefined,
                         ]}
                       />
                     )}
