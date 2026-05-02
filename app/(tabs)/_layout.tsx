@@ -170,12 +170,24 @@ function TabsInner() {
                       borderColor: isDark ? '#000000' : '#ffffff',
                     }} />
                   )}
+                  {unreadNotifCount > 0 && (
+                    <View style={{
+                      position: 'absolute',
+                      top: -2,
+                      right: -2,
+                      width: 14,
+                      height: 14,
+                      borderRadius: 7,
+                      backgroundColor: '#ef4444',
+                      borderWidth: 2,
+                      borderColor: isDark ? '#000000' : '#ffffff',
+                    }} />
+                  )}
                 </View>
               );
             }
             return <Ionicons name={focused ? 'person' : 'person-outline'} size={size} color={color} />;
           },
-          tabBarBadge: unreadNotifCount > 0 ? unreadNotifCount : undefined,
         }}
       />
       {/* Hide nested stack routes from tab bar */}

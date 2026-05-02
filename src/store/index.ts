@@ -147,6 +147,11 @@ export {
   useUpdateUserTypeMutation,
   useRequestAccountDeletionMutation,
   useCancelAccountDeletionMutation,
+  useRegisterDeviceMutation,
+  useUnregisterDeviceMutation,
+  useGetLinkedAccountsQuery,
+  useLinkAccountMutation,
+  useUnlinkAccountMutation,
 } from './apis/endpoints/user';
 
 export {

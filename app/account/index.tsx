@@ -9,7 +9,6 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
@@ -95,7 +94,7 @@ export default function AccountScreen() {
   }, [cancelDeletion]);
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
+    <View style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]}>
       <ScreenHeader
         title="Account"
         left={
@@ -200,7 +199,7 @@ export default function AccountScreen() {
           )}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
