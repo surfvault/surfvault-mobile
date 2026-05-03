@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { View, Text } from 'react-native';
 import { Image } from 'expo-image';
+import VerifiedBadge from './VerifiedBadge';
 
 interface UserAvatarProps {
   uri?: string | null;
@@ -80,15 +81,13 @@ export default function UserAvatar({
       )}
       {verified && (
         <View
-          className="absolute bg-sky-500 rounded-full items-center justify-center"
           style={{
-            width: size * 0.3,
-            height: size * 0.3,
-            bottom: 0,
-            right: 0,
+            position: 'absolute',
+            bottom: -2,
+            right: -2,
           }}
         >
-          <Text style={{ fontSize: size * 0.18, color: 'white' }}>✓</Text>
+          <VerifiedBadge size={Math.max(14, size * 0.32)} />
         </View>
       )}
       {/* Instagram-style ACTIVE pill — overlaps the bottom edge of the
