@@ -88,8 +88,14 @@ const formatPhotographerSubtitle = (handles: string[]): string => {
 };
 
 // US → region (state); elsewhere → country full name. Mirrors web.
+// Stop-words stay lowercase unless they lead the string.
+const TITLE_CASE_STOP_WORDS = new Set(['of', 'and', 'the', 'in', 'on', 'at', 'to', 'for', 'by', 'with', 'a', 'an']);
 const titleCase = (s: string) =>
-  s.toLowerCase().replace(/(^|[\s_-])([a-z])/g, (_, sep, ch) => `${sep === '_' ? ' ' : sep}${ch.toUpperCase()}`);
+  s.toLowerCase().replace(/(^|[\s_-])([^_\s-]+)/g, (_, sep, word) => {
+    const space = sep === '_' ? ' ' : sep;
+    if (sep && TITLE_CASE_STOP_WORDS.has(word)) return `${space}${word}`;
+    return `${space}${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+  });
 const hiddenAreaLabel = (group: BreakDateGroup): string | null => {
   if (group.surf_break_country === 'US' && group.surf_break_region) {
     return titleCase(group.surf_break_region);
