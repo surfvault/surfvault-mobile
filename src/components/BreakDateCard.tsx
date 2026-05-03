@@ -94,7 +94,8 @@ const hiddenAreaLabel = (group: BreakDateGroup): string | null => {
   if (group.surf_break_country === 'US' && group.surf_break_region) {
     return titleCase(group.surf_break_region);
   }
-  return group.surf_break_country_name || null;
+  // DB stores country names lowercase ("nicaragua"); title-case for display.
+  return group.surf_break_country_name ? titleCase(group.surf_break_country_name) : null;
 };
 
 const MAX_VISIBLE_TAGS = 3;
