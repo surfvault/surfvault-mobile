@@ -43,7 +43,10 @@ const formatDateParam = (date: Date): string =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 export default function SurfBreakDetailScreen() {
-  const { breakRoute } = useLocalSearchParams<{ breakRoute: string[] | string }>();
+  const { breakRoute, date: dateQueryParam } = useLocalSearchParams<{
+    breakRoute: string[] | string;
+    date?: string;
+  }>();
   // Catch-all returns an array of segments: ["US", "FLORIDA", "THE_MAYPORT_POLES"]
   const parts = Array.isArray(breakRoute) ? breakRoute : (breakRoute ?? '').split('/');
   const country = parts[0] ?? '';
@@ -60,7 +63,16 @@ export default function SurfBreakDetailScreen() {
   const [continuationToken, setContinuationToken] = useState('');
   const [sessions, setSessions] = useState<any[]>([]);
   const seenIdsRef = useRef(new Set<string>());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  // Seed selectedDate from `?date=YYYY-MM-DD` (used by Discover/Favorites
+  // multi-card taps so the break page lands pre-filtered to that day).
+  // Parse as local-noon so toLocaleDateString never shifts it back a day in
+  // negative-UTC-offset timezones.
+  const [selectedDate, setSelectedDate] = useState<Date | null>(() => {
+    if (!dateQueryParam) return null;
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(dateQueryParam);
+    if (!m) return null;
+    return new Date(+m[1], +m[2] - 1, +m[3], 12);
+  });
   const [pickerDate, setPickerDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
 

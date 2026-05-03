@@ -297,7 +297,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             <UserAvatar
               uri={session.user_picture}
               name={session.user_name ?? handle}
-              size={40}
+              size={44}
               verified={session.user_verified}
             />
             <View style={styles.headerInfo}>
@@ -497,7 +497,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: 16,
+    marginBottom: 32,
   },
   header: {
     flexDirection: 'row',
@@ -521,8 +521,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   handleText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#111827',
   },
   typeIcon: {

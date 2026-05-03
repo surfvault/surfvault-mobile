@@ -245,7 +245,7 @@ export default function SponsoredCard({
 
 const styles = StyleSheet.create({
   card: {
-    marginBottom: 16,
+    marginBottom: 32,
   },
   header: {
     flexDirection: 'row',
@@ -260,9 +260,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
@@ -281,8 +281,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   companyName: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     flexShrink: 1,
   },
   sponsoredPill: {

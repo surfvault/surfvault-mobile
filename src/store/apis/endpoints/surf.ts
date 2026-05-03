@@ -67,6 +67,7 @@ const surfApi = rootApi.injectEndpoints({
         limit,
         continuationToken,
         feed,
+        groupByBreakDate,
       }: {
         userId?: string;
         country?: string;
@@ -76,8 +77,9 @@ const surfApi = rootApi.injectEndpoints({
         limit?: number;
         continuationToken?: string;
         feed?: 'following' | 'favorites';
+        groupByBreakDate?: boolean;
       }) => ({
-        url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}`,
+        url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}&groupByBreakDate=${groupByBreakDate ? 'true' : ''}`,
         method: 'GET',
       }),
     }),

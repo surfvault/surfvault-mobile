@@ -32,6 +32,7 @@ import {
 import { useUser } from '../../src/context/UserProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
 import SessionCard from '../../src/components/SessionCard';
+import BreakDateCard, { type BreakDateGroup } from '../../src/components/BreakDateCard';
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
@@ -172,12 +173,17 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const feedQueryArg = feedType === 'following' || feedType === 'favorites' ? feedType : undefined;
+  // Discover + Favorites get the grouped (break+date) feed shape. Following
+  // stays per-session — the point of Following is "what did this person do",
+  // not "what happened at this place".
+  const useGroupedFeed = feedType === 'discover' || feedType === 'favorites';
   const { data: sessionsData, currentData: sessionsCurrentData, isLoading, isFetching, refetch: refetchSessions } = useGetLatestSessionsQuery(
     {
       userId: user?.id,
       limit: 10,
       continuationToken,
       feed: feedQueryArg,
+      groupByBreakDate: useGroupedFeed,
     },
     { skip: feedType === 'boardroom' || ((feedType === 'following' || feedType === 'favorites') && !user?.id) }
   );
@@ -185,15 +191,26 @@ export default function HomeScreen() {
   useEffect(() => {
     const results = sessionsCurrentData?.results;
     if (!results) return;
-    const incoming = Array.isArray(results.sessions) ? results.sessions : [];
+    // Grouped feeds return `groups`, ungrouped return `sessions`. Either way
+    // the items are plugged into the same row pipeline; downstream we
+    // dispatch the renderer based on shape (group_key present → BreakDateCard).
+    const incoming = Array.isArray(results.groups)
+      ? results.groups
+      : Array.isArray(results.sessions) ? results.sessions : [];
     const nextToken = results.continuationToken || '';
     hasMoreRef.current = Boolean(nextToken);
 
+    // Dedup key: groups → "date|group_key", sessions → session_id.
+    const keyOf = (item: any): string | null => {
+      if (item?.group_key && item?.session_date) return `${item.session_date}|${item.group_key}`;
+      return item?.session_id ?? item?.id ?? null;
+    };
+
     if (isRefreshingRef.current) {
-      // On refresh: replace all sessions with fresh data
+      // On refresh: replace with fresh data
       seenIdsRef.current = new Set();
       const unique = incoming.filter((s: any) => {
-        const id = s?.session_id ?? s?.id;
+        const id = keyOf(s);
         if (!id || seenIdsRef.current.has(id)) return false;
         seenIdsRef.current.add(id);
         return true;
@@ -208,7 +225,7 @@ export default function HomeScreen() {
     setSessions((prev) => {
       const newItems: any[] = [];
       for (const s of incoming) {
-        const id = s?.session_id ?? s?.id;
+        const id = keyOf(s);
         if (!id) continue;
         if (!seenIdsRef.current.has(id)) { seenIdsRef.current.add(id); newItems.push(s); }
       }
@@ -358,8 +375,19 @@ export default function HomeScreen() {
 
   // Interleave alternating ad/shaper groups into the session feed at the
   // shared cadence — matches web so both platforms place promos identically.
+  // Custom itemKey handles the grouped feed shape (groups have group_key,
+  // not session_id) so React keys stay unique across both shapes.
   const feedRows = useMemo(
-    () => interleavePromoGroups(sessions, feedAds) as FeedRow<any, any>[],
+    () =>
+      interleavePromoGroups(
+        sessions,
+        feedAds,
+        undefined,
+        (t: any, i: number) =>
+          t?.group_key && t?.session_date
+            ? `g-${t.session_date}-${t.group_key}`
+            : t?.session_id ?? t?.id ?? `item-${i}`
+      ) as FeedRow<any, any>[],
     [sessions, feedAds]
   );
 
@@ -766,6 +794,11 @@ export default function HomeScreen() {
               );
             }
             const item = row.data;
+            // Grouped feed (Discover/Favorites): item is a BreakDateGroup
+            // with a `group_key`. Following stays on per-session SessionCard.
+            if (item?.group_key && Array.isArray(item?.sessions)) {
+              return <BreakDateCard group={item as BreakDateGroup} />;
+            }
             return (
               <SessionCard
                 session={item}
