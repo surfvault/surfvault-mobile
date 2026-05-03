@@ -196,6 +196,13 @@ const userApi = rootApi.injectEndpoints({
         method: 'GET',
       }),
     }),
+    getPhotographersAtBreak: builder.query({
+      providesTags: [ApiTag.User],
+      query: ({ breakId }: { breakId: string }) => ({
+        url: `/surf-breaks/${breakId}/photographers`,
+        method: 'GET',
+      }),
+    }),
     getPopularTags: builder.query({
       providesTags: [ApiTag.User],
       query: () => ({
@@ -262,6 +269,7 @@ export const {
   useFollowUserMutation,
   useUpdateUserFavoritesMutation,
   useGetPhotographersQuery,
+  useGetPhotographersAtBreakQuery,
   useGetPopularTagsQuery,
   useRequestAccessToUserMutation,
   useGetAccessRequestQuery,

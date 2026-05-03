@@ -29,6 +29,7 @@ import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
+import LocalPhotographersRail from '../../src/components/LocalPhotographersRail';
 import {
   groupAdsByPartner,
   interleavePromoGroups,
@@ -248,22 +249,25 @@ export default function SurfBreakDetailScreen() {
               return <SessionCard session={row.data} enableCarousel />;
             }}
             ListHeaderComponent={
-              <View style={styles.headerWrap}>
-                <Text style={[styles.breakName, { color: isDark ? '#fff' : '#111827' }]}>{breakName}</Text>
-                <Text style={[styles.breakLocation, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                  {regionDisplay}{regionDisplay && countryDisplay ? ' · ' : ''}{countryDisplay}
-                </Text>
-                <View style={styles.dateRow}>
-                  <Pressable onPress={() => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); }} style={[styles.dateBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-                    <Ionicons name="calendar-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
-                    <Text style={[styles.dateBtnText, { color: isDark ? '#d1d5db' : '#374151' }]}>
-                      {selectedDate ? formatDateLabel(selectedDate) : 'Any date'}
-                    </Text>
-                  </Pressable>
-                  {selectedDate && (
-                    <Pressable onPress={clearDate} hitSlop={8}><Ionicons name="close-circle" size={20} color={isDark ? '#6b7280' : '#9ca3af'} /></Pressable>
-                  )}
+              <View>
+                <View style={styles.headerWrap}>
+                  <Text style={[styles.breakName, { color: isDark ? '#fff' : '#111827' }]}>{breakName}</Text>
+                  <Text style={[styles.breakLocation, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                    {regionDisplay}{regionDisplay && countryDisplay ? ' · ' : ''}{countryDisplay}
+                  </Text>
+                  <View style={styles.dateRow}>
+                    <Pressable onPress={() => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); }} style={[styles.dateBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                      <Ionicons name="calendar-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
+                      <Text style={[styles.dateBtnText, { color: isDark ? '#d1d5db' : '#374151' }]}>
+                        {selectedDate ? formatDateLabel(selectedDate) : 'Any date'}
+                      </Text>
+                    </Pressable>
+                    {selectedDate && (
+                      <Pressable onPress={clearDate} hitSlop={8}><Ionicons name="close-circle" size={20} color={isDark ? '#6b7280' : '#9ca3af'} /></Pressable>
+                    )}
+                  </View>
                 </View>
+                <LocalPhotographersRail breakId={breakData?.id} />
               </View>
             }
             ListEmptyComponent={
