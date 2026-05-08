@@ -22,6 +22,7 @@ import {
   useMarkNotificationsAsReadMutation,
   useUpdateAccessRequestMutation,
 } from '../../src/store';
+import UserAvatar from '../../src/components/UserAvatar';
 
 const formatDate = (dateStr: string) => {
   const d = new Date(dateStr);
@@ -232,6 +233,13 @@ export default function NotificationsScreen() {
         ? item.resource_user_access_request?.access_status
         : null;
 
+    // Prefer the actor's avatar when the notification involves a user.
+    // resource_user covers uploads/active/newBoard; metadata_user covers
+    // newFollower/userAccessRequestApproval (where the resource itself is
+    // the request/follow, not a user).
+    const actor = item.resource_user ?? item.metadata_user ?? null;
+    const showAvatar = !!actor?.picture || !!actor?.handle;
+
     return (
       <Pressable
         onPress={() => handleNotifPress(item)}
@@ -241,9 +249,18 @@ export default function NotificationsScreen() {
           isUnread && { backgroundColor: isDark ? 'rgba(59,130,246,0.08)' : '#eff6ff' },
         ]}
       >
-        <View style={[s.notifIcon, { backgroundColor: icon.color + '18' }]}>
-          <Ionicons name={icon.name as any} size={20} color={icon.color} />
-        </View>
+        {showAvatar ? (
+          <UserAvatar
+            uri={actor.picture}
+            name={actor.name ?? actor.handle}
+            size={40}
+            verified={!!actor.verified}
+          />
+        ) : (
+          <View style={[s.notifIcon, { backgroundColor: icon.color + '18' }]}>
+            <Ionicons name={icon.name as any} size={20} color={icon.color} />
+          </View>
+        )}
         <View style={s.notifContent}>
           <View style={s.notifTopRow}>
             <Text style={[s.notifTitle, isUnread && s.notifTitleUnread, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
@@ -292,7 +309,7 @@ export default function NotificationsScreen() {
         title="Notifications"
         left={
           <Pressable onPress={smartBack} hitSlop={8}>
-            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+            <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
           </Pressable>
         }
         right={unread.length > 0 ? (

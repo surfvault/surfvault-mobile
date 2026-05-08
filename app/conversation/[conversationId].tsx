@@ -269,7 +269,7 @@ export default function ConversationDetailScreen() {
           {/* Floating header — iMessage style with blur */}
           <BlurView intensity={60} tint={isDark ? 'dark' : 'light'} style={[styles.floatingHeader, { paddingTop: insets.top }]}>
             <Pressable onPress={smartBack} hitSlop={8} style={[styles.headerPill, { backgroundColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)' }]}>
-              <Ionicons name="chevron-back" size={20} color="#007AFF" />
+              <Ionicons name="chevron-back" size={20} color={isDark ? '#fff' : '#000'} />
             </Pressable>
             {otherUser ? (
               <View style={styles.headerCenter}>

@@ -10,6 +10,7 @@ import { useAuth } from '../../src/context/AuthProvider';
 import { TabBarProvider, useTabBar } from '../../src/context/TabBarContext';
 import { useActiveTab } from '../../src/context/NavigationContext';
 import UploadProgressPill from '../../src/components/UploadProgressPill';
+import GradientRing, { STORY_STOPS } from '../../src/components/GradientRing';
 
 function TabsInner() {
   const colorScheme = useColorScheme();
@@ -137,17 +138,25 @@ function TabsInner() {
           tabBarIcon: ({ color, size, focused }) => {
             if (isAuthenticated && user?.picture) {
               const avatarSize = size + 6;
+              const RING_STROKE = 2;
+              const RING_GAP = 2;
+              const ringSize = avatarSize + (RING_STROKE + RING_GAP) * 2;
               return (
                 <View style={{
-                  width: avatarSize + 4,
-                  height: avatarSize + 4,
-                  borderRadius: (avatarSize + 4) / 2,
-                  borderWidth: 2,
-                  borderColor: focused ? '#0ea5e9' : 'transparent',
+                  width: ringSize,
+                  height: ringSize,
+                  borderRadius: ringSize / 2,
                   justifyContent: 'center',
                   alignItems: 'center',
                   marginTop: 6,
                 }}>
+                  {focused && (
+                    <GradientRing
+                      size={ringSize}
+                      strokeWidth={RING_STROKE}
+                      stops={STORY_STOPS}
+                    />
+                  )}
                   <Image
                     source={{ uri: user.picture as string }}
                     style={{

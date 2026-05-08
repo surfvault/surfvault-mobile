@@ -1,7 +1,7 @@
 import { View, Text, Pressable, ScrollView, StyleSheet, useColorScheme } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Defs, LinearGradient, Stop, Circle } from 'react-native-svg';
+import GradientRing, { STORY_STOPS, ACTIVE_STOPS, NOTE_STOPS } from './GradientRing';
 import { useGetPhotographersAtBreakQuery } from '../store';
 import { useTrackedPush } from '../context/NavigationContext';
 
@@ -11,20 +11,6 @@ const isNoteActive = (setAt?: string | null) => {
   return Date.now() - new Date(setAt).getTime() < SEVEN_DAYS_MS;
 };
 
-const STORY_STOPS = [
-  { offset: '0%', color: '#22d3ee' },
-  { offset: '50%', color: '#0ea5e9' },
-  { offset: '100%', color: '#6366f1' },
-];
-const ACTIVE_STOPS = [
-  { offset: '0%', color: '#22c55e' },
-  { offset: '100%', color: '#16a34a' },
-];
-const NOTE_STOPS = [
-  { offset: '0%', color: '#38bdf8' },
-  { offset: '100%', color: '#0ea5e9' },
-];
-
 const AVATAR_SIZE = 68;
 const RING_WIDTH = 3;
 const GAP = 2;
@@ -32,28 +18,6 @@ const TOTAL = AVATAR_SIZE + (RING_WIDTH + GAP) * 2;
 
 interface Props {
   breakId?: string | null;
-}
-
-function GradientRing({ id, stops }: { id: string; stops: typeof STORY_STOPS }) {
-  return (
-    <Svg width={TOTAL} height={TOTAL} style={StyleSheet.absoluteFill}>
-      <Defs>
-        <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
-          {stops.map((s, i) => (
-            <Stop key={i} offset={s.offset} stopColor={s.color} />
-          ))}
-        </LinearGradient>
-      </Defs>
-      <Circle
-        cx={TOTAL / 2}
-        cy={TOTAL / 2}
-        r={(TOTAL - RING_WIDTH) / 2}
-        stroke={`url(#${id})`}
-        strokeWidth={RING_WIDTH}
-        fill="none"
-      />
-    </Svg>
-  );
 }
 
 export default function LocalPhotographersRail({ breakId }: Props) {
@@ -79,7 +43,6 @@ export default function LocalPhotographersRail({ breakId }: Props) {
       {photographers.map((p: any) => {
         const noteActive = isNoteActive(p?.status_note_set_at) && !!p?.status_note;
         const stops = p?.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : STORY_STOPS;
-        const gradId = `g-${p.id}`;
 
         return (
           <Pressable
@@ -88,7 +51,7 @@ export default function LocalPhotographersRail({ breakId }: Props) {
             style={styles.item}
           >
             <View style={styles.ringWrap}>
-              <GradientRing id={gradId} stops={stops} />
+              <GradientRing size={TOTAL} strokeWidth={RING_WIDTH} stops={stops} />
               <View style={[styles.avatarWrap, { backgroundColor: isDark ? '#374151' : '#e5e7eb' }]}>
                 {p.picture ? (
                   <Image

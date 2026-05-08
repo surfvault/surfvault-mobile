@@ -12,6 +12,15 @@ interface UserCoordsState {
     hasCoords: boolean;
 }
 
+interface UserCoordsOptions {
+    /**
+     * When true, suppresses the auto-prompt for foreground location permission.
+     * Use when an alternative geo signal (e.g. user's home break) is already
+     * available and asking for OS-level location would be a needless gate.
+     */
+    skipPrompt?: boolean;
+}
+
 /**
  * Reads the user's coordinates from the Redux location slice. If coords haven't
  * been populated yet (user hasn't opened the map tab), politely requests
@@ -21,7 +30,8 @@ interface UserCoordsState {
  * Denial or permission errors are swallowed — callers treat `hasCoords=false`
  * as "no geo signal" and fall back to non-targeted ads.
  */
-export function useUserCoords(): UserCoordsState {
+export function useUserCoords(options: UserCoordsOptions = {}): UserCoordsState {
+    const { skipPrompt = false } = options;
     const dispatch = useDispatch();
     const coords = useSelector((state: any) => state.location?.coordinates) as
         | { lat: number; lon: number }
@@ -30,7 +40,7 @@ export function useUserCoords(): UserCoordsState {
     const hasCoords = !!(coords && (coords.lat !== 0 || coords.lon !== 0));
 
     useEffect(() => {
-        if (hasCoords || didPromptOnce) return;
+        if (hasCoords || didPromptOnce || skipPrompt) return;
         didPromptOnce = true;
         (async () => {
             try {
@@ -51,7 +61,7 @@ export function useUserCoords(): UserCoordsState {
                 /* Permission denied or location unavailable — fall back silently. */
             }
         })();
-    }, [hasCoords, dispatch]);
+    }, [hasCoords, dispatch, skipPrompt]);
 
     return {
         lat: coords?.lat ?? null,

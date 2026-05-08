@@ -139,7 +139,7 @@ export default function ManageFavoritesScreen() {
         title="Manage Favorites"
         left={
           <Pressable onPress={goBack} hitSlop={8}>
-            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+            <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
           </Pressable>
         }
       />

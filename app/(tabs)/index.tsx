@@ -36,6 +36,7 @@ import BreakDateCard, { type BreakDateGroup } from '../../src/components/BreakDa
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
+import GradientRing, { STORY_STOPS, ACTIVE_STOPS, NOTE_STOPS } from '../../src/components/GradientRing';
 import BoardroomFeed, { type BoardroomFeedHandle } from '../../src/components/BoardroomFeed';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
@@ -83,8 +84,13 @@ export default function HomeScreen() {
 
   // Location — read from Redux (set by map page when permission is granted)
   const coords = useSelector((state: any) => state.location.coordinates);
-  // Also request on first home visit if the user never opened the map tab
-  const { lat: userLat, lon: userLon, hasCoords } = useUserCoords();
+  // Also request on first home visit if the user never opened the map tab —
+  // BUT only when the user hasn't set a home break in their profile. With a
+  // home break, we already have a geo anchor and don't need OS permission.
+  const hasProfileBreak = !!(user as any)?.surf_break_id;
+  const { lat: userLat, lon: userLon, hasCoords } = useUserCoords({
+    skipPrompt: hasProfileBreak,
+  });
 
   // Shaper feed anchors on the user's home break first (custom shapers are
   // bought near where you surf, not where you stand) and falls back to device
@@ -302,14 +308,19 @@ export default function HomeScreen() {
   const searchInputRef = useRef<TextInput>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Nearby data
+  // Nearby data — prefer the user's home break (set in profile), fall
+  // back to device GPS. `useUserCoords` auto-prompts on home visit so
+  // most users have one of the two even without visiting the map tab.
+  const nearbyLat = breakLat ?? userLat ?? coords?.lat ?? null;
+  const nearbyLon = breakLon ?? userLon ?? coords?.lon ?? null;
+  const hasNearbyAnchor = nearbyLat != null && nearbyLon != null;
   const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
-    { lat: coords?.lat ?? 0, long: coords?.lon ?? 0 },
-    { skip: !coords }
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
+    { skip: !hasNearbyAnchor }
   );
   const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
-    { lat: coords?.lat ?? 0, long: coords?.lon ?? 0 },
-    { skip: !coords }
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
+    { skip: !hasNearbyAnchor }
   );
 
   // Search — uses /map/search which returns { results: { searchContent: [...] } }
@@ -326,8 +337,14 @@ export default function HomeScreen() {
 
   const { data: tagsData } = useGetPopularTagsQuery(undefined);
 
-  const nearbyBreaks = nearbyBreaksData?.results?.surfBreaks ?? [];
-  const nearbyPhotographers = nearbyPhotographersData?.results?.photographers ?? [];
+  // API returns `nearbyBreaks` / `nearbyPhotographers` (not `surfBreaks` /
+  // `photographers`) — see mobile API response gotchas in CLAUDE.md.
+  const nearbyBreaks =
+    nearbyBreaksData?.results?.nearbyBreaks ?? nearbyBreaksData?.results?.surfBreaks ?? [];
+  const nearbyPhotographers =
+    nearbyPhotographersData?.results?.nearbyPhotographers ??
+    nearbyPhotographersData?.results?.photographers ??
+    [];
   const popularTags = tagsData?.results?.tags ?? [];
 
   // Ads for the home feed — geo-boosted when we have user coords.
@@ -769,7 +786,7 @@ export default function HomeScreen() {
 
       {feedType === 'boardroom' ? (
         <BoardroomFeed ref={boardroomRef} isDark={isDark} />
-      ) : showSkeleton ? <HomeSkeleton /> : (
+      ) : showSkeleton ? <HomeSkeleton showNearby={showNearbySections} /> : (
       <FlatList
         ref={feedListRef}
           data={feedRows}
@@ -872,30 +889,36 @@ export default function HomeScreen() {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, gap: 16 }}
                     keyExtractor={(item: any) => item.id ?? item.handle}
-                    renderItem={({ item }) => (
-                      <Pressable
-                        onPress={() => trackedPush(`/user/${item.handle}` as any)}
-                        style={{ alignItems: 'center', width: 80 }}
-                      >
-                        <UserAvatar
-                          uri={item.picture}
-                          name={item.name ?? item.handle}
-                          size={64}
-                          active={item.active}
-                          verified={item.verified}
-                          hasStatusNote={!!item.status_note && Date.now() - new Date(item.status_note_set_at).getTime() < 7 * 24 * 60 * 60 * 1000}
-                        />
-                        <Text
-                          style={[styles.photographerHandle, { color: isDark ? '#fff' : '#111827' }]}
-                          numberOfLines={1}
+                    renderItem={({ item }) => {
+                      const noteActive = !!item.status_note && Date.now() - new Date(item.status_note_set_at).getTime() < 7 * 24 * 60 * 60 * 1000;
+                      const stops = item.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : STORY_STOPS;
+                      const AVATAR = 64;
+                      const RING_STROKE = 3;
+                      const RING_GAP = 2;
+                      const RING_TOTAL = AVATAR + (RING_STROKE + RING_GAP) * 2;
+                      return (
+                        <Pressable
+                          onPress={() => trackedPush(`/user/${item.handle}` as any)}
+                          style={{ alignItems: 'center', width: 80 }}
                         >
-                          @{item.handle}
-                        </Text>
-                        {item.active && (
-                          <View style={[styles.activeDot, { backgroundColor: '#22c55e' }]} />
-                        )}
-                      </Pressable>
-                    )}
+                          <View style={{ width: RING_TOTAL, height: RING_TOTAL, alignItems: 'center', justifyContent: 'center' }}>
+                            <GradientRing size={RING_TOTAL} strokeWidth={RING_STROKE} stops={stops} />
+                            <UserAvatar
+                              uri={item.picture}
+                              name={item.name ?? item.handle}
+                              size={AVATAR}
+                              verified={item.verified}
+                            />
+                          </View>
+                          <Text
+                            style={[styles.photographerHandle, { color: isDark ? '#fff' : '#111827' }]}
+                            numberOfLines={1}
+                          >
+                            @{item.handle}
+                          </Text>
+                        </Pressable>
+                      );
+                    }}
                     scrollEnabled
                   />
                 </View>

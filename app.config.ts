@@ -10,16 +10,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
-  splash: {
-    image: './assets/splash-icon.png',
-    resizeMode: 'contain',
-    backgroundColor: '#ffffff',
-    dark: {
-      image: './assets/splash-icon-dark.png',
-      resizeMode: 'contain',
-      backgroundColor: '#000000',
-    },
-  },
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.surfvault.mobile',
@@ -50,6 +40,21 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: 'surfvault',
   plugins: [
     'expo-router',
+    [
+      'expo-splash-screen',
+      {
+        image: './assets/splash-icon.png',
+        imageWidth: 680,
+        resizeMode: 'contain',
+        backgroundColor: '#ffffff',
+        dark: {
+          image: './assets/splash-icon-dark.png',
+          imageWidth: 680,
+          resizeMode: 'contain',
+          backgroundColor: '#000000',
+        },
+      },
+    ],
     [
       'expo-notifications',
       {

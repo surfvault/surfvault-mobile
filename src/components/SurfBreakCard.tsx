@@ -1,6 +1,8 @@
 import { View, Text, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
 
 interface SurfBreakCardProps {
   surfBreak: {
@@ -12,29 +14,50 @@ interface SurfBreakCardProps {
     thumbnail?: string;
     distance?: number;
     surf_break_identifier?: string;
+    coordinates?: { lat?: number | string; lon?: number | string } | null;
+    lat?: number | string | null;
+    lon?: number | string | null;
   };
   compact?: boolean;
 }
+
+const parseCoord = (v: unknown): number | null => {
+  if (v == null) return null;
+  const n = typeof v === 'number' ? v : parseFloat(String(v));
+  return Number.isFinite(n) ? n : null;
+};
 
 export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakCardProps) {
   const router = useRouter();
 
   const handlePress = () => {
-    if (surfBreak.surf_break_identifier) {
-      // surf_break_identifier format: "country/region/break-name"
-      const parts = surfBreak.surf_break_identifier.split('/');
-      if (parts.length === 3) {
-        router.push(`/break/${parts[0]}/${parts[1]}/${parts[2]}`);
-      }
+    const ident = surfBreak.surf_break_identifier;
+    if (!ident) return;
+    // Two shapes flow into this card:
+    //   1. Composite slug "country/region/break" (used by some endpoints).
+    //   2. Bare slug + sibling country_code/region fields (nearby endpoint).
+    const parts = ident.split('/');
+    if (parts.length === 3) {
+      router.push(`/break/${parts[0]}/${parts[1]}/${parts[2]}`);
+      return;
+    }
+    const country = surfBreak.country_code ?? surfBreak.country;
+    const region = surfBreak.region && surfBreak.region !== '' ? surfBreak.region : '0';
+    if (country) {
+      router.push(`/break/${country}/${region}/${ident}`);
     }
   };
 
-  const formatDistance = (meters?: number) => {
-    if (!meters) return '';
-    const km = meters / 1000;
-    if (km < 1) return `${Math.round(meters)}m away`;
+  // Backend returns distance in km (haversine `6371 * acos(...)`).
+  const formatDistance = (km?: number) => {
+    if (km == null) return '';
+    if (km < 1) return `${Math.round(km * 1000)}m away`;
     return `${km.toFixed(1)}km away`;
   };
+
+  const lat = parseCoord(surfBreak.lat ?? surfBreak.coordinates?.lat);
+  const lon = parseCoord(surfBreak.lon ?? surfBreak.coordinates?.lon);
+  const hasCoords = lat != null && lon != null;
 
   if (compact) {
     return (
@@ -51,12 +74,73 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
               contentFit="cover"
               transition={200}
             />
+          ) : hasCoords ? (
+            <View className="w-full" style={{ aspectRatio: 4 / 3 }}>
+              <MapView
+                provider={PROVIDER_DEFAULT}
+                style={{ flex: 1 }}
+                region={{
+                  latitude: lat as number,
+                  longitude: lon as number,
+                  latitudeDelta: 0.08,
+                  longitudeDelta: 0.08,
+                }}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                toolbarEnabled={false}
+                showsUserLocation={false}
+                showsMyLocationButton={false}
+                showsCompass={false}
+                showsScale={false}
+                showsTraffic={false}
+                showsIndoors={false}
+                pointerEvents="none"
+              />
+              {/* Centered marker — drawn in pure RN over the map. Since
+                  `region` is locked to the break's coords, the visual
+                  center of the MapView is always the break, so a centered
+                  dot is correct. Avoids react-native-maps' flaky custom
+                  Marker rendering on iOS. */}
+              <View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  top: 0, left: 0, right: 0, bottom: 0,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <View
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: '#0ea5e9',
+                    borderWidth: 1.5,
+                    borderColor: '#fff',
+                    shadowColor: '#000',
+                    shadowOpacity: 0.35,
+                    shadowRadius: 2,
+                    shadowOffset: { width: 0, height: 1 },
+                  }}
+                />
+              </View>
+              {/* Tap-through overlay forwards the tap to the card's
+                  navigation handler — MapView's native gesture recognizers
+                  swallow it otherwise. */}
+              <Pressable
+                onPress={handlePress}
+                style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+              />
+            </View>
           ) : (
             <View
-              className="w-full bg-gray-200 dark:bg-gray-700 items-center justify-center"
-              style={{ aspectRatio: 4 / 3 }}
+              className="w-full items-center justify-center"
+              style={{ aspectRatio: 4 / 3, backgroundColor: '#0c4a6e' }}
             >
-              <Text className="text-gray-400 text-2xl">🏄</Text>
+              <Ionicons name="location" size={28} color="#38bdf8" />
             </View>
           )}
         </View>
@@ -68,7 +152,9 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
             {surfBreak.region}{surfBreak.country_code ? `, ${surfBreak.country_code}` : ''}
           </Text>
         )}
-        {surfBreak.distance != null && (
+        {/* Hide distance when this break IS the user's anchor — "0m away"
+            on your own home break is just noise. */}
+        {surfBreak.distance != null && surfBreak.distance >= 0.05 && (
           <Text className="text-xs text-sky-500 mt-0.5">
             {formatDistance(surfBreak.distance)}
           </Text>

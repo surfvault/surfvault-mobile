@@ -24,6 +24,7 @@ import { useTrackedPush } from '../context/NavigationContext';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetSection } from './ActionSheet';
+import HomeSkeleton from './HomeSkeleton';
 import { pickThumbnailPhoto } from './ShaperBoardsGrid';
 
 // Cap matches the backend featured-board limit (9). The trailing "Shaper
@@ -92,11 +93,7 @@ const BoardroomFeed = forwardRef<BoardroomFeedHandle, Props>(function BoardroomF
   }, [refetch]);
 
   if (isLoading) {
-    return (
-      <View style={[styles.centerWrap, { paddingVertical: 80 }]}>
-        <ActivityIndicator />
-      </View>
-    );
+    return <HomeSkeleton showNearby={false} />;
   }
 
   if (shapers.length === 0) {

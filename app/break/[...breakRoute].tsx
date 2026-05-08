@@ -208,7 +208,7 @@ export default function SurfBreakDetailScreen() {
       <ScreenHeader
         left={
           <Pressable onPress={smartBack} hitSlop={8}>
-            <Ionicons name="chevron-back" size={28} color="#007AFF" />
+            <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
           </Pressable>
         }
         right={

@@ -256,8 +256,8 @@ export default function UserProfileScreen() {
       <ScreenHeader
         left={
           <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Ionicons name="chevron-back" size={28} color="#007AFF" />
-            <Text style={{ fontSize: 17, color: '#007AFF' }}>{profile?.handle ?? handle}</Text>
+            <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
+            <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#fff' : '#111827' }}>{profile?.handle ?? handle}</Text>
           </Pressable>
         }
       />
