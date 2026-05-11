@@ -24,6 +24,7 @@ import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
+import GradientRing, { ACTIVE_STOPS, NOTE_STOPS } from '../../src/components/GradientRing';
 import { FlatList } from 'react-native';
 import React from 'react';
 
@@ -704,20 +705,38 @@ export default function MapScreen() {
                       showsHorizontalScrollIndicator={false}
                       keyExtractor={(p: any) => p.id ?? p.handle}
                       contentContainerStyle={{ paddingHorizontal: 8, gap: 12, paddingVertical: 4 }}
-                      renderItem={({ item: p }) => (
-                        <Pressable
-                          onPress={() => trackedPush(`/user/${p.handle}`)}
-                          style={styles.nearbyPhotographer}
-                        >
-                          <UserAvatar uri={p.picture} name={p.name ?? p.handle} size={44} verified={p.verified} />
-                          <View style={styles.nearbyPhotographerHandleRow}>
+                      renderItem={({ item: p }) => {
+                        const noteActive =
+                          !!p.status_note &&
+                          Date.now() - new Date(p.status_note_set_at).getTime() <
+                            7 * 24 * 60 * 60 * 1000;
+                        const stops = p.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : null;
+                        const AVATAR = 44;
+                        const RING_STROKE = 3;
+                        const RING_GAP = 2;
+                        const RING_TOTAL = AVATAR + (RING_STROKE + RING_GAP) * 2;
+                        return (
+                          <Pressable
+                            onPress={() => trackedPush(`/user/${p.handle}`)}
+                            style={styles.nearbyPhotographer}
+                          >
+                            <View style={{ width: RING_TOTAL, height: RING_TOTAL, alignItems: 'center', justifyContent: 'center' }}>
+                              {stops && <GradientRing size={RING_TOTAL} strokeWidth={RING_STROKE} stops={stops} />}
+                              <UserAvatar
+                                uri={p.picture}
+                                name={p.name ?? p.handle}
+                                size={AVATAR}
+                                verified={p.verified}
+                                userType={p.verified ? (p.user_type ?? 'photographer') : undefined}
+                                badgeBackgroundColor={isDark ? 'rgba(17,24,39,0.95)' : 'rgba(255,255,255,0.95)'}
+                              />
+                            </View>
                             <Text style={[styles.nearbyPhotographerHandle, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={1}>
                               @{p.handle}
                             </Text>
-                            {p.active && <View style={styles.nearbyActiveDot} />}
-                          </View>
-                        </Pressable>
-                      )}
+                          </Pressable>
+                        );
+                      }}
                     />
                   </View>
                 )}

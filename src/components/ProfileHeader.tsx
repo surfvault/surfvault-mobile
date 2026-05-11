@@ -1,6 +1,6 @@
 import { View, Text, Pressable, StyleSheet, Linking, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import { useGetShaperBoardsQuery } from '../store';
 
@@ -188,27 +188,8 @@ export default function ProfileHeader({
       )}
 
       {/* Tags */}
-      {(userType || profile?.verified || (!isSelf && profile?.access === 'private') || (profile?.tags?.length ?? 0) > 0) && (
+      {((!isSelf && profile?.access === 'private') || (profile?.tags?.length ?? 0) > 0) && (
         <View style={s.tagsRow}>
-          {userType && (
-            <View style={[s.tagPill, s.typePill, { backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9' }]}>
-              {userType === 'photographer' ? (
-                <Ionicons name="camera-outline" size={11} color={isDark ? '#d1d5db' : '#475569'} />
-              ) : userType === 'shaper' ? (
-                <MaterialCommunityIcons name="hammer-wrench" size={11} color={isDark ? '#d1d5db' : '#475569'} />
-              ) : (
-                <MaterialCommunityIcons name="surfing" size={12} color={isDark ? '#d1d5db' : '#475569'} />
-              )}
-              <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#d1d5db' : '#475569' }}>
-                {userType === 'photographer' ? 'Photographer' : userType === 'shaper' ? 'Shaper' : 'Surfer'}
-              </Text>
-            </View>
-          )}
-          {profile?.verified && (
-            <View style={[s.tagPill, { backgroundColor: isDark ? 'rgba(14,165,233,0.15)' : '#f0f9ff', borderWidth: 1, borderColor: isDark ? 'rgba(14,165,233,0.3)' : '#bae6fd' }]}>
-              <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#38bdf8' : '#0284c7' }}>Verified</Text>
-            </View>
-          )}
           {!isSelf && profile?.access === 'private' && (
             <View style={[s.tagPill, { backgroundColor: isDark ? 'rgba(239,68,68,0.1)' : '#fef2f2', borderWidth: 1, borderColor: isDark ? 'rgba(239,68,68,0.25)' : '#fecaca' }]}>
               <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#fca5a5' : '#dc2626' }}>Private</Text>

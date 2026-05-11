@@ -23,6 +23,7 @@ import { useUser } from '../context/UserProvider';
 import { useTrackedPush } from '../context/NavigationContext';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
 import ActionSheet from './ActionSheet';
+import UserAvatar from './UserAvatar';
 import type { ActionSheetSection } from './ActionSheet';
 import HomeSkeleton from './HomeSkeleton';
 import { pickThumbnailPhoto } from './ShaperBoardsGrid';
@@ -278,17 +279,15 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
           regardless of the inline carousel size. */}
       <View style={styles.header}>
         <Pressable onPress={openShaperProfile} style={styles.headerLeft}>
-          <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            {shaper.picture ? (
-              <Image source={{ uri: shaper.picture }} style={styles.avatarImg} contentFit="cover" />
-            ) : (
-              <MaterialCommunityIcons
-                name="surfing"
-                size={18}
-                color={isDark ? '#9ca3af' : '#6b7280'}
-              />
-            )}
-          </View>
+          <UserAvatar
+            uri={shaper.picture}
+            name={shaper.name ?? shaper.handle}
+            size={44}
+            verified={!!shaper.verified}
+            // Boardroom only shows shapers, so the badge is only informative
+            // when verified.
+            userType={shaper.verified ? 'shaper' : undefined}
+          />
           <View style={styles.headerInfo}>
             <Text
               style={[styles.shaperName, { color: isDark ? '#fff' : '#111827' }]}

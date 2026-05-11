@@ -9,6 +9,7 @@ interface PhotographerCardProps {
     name?: string;
     picture?: string;
     verified?: boolean;
+    user_type?: 'surfer' | 'photographer' | 'shaper';
     active?: boolean;
     status_note?: string;
     status_note_set_at?: string;
@@ -39,6 +40,7 @@ export default function PhotographerCard({ photographer, compact = false }: Phot
           size={48}
           active={photographer.active}
           verified={photographer.verified}
+          userType={photographer.user_type ?? 'photographer'}
           hasStatusNote={hasActiveNote}
         />
         <Text
@@ -62,6 +64,7 @@ export default function PhotographerCard({ photographer, compact = false }: Phot
         size={44}
         active={photographer.active}
         verified={photographer.verified}
+        userType={photographer.user_type ?? 'photographer'}
         hasStatusNote={hasActiveNote}
       />
       <View className="flex-1 ml-3">

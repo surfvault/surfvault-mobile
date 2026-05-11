@@ -1,7 +1,8 @@
 import { View, Text, Pressable, ScrollView, StyleSheet, useColorScheme } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import GradientRing, { STORY_STOPS, ACTIVE_STOPS, NOTE_STOPS } from './GradientRing';
+import GradientRing, { ACTIVE_STOPS, NOTE_STOPS } from './GradientRing';
+import UserTypeBadge from './UserTypeBadge';
 import { useGetPhotographersAtBreakQuery } from '../store';
 import { useTrackedPush } from '../context/NavigationContext';
 
@@ -42,7 +43,8 @@ export default function LocalPhotographersRail({ breakId }: Props) {
     >
       {photographers.map((p: any) => {
         const noteActive = isNoteActive(p?.status_note_set_at) && !!p?.status_note;
-        const stops = p?.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : STORY_STOPS;
+        // Active wins over note. Idle (no active + no note) → no ring at all.
+        const stops = p?.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : null;
 
         return (
           <Pressable
@@ -51,7 +53,7 @@ export default function LocalPhotographersRail({ breakId }: Props) {
             style={styles.item}
           >
             <View style={styles.ringWrap}>
-              <GradientRing size={TOTAL} strokeWidth={RING_WIDTH} stops={stops} />
+              {stops && <GradientRing size={TOTAL} strokeWidth={RING_WIDTH} stops={stops} />}
               <View style={[styles.avatarWrap, { backgroundColor: isDark ? '#374151' : '#e5e7eb' }]}>
                 {p.picture ? (
                   <Image
@@ -65,15 +67,12 @@ export default function LocalPhotographersRail({ breakId }: Props) {
                   <Ionicons name="person" size={28} color={isDark ? '#cbd5e1' : '#94a3b8'} />
                 )}
               </View>
-              {p?.active && (
+              {p?.verified && (
                 <View
                   pointerEvents="none"
-                  style={[
-                    styles.activePill,
-                    { borderColor: isDark ? '#000' : '#fff' },
-                  ]}
+                  style={[styles.badge, { backgroundColor: isDark ? '#000' : '#fff' }]}
                 >
-                  <Text style={styles.activePillText}>ACTIVE</Text>
+                  <UserTypeBadge userType="photographer" isVerified size={24} />
                 </View>
               )}
             </View>
@@ -110,20 +109,14 @@ const styles = StyleSheet.create({
   },
   avatar: { width: AVATAR_SIZE, height: AVATAR_SIZE },
   handle: { fontSize: 11, marginTop: 4, maxWidth: TOTAL + 8 },
-  activePill: {
+  badge: {
     position: 'absolute',
-    bottom: -2,
-    alignSelf: 'center',
-    backgroundColor: '#22c55e',
-    borderRadius: 999,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-    borderWidth: 1,
-  },
-  activePillText: {
-    fontSize: 8,
-    fontWeight: '800',
-    color: '#fff',
-    letterSpacing: 0.4,
+    bottom: 4,
+    right: 4,
+    width: 27,
+    height: 27,
+    borderRadius: 13.5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

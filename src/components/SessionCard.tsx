@@ -3,7 +3,7 @@ import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, us
 import type { ViewToken, LayoutChangeEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetOption, ActionSheetSection, ActionSheetHeader } from './ActionSheet';
@@ -297,19 +297,13 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             <UserAvatar
               uri={session.user_picture}
               name={session.user_name ?? handle}
-              size={44}
+              size={52}
               verified={session.user_verified}
+              userType={session.user_type}
             />
             <View style={styles.headerInfo}>
               <View style={styles.headerNameRow}>
                 <Text style={[styles.handleText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{handle}</Text>
-                {session.user_type && (
-                  session.user_type === 'photographer' ? (
-                    <Ionicons name="camera-outline" size={12} color="#9ca3af" style={styles.typeIcon} />
-                  ) : (
-                    <MaterialCommunityIcons name="surfing" size={13} color="#9ca3af" style={styles.typeIcon} />
-                  )
-                )}
                 {session.session_date && (
                   <>
                     <Text style={styles.dotSeparator}>·</Text>

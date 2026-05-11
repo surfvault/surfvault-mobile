@@ -41,6 +41,7 @@ import {
 } from '../../src/store';
 import { useTabBar } from '../../src/context/TabBarContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
+import UserTypeBadge from '../../src/components/UserTypeBadge';
 import SessionCard from '../../src/components/SessionCard';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
@@ -598,12 +599,28 @@ export default function ProfileScreen() {
             <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
               {user?.handle ?? ''}
             </Text>
+            {(user?.user_type === 'surfer' || user?.user_type === 'photographer' || user?.user_type === 'shaper') && (
+              <UserTypeBadge
+                userType={user.user_type}
+                isVerified={!!(user as any)?.verified}
+                size={28}
+              />
+            )}
             <Ionicons name="chevron-down" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
           </Pressable>
         ) : (
-          <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
-            {user?.handle ?? ''}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
+              {user?.handle ?? ''}
+            </Text>
+            {(user?.user_type === 'surfer' || user?.user_type === 'photographer' || user?.user_type === 'shaper') && (
+              <UserTypeBadge
+                userType={user.user_type}
+                isVerified={!!(user as any)?.verified}
+                size={28}
+              />
+            )}
+          </View>
         )}
         <View style={s.headerRight}>
           <Pressable onPress={() => trackedPush('/notifications' as any)} hitSlop={8}>

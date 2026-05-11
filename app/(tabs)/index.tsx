@@ -36,7 +36,7 @@ import BreakDateCard, { type BreakDateGroup } from '../../src/components/BreakDa
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
 import UserAvatar from '../../src/components/UserAvatar';
-import GradientRing, { STORY_STOPS, ACTIVE_STOPS, NOTE_STOPS } from '../../src/components/GradientRing';
+import GradientRing, { ACTIVE_STOPS, NOTE_STOPS } from '../../src/components/GradientRing';
 import BoardroomFeed, { type BoardroomFeedHandle } from '../../src/components/BoardroomFeed';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
@@ -601,7 +601,7 @@ export default function HomeScreen() {
                     const userType = item.user_type;
                     return (
                       <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
-                        <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} />
+                        <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} userType={userType} />
                         <View style={styles.resultInfo}>
                           <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
                             {item.name ?? item.handle}
@@ -891,7 +891,8 @@ export default function HomeScreen() {
                     keyExtractor={(item: any) => item.id ?? item.handle}
                     renderItem={({ item }) => {
                       const noteActive = !!item.status_note && Date.now() - new Date(item.status_note_set_at).getTime() < 7 * 24 * 60 * 60 * 1000;
-                      const stops = item.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : STORY_STOPS;
+                      // Active wins over note. Idle → no ring.
+                      const stops = item.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : null;
                       const AVATAR = 64;
                       const RING_STROKE = 3;
                       const RING_GAP = 2;
@@ -902,12 +903,13 @@ export default function HomeScreen() {
                           style={{ alignItems: 'center', width: 80 }}
                         >
                           <View style={{ width: RING_TOTAL, height: RING_TOTAL, alignItems: 'center', justifyContent: 'center' }}>
-                            <GradientRing size={RING_TOTAL} strokeWidth={RING_STROKE} stops={stops} />
+                            {stops && <GradientRing size={RING_TOTAL} strokeWidth={RING_STROKE} stops={stops} />}
                             <UserAvatar
                               uri={item.picture}
                               name={item.name ?? item.handle}
                               size={AVATAR}
                               verified={item.verified}
+                              userType={item.verified ? (item.user_type ?? 'photographer') : undefined}
                             />
                           </View>
                           <Text

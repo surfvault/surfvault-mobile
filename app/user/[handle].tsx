@@ -38,6 +38,7 @@ import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGa
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
+import UserTypeBadge from '../../src/components/UserTypeBadge';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -268,6 +269,15 @@ export default function UserProfileScreen() {
             <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#fff' : '#111827' }}>
               {profile?.handle ?? handle}
             </Text>
+            {(profile?.user_type === 'surfer' || profile?.user_type === 'photographer' || profile?.user_type === 'shaper') && (
+              <View style={{ marginLeft: 6 }}>
+                <UserTypeBadge
+                  userType={profile.user_type}
+                  isVerified={!!profile?.verified}
+                  size={28}
+                />
+              </View>
+            )}
           </Pressable>
         }
       />

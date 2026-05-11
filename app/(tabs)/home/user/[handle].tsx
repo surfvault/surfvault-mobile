@@ -23,6 +23,7 @@ import {
   useFollowUserMutation,
 } from '../../../../src/store';
 import UserAvatar from '../../../../src/components/UserAvatar';
+import UserTypeBadge from '../../../../src/components/UserTypeBadge';
 import SessionCard from '../../../../src/components/SessionCard';
 
 const isNoteActive = (setAt?: string): boolean => {
@@ -180,18 +181,9 @@ export default function UserProfileScreen() {
         </Text>
       )}
 
-      {/* Role pill + Tags */}
-      {(userType || (profile?.tags?.length ?? 0) > 0) && (
+      {/* Tags */}
+      {(profile?.tags?.length ?? 0) > 0 && (
         <View style={styles.tagsRow}>
-          {userType && (
-            <View style={[styles.tagPill, {
-              backgroundColor: isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9',
-            }]}>
-              <Text style={{ fontSize: 11, fontWeight: '500', color: isDark ? '#d1d5db' : '#475569' }}>
-                {userType === 'photographer' ? '📸 Photographer' : '🏄‍♂️ Surfer'}
-              </Text>
-            </View>
-          )}
           {profile?.tags?.map((tag: string) => (
             <View key={tag} style={[styles.tagPill, {
               backgroundColor: isDark ? 'rgba(99,102,241,0.1)' : '#eef2ff',
@@ -258,6 +250,15 @@ export default function UserProfileScreen() {
           <Pressable onPress={() => router.back()} style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
             <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#fff' : '#111827' }}>{profile?.handle ?? handle}</Text>
+            {(profile?.user_type === 'surfer' || profile?.user_type === 'photographer' || profile?.user_type === 'shaper') && (
+              <View style={{ marginLeft: 6 }}>
+                <UserTypeBadge
+                  userType={profile.user_type}
+                  isVerified={!!profile?.verified}
+                  size={28}
+                />
+              </View>
+            )}
           </Pressable>
         }
       />

@@ -12,7 +12,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   newArchEnabled: true,
   ios: {
     supportsTablet: true,
-    bundleIdentifier: 'com.surfvault.mobile',
+    bundleIdentifier: 'com.surfvaultapp.mobile',
     usesAppleSignIn: true,
     entitlements: {
       'com.apple.developer.applesignin': ['Default'],
@@ -29,7 +29,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       backgroundColor: '#ffffff',
     },
     edgeToEdgeEnabled: true,
-    package: 'com.surfvault.mobile',
+    package: 'com.surfvaultapp.mobile',
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     config: {
       googleMaps: {

@@ -23,6 +23,7 @@ import {
   useReadConversationMutation,
 } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
+import UserTypeBadge from '../../src/components/UserTypeBadge';
 import ConversationSkeleton from '../../src/components/ConversationSkeleton';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -277,7 +278,6 @@ export default function ConversationDetailScreen() {
                   uri={isOtherUserDeleted ? undefined : otherUser.picture}
                   name={isOtherUserDeleted ? 'Deleted User' : (otherUser.name ?? otherUser.handle)}
                   size={36}
-                  verified={isOtherUserDeleted ? false : otherUser.verified}
                 />
                 <Pressable
                   onPress={isOtherUserDeleted ? undefined : () => trackedPush(`/user/${otherUser.handle}` as any)}
@@ -287,6 +287,13 @@ export default function ConversationDetailScreen() {
                   <Text style={[styles.headerHandle, { color: isOtherUserDeleted ? (isDark ? '#6b7280' : '#9ca3af') : (isDark ? '#fff' : '#111827') }]} numberOfLines={1}>
                     {isOtherUserDeleted ? 'Deleted User' : (otherUser.name ?? otherUser.handle)}
                   </Text>
+                  {!isOtherUserDeleted && (otherUser.user_type === 'surfer' || otherUser.user_type === 'photographer' || otherUser.user_type === 'shaper') && (
+                    <UserTypeBadge
+                      userType={otherUser.user_type}
+                      isVerified={!!otherUser.verified}
+                      size={16}
+                    />
+                  )}
                   {!isOtherUserDeleted && <Ionicons name="chevron-forward" size={12} color={isDark ? '#6b7280' : '#9ca3af'} />}
                 </Pressable>
               </View>
