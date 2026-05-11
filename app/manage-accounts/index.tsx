@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import ScreenHeader from '../../src/components/ScreenHeader';
 import { useSmartBack } from '../../src/context/NavigationContext';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useLinkedAccounts } from '../../src/context/LinkedAccountsContext';
+import UserTypeBadge from '../../src/components/UserTypeBadge';
 import { getAuthToken } from '../../src/store/apis/customBaseQuery';
 
 const MAX_LINKED_ACCOUNTS = 5;
@@ -29,9 +30,43 @@ export default function ManageAccountsScreen() {
   const isDark = useColorScheme() === 'dark';
   const smartBack = useSmartBack();
   const { login } = useAuth();
-  const { accounts, activeUserId, switchTo, removeAccount, busy } = useLinkedAccounts();
+  const { accounts, activeUserId, switchTo, removeAccount, busy, patchAccount } = useLinkedAccounts();
   const [adding, setAdding] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
+  const refreshedRef = useRef<Set<string>>(new Set());
+
+  // Refresh persisted display fields for each linked account so the switcher
+  // doesn't render stale values for entries added before recent schema
+  // additions (verified, etc.).
+  useEffect(() => {
+    const apiBase = Constants.expoConfig?.extra?.apiBaseUrl ?? '';
+    accounts.forEach((acct) => {
+      if (acct.status !== 'ok') return;
+      if (!acct.accessToken) return;
+      if (refreshedRef.current.has(acct.userId)) return;
+      refreshedRef.current.add(acct.userId);
+      (async () => {
+        try {
+          const res = await fetch(`${apiBase}/user/self`, {
+            headers: { Authorization: `Bearer ${acct.accessToken}` },
+          });
+          if (!res.ok) return;
+          const json = await res.json();
+          const u = json?.results?.user ?? json?.results;
+          if (!u?.id) return;
+          await patchAccount(acct.userId, {
+            verified: !!u.verified,
+            handle: u.handle ?? acct.handle,
+            name: u.name ?? acct.name,
+            picture: u.picture ?? acct.picture,
+            userType: u.user_type ?? acct.userType,
+          });
+        } catch {
+          // best-effort
+        }
+      })();
+    });
+  }, [accounts, patchAccount]);
 
   // Add account flow:
   //   1. Remember the currently-active user — that's the side already in
@@ -222,11 +257,17 @@ export default function ManageAccountsScreen() {
                         </Text>
                       </View>
                     )}
-                    <View style={{ flex: 1, marginLeft: 12 }}>
-                      <Text style={[s.label, { color: isDark ? '#fff' : '#111827' }]}>{label}</Text>
-                      <Text style={[s.sublabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                        {acct.userType ?? '—'}
+                    <View style={{ flex: 1, marginLeft: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={[s.label, { color: isDark ? '#fff' : '#111827', flexShrink: 1 }]} numberOfLines={1}>
+                        {label}
                       </Text>
+                      {(acct.userType === 'surfer' || acct.userType === 'photographer' || acct.userType === 'shaper') && (
+                        <UserTypeBadge
+                          userType={acct.userType}
+                          isVerified={!!acct.verified}
+                          size={18}
+                        />
+                      )}
                     </View>
                     {busyUserId === acct.userId ? (
                       <ActivityIndicator size="small" color="#0ea5e9" />

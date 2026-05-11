@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useEffect, type ComponentProps } from 'react';
+import { useCallback, useMemo, useRef, useEffect, type ComponentProps, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -30,6 +30,8 @@ export interface ActionSheetOption {
   imageUri?: string | null;
   /** Optional secondary line under the label (e.g. user_type pill text). */
   subtitle?: string;
+  /** Optional node rendered inline immediately after the label (e.g. a small badge). */
+  labelBadge?: ReactNode;
   /** Renders an active checkmark on the right side of the row. */
   trailingCheckmark?: boolean;
   /** Centers the label text horizontally and suppresses the icon slot. */
@@ -261,18 +263,21 @@ export default function ActionSheet({ visible, options, sections, title, header,
                         // takes flex:1 so the row layout matches the
                         // single-line variant.
                         <View style={{ flex: 1 }}>
-                          <Text
-                            style={[
-                              styles.rowText,
-                              { color: itemColor },
-                              opt.destructive && styles.rowTextDestructive,
-                              opt.centered && { textAlign: 'center' },
-                              { flex: undefined },
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {opt.label}
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text
+                              style={[
+                                styles.rowText,
+                                { color: itemColor, flexShrink: 1 },
+                                opt.destructive && styles.rowTextDestructive,
+                                opt.centered && { textAlign: 'center' },
+                                { flex: undefined },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {opt.label}
+                            </Text>
+                            {opt.labelBadge}
+                          </View>
                           <Text
                             style={{
                               fontSize: 10,
@@ -285,6 +290,23 @@ export default function ActionSheet({ visible, options, sections, title, header,
                           >
                             {opt.subtitle}
                           </Text>
+                        </View>
+                      ) : opt.labelBadge ? (
+                        // Label + inline badge variant — keep both on the
+                        // same baseline, badge sits flush to the label end.
+                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text
+                            style={[
+                              styles.rowText,
+                              { color: itemColor, flexShrink: 1, flex: undefined },
+                              opt.destructive && styles.rowTextDestructive,
+                              opt.centered && { textAlign: 'center' },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {opt.label}
+                          </Text>
+                          {opt.labelBadge}
                         </View>
                       ) : (
                         // Single-line variant: keep the original direct-child

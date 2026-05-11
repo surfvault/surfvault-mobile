@@ -8,7 +8,7 @@ import React, {
   useState,
 } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { saveAuthToken } from '../store/apis/customBaseQuery';
+import { saveAuthToken, clearAuthToken } from '../store/apis/customBaseQuery';
 import { store } from '../store';
 import { rootApi } from '../store/apis/rootApi';
 import { refreshAccessToken } from '../helpers/auth0Refresh';
@@ -29,6 +29,7 @@ export interface AccountSession {
   picture: string | null;
   userType: 'surfer' | 'photographer' | 'shaper' | null;
   email: string | null;
+  verified: boolean;
   refreshToken: string;
   accessToken: string;
   expiresAt: number;
@@ -59,6 +60,20 @@ interface LinkedAccountsContextType extends LinkedAccountsState {
   removeAccount: (userId: string) => Promise<void>;
   /** Mark an account as needing re-authentication (refresh failed). */
   markExpired: (userId: string) => void;
+  /**
+   * Sign out of the active account WITHOUT removing it from the linked-accounts
+   * list. Marks it expired so the next switch-back requires reauth, then
+   * switches to another `ok` account if one exists, otherwise leaves the app
+   * signed out (the expired entry stays in the switcher).
+   */
+  signOutCurrent: (userIdHint?: string | null) => Promise<void>;
+  /**
+   * Patch a single linked account's persisted display fields (handle,
+   * verified, picture, etc.) without touching tokens or active state. Used
+   * by Manage Accounts to refresh stale fields after the schema gained new
+   * columns.
+   */
+  patchAccount: (userId: string, patch: Partial<AccountSession>) => Promise<void>;
   /** True while async work is in flight (initial hydrate, refresh, switch). */
   busy: boolean;
 }
@@ -70,6 +85,8 @@ const LinkedAccountsContext = createContext<LinkedAccountsContextType>({
   switchTo: async () => false,
   removeAccount: async () => {},
   markExpired: () => {},
+  signOutCurrent: async () => {},
+  patchAccount: async () => {},
   busy: false,
 });
 
@@ -246,6 +263,51 @@ export function LinkedAccountsProvider({ children }: { children: React.ReactNode
     [writeState]
   );
 
+  const patchAccount = useCallback(
+    async (userId: string, patch: Partial<AccountSession>) => {
+      const accounts = stateRef.current.accounts.map((a) =>
+        a.userId === userId ? { ...a, ...patch } : a
+      );
+      await writeState({ ...stateRef.current, accounts });
+    },
+    [writeState]
+  );
+
+  // Mirror of the web flow. Marks the target account expired (so the next
+  // switch-back requires reauth) and either promotes another `ok` account to
+  // active or leaves the app fully signed-out.
+  //
+  // `userIdHint` lets callers target the account they're displaying, in case
+  // `activeUserId` and the installed bearer have drifted apart.
+  const signOutCurrent = useCallback(
+    async (userIdHint?: string | null) => {
+      const targetId = userIdHint || stateRef.current.activeUserId;
+      if (!targetId) {
+        await clearAuthToken();
+        store.dispatch(rootApi.util.resetApiState());
+        return;
+      }
+
+      const nextAccounts = stateRef.current.accounts.map((a) =>
+        a.userId === targetId ? { ...a, status: 'expired' as const } : a
+      );
+      const fallback = nextAccounts
+        .filter((a) => a.userId !== targetId && a.status !== 'expired')
+        .sort((a, b) => b.addedAt - a.addedAt)[0];
+
+      if (fallback) {
+        await writeState({ accounts: nextAccounts, activeUserId: fallback.userId });
+        await switchTo(fallback.userId);
+        return;
+      }
+
+      await writeState({ accounts: nextAccounts, activeUserId: null });
+      await saveAuthToken(null);
+      store.dispatch(rootApi.util.resetApiState());
+    },
+    [writeState, switchTo]
+  );
+
   const value = useMemo<LinkedAccountsContextType>(
     () => ({
       accounts: state.accounts,
@@ -254,9 +316,11 @@ export function LinkedAccountsProvider({ children }: { children: React.ReactNode
       switchTo,
       removeAccount,
       markExpired,
+      signOutCurrent,
+      patchAccount,
       busy,
     }),
-    [state, addAccount, switchTo, removeAccount, markExpired, busy]
+    [state, addAccount, switchTo, removeAccount, markExpired, signOutCurrent, patchAccount, busy]
   );
 
   return <LinkedAccountsContext.Provider value={value}>{children}</LinkedAccountsContext.Provider>;

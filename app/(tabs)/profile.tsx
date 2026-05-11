@@ -21,6 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useNavigation } from 'expo-router';
 import { useDispatch } from 'react-redux';
 import { useTrackedPush } from '../../src/context/NavigationContext';
+import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
@@ -69,8 +70,42 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
   const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
-  const { accounts: linkedAccounts, activeUserId, switchTo: switchLinkedAccount } =
+  const { accounts: linkedAccounts, activeUserId, switchTo: switchLinkedAccount, patchAccount } =
     useLinkedAccounts();
+  // Refresh persisted display fields (verified, picture, etc.) for each
+  // linked account when the switcher opens, so the sheet matches current
+  // server state instead of stale local data.
+  const refreshedAcctIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!accountSwitcherVisible) return;
+    const apiBase = Constants.expoConfig?.extra?.apiBaseUrl ?? '';
+    linkedAccounts.forEach((acct) => {
+      if (acct.status !== 'ok') return;
+      if (!acct.accessToken) return;
+      if (refreshedAcctIdsRef.current.has(acct.userId)) return;
+      refreshedAcctIdsRef.current.add(acct.userId);
+      (async () => {
+        try {
+          const res = await fetch(`${apiBase}/user/self`, {
+            headers: { Authorization: `Bearer ${acct.accessToken}` },
+          });
+          if (!res.ok) return;
+          const json = await res.json();
+          const u = json?.results?.user ?? json?.results;
+          if (!u?.id) return;
+          await patchAccount(acct.userId, {
+            verified: !!u.verified,
+            handle: u.handle ?? acct.handle,
+            name: u.name ?? acct.name,
+            picture: u.picture ?? acct.picture,
+            userType: u.user_type ?? acct.userType,
+          });
+        } catch {
+          // best-effort
+        }
+      })();
+    });
+  }, [accountSwitcherVisible, linkedAccounts, patchAccount]);
   // Sibling profiles linked on this device, excluding the active one.
   const siblingAccounts = linkedAccounts.filter((a) => a.userId !== activeUserId);
   const hasSiblings = siblingAccounts.length > 0;
@@ -954,7 +989,16 @@ export default function ProfileScreen() {
                 .filter((a) => a.userId === activeUserId)
                 .map((acct) => ({
                   label: acct.handle ?? acct.name ?? acct.email ?? 'Account',
-                  subtitle: acct.userType ?? undefined,
+                  labelBadge:
+                    acct.userType === 'surfer' || acct.userType === 'photographer' || acct.userType === 'shaper'
+                      ? (
+                          <UserTypeBadge
+                            userType={acct.userType}
+                            isVerified={!!acct.verified}
+                            size={16}
+                          />
+                        )
+                      : undefined,
                   imageUri: acct.picture ?? undefined,
                   icon: acct.picture ? undefined : ('person-circle-outline' as const),
                   trailingCheckmark: true,
@@ -962,10 +1006,20 @@ export default function ProfileScreen() {
                 }))),
               ...siblingAccounts.map((acct) => ({
                 label: acct.handle ?? acct.name ?? acct.email ?? 'Account',
+                // Expired accounts keep the "Tap to re-authenticate" hint as
+                // a subtitle so the user knows what'll happen on tap.
                 subtitle:
-                  acct.status === 'expired'
-                    ? 'Tap to re-authenticate'
-                    : (acct.userType ?? undefined),
+                  acct.status === 'expired' ? 'Tap to re-authenticate' : undefined,
+                labelBadge:
+                  acct.status !== 'expired' && (acct.userType === 'surfer' || acct.userType === 'photographer' || acct.userType === 'shaper')
+                    ? (
+                        <UserTypeBadge
+                          userType={acct.userType}
+                          isVerified={!!acct.verified}
+                          size={16}
+                        />
+                      )
+                    : undefined,
                 imageUri: acct.picture ?? undefined,
                 icon: acct.picture
                   ? undefined

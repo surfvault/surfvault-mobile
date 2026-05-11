@@ -30,10 +30,11 @@ interface AuthContextType {
    */
   login: () => Promise<string | null>;
   /**
-   * Sign out of the *active* account only. Other linked accounts on this
-   * device stay registered and reachable via the switcher. When the last
-   * account is removed, also clears the underlying Auth0 Keychain entry so
-   * the next authorize() forces a fresh login.
+   * Sign out of the *active* account only. The entry stays in the linked
+   * set marked `expired` (switching back requires reauth). Other linked
+   * accounts keep their tokens. When the active was the last `ok` account,
+   * the app drops to a signed-out state and the Auth0 Keychain is wiped so
+   * the next authorize() forces fresh creds.
    */
   logout: () => Promise<void>;
   token: string | null;
@@ -54,6 +55,7 @@ async function fetchSelfWithToken(accessToken: string): Promise<{
   picture: string | null;
   user_type: 'surfer' | 'photographer' | 'shaper' | null;
   email: string | null;
+  verified: boolean;
 } | null> {
   const apiBaseUrl = Constants.expoConfig?.extra?.apiBaseUrl ?? '';
   try {
@@ -71,6 +73,7 @@ async function fetchSelfWithToken(accessToken: string): Promise<{
       picture: user.picture ?? null,
       user_type: user.user_type ?? null,
       email: user.email ?? null,
+      verified: !!user.verified,
     };
   } catch {
     return null;
@@ -144,6 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     picture: profile.picture,
                     userType: profile.user_type,
                     email: profile.email,
+                    verified: profile.verified,
                   }
                 );
               }
@@ -190,6 +194,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           picture: account.picture,
           userType: account.userType,
           email: account.email,
+          verified: account.verified,
         }
       );
       return refreshed.accessToken;
@@ -224,6 +229,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           picture: profile.picture,
           userType: profile.user_type,
           email: profile.email,
+          verified: profile.verified,
         }
       );
       return profile.id;
@@ -234,6 +240,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [authorize, getCredentials, linked]);
 
   // -------------------- LOGOUT (active account only) --------------------
+  // Mirrors web behavior: the account stays in the linked set marked
+  // `expired` so the user can switch back with one tap (re-auth flow). If
+  // no other `ok` account remains, drop to a fully signed-out state and
+  // clear the Auth0 Keychain so the next login forces fresh creds.
   const logout = useCallback(async () => {
     const activeId = activeUserIdRef.current;
     if (!activeId) return;
@@ -255,13 +265,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // best-effort
         }
       }
-      // Drop the active account from the linked set; LinkedAccountsContext
-      // promotes the next-most-recent or clears state entirely.
-      const willBeEmpty = accountsRef.current.length <= 1;
-      await linked.removeAccount(activeId);
-      if (willBeEmpty) {
-        // Last account on this device — clear the Auth0 Keychain entry so
-        // the next authorize() doesn't silently inherit the prior session.
+
+      // Will the device end up fully signed-out? True when no OTHER `ok`
+      // accounts exist — we only want to wipe the Auth0 keychain then.
+      const hasOkFallback = accountsRef.current.some(
+        (a) => a.userId !== activeId && a.status === 'ok'
+      );
+      await linked.signOutCurrent(activeId);
+      if (!hasOkFallback) {
         try {
           await clearCredentials();
         } catch {
