@@ -150,6 +150,7 @@ export default function FollowStatsScreen() {
             name={item.name ?? item.handle}
             size={42}
             verified={item.verified}
+            userType={item.user_type}
           />
         </View>
         <View style={{ flex: 1, minWidth: 0, marginLeft: 12, marginRight: 8 }}>

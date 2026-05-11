@@ -255,6 +255,7 @@ export default function NotificationsScreen() {
             name={actor.name ?? actor.handle}
             size={40}
             verified={!!actor.verified}
+            userType={actor.user_type}
           />
         ) : (
           <View style={[s.notifIcon, { backgroundColor: icon.color + '18' }]}>

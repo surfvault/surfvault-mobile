@@ -1,9 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, FlatList, useColorScheme, type LayoutChangeEvent, type ViewToken } from 'react-native';
 import { Image } from 'expo-image';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
-import VerifiedBadge from './VerifiedBadge';
 import { useTrackedPush } from '../context/NavigationContext';
 
 /**
@@ -107,7 +106,7 @@ const hiddenAreaLabel = (group: BreakDateGroup): string | null => {
 const MAX_VISIBLE_TAGS = 3;
 const STACK_OVERLAP = 14;
 const STACK_AVATAR_SIZE = 36;
-const SOLO_AVATAR_SIZE = 44;
+const SOLO_AVATAR_SIZE = 52;
 
 export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
   const colorScheme = useColorScheme();
@@ -182,22 +181,12 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
       <View style={styles.card}>
         <View style={styles.header}>
           <Pressable onPress={onPrimaryPress} style={styles.headerLeft}>
-            <UserAvatar uri={solo.user_picture} name={solo.user_name ?? solo.user_handle} size={SOLO_AVATAR_SIZE} />
+            <UserAvatar uri={solo.user_picture} name={solo.user_name ?? solo.user_handle} size={SOLO_AVATAR_SIZE} verified={solo.user_verified} userType={solo.user_type} />
             <View style={styles.headerInfo}>
               <View style={styles.headerNameRow}>
                 <Text style={[styles.primaryText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
                   {primary}
                 </Text>
-                {handleIsPrimary && solo.user_verified && (
-                  <View style={{ marginLeft: 4 }}>
-                    <VerifiedBadge size={16} />
-                  </View>
-                )}
-                {handleIsPrimary && solo.user_type && (
-                  solo.user_type === 'photographer'
-                    ? <Ionicons name="camera-outline" size={13} color="#9ca3af" style={styles.typeIcon} />
-                    : <MaterialCommunityIcons name="surfing" size={14} color="#9ca3af" style={styles.typeIcon} />
-                )}
                 {group.session_date && (
                   <>
                     <Text style={styles.dotSeparator}>·</Text>
@@ -210,16 +199,6 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
                   <Text style={[styles.subtitleText, { color: isDark ? '#d1d5db' : '#4b5563' }]} numberOfLines={1}>
                     {subtitle}
                   </Text>
-                  {solo.user_verified && (
-                    <View style={{ marginLeft: 3 }}>
-                      <VerifiedBadge size={14} />
-                    </View>
-                  )}
-                  {solo.user_type && (
-                    solo.user_type === 'photographer'
-                      ? <Ionicons name="camera-outline" size={11} color="#9ca3af" style={styles.typeIcon} />
-                      : <MaterialCommunityIcons name="surfing" size={12} color="#9ca3af" style={styles.typeIcon} />
-                  )}
                 </View>
               )}
             </View>

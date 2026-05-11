@@ -516,30 +516,13 @@ export default function SessionDetailScreen() {
                       name={session.user_name ?? sessionHandle}
                       size={36}
                       verified={session.user_verified}
+                      userType={session.user_type}
                     />
                     <View style={{ marginLeft: 8, flex: 1 }}>
                       <View style={styles.nameRow}>
                         <Text style={[styles.photographerName, { color: isDark ? '#fff' : '#111827' }]}>
                           {session.user_name ?? sessionHandle}
                         </Text>
-                        {session.user_type && (
-                          <View style={[styles.typePill, {
-                            backgroundColor: session.user_type === 'photographer'
-                              ? (isDark ? 'rgba(14, 165, 233, 0.15)' : '#f0f9ff')
-                              : (isDark ? 'rgba(139, 92, 246, 0.15)' : '#f5f3ff'),
-                            borderColor: session.user_type === 'photographer'
-                              ? (isDark ? 'rgba(14, 165, 233, 0.3)' : '#bae6fd')
-                              : (isDark ? 'rgba(139, 92, 246, 0.3)' : '#ddd6fe'),
-                          }]}>
-                            <Text style={[styles.typePillText, {
-                              color: session.user_type === 'photographer'
-                                ? (isDark ? '#38bdf8' : '#0284c7')
-                                : (isDark ? '#a78bfa' : '#7c3aed'),
-                            }]}>
-                              {session.user_type === 'photographer' ? 'Photographer' : 'Surfer'}
-                            </Text>
-                          </View>
-                        )}
                       </View>
                       {subtitleParts.length > 0 && (
                         <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>

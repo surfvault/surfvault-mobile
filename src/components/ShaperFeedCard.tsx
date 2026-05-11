@@ -15,6 +15,7 @@ import { useTrackedPush } from '../context/NavigationContext';
 import type { BoardroomShaper, Board } from '../store';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
 import { pickThumbnailPhoto } from './ShaperBoardsGrid';
+import UserAvatar from './UserAvatar';
 
 interface ShaperFeedCardProps {
   shaper: BoardroomShaper;
@@ -77,25 +78,18 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
       {/* Header — shaper identity */}
       <View style={styles.header}>
         <Pressable onPress={openShaperProfile} style={styles.headerLeft}>
-          <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            {shaper.picture ? (
-              <Image source={{ uri: shaper.picture }} style={styles.avatarImg} contentFit="cover" />
-            ) : (
-              <MaterialCommunityIcons
-                name="hammer-wrench"
-                size={18}
-                color={isDark ? '#9ca3af' : '#6b7280'}
-              />
-            )}
-          </View>
+          <UserAvatar
+            uri={shaper.picture}
+            name={shaper.name ?? shaper.handle}
+            size={52}
+            userType="shaper"
+            verified={!!shaper.verified}
+          />
           <View style={styles.headerInfo}>
             <View style={styles.headerNameRow}>
               <Text style={[styles.shaperName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
                 {shaper.name ?? shaper.handle}
               </Text>
-              <View style={styles.shaperPill}>
-                <Text style={styles.shaperPillText}>Shaper</Text>
-              </View>
             </View>
             {/* Subtitle priority:
              *   1. Distance — Boardroom only (when viewer + shaper both have a break)

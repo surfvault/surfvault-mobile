@@ -125,6 +125,7 @@ export default function MessagesScreen() {
           name={isDeleted ? 'Deleted User' : (other?.name ?? other?.handle)}
           size={48}
           verified={isDeleted ? false : other?.verified}
+          userType={isDeleted ? undefined : other?.user_type}
           active={isDeleted ? false : other?.active}
         />
         <View style={styles.conversationInfo}>

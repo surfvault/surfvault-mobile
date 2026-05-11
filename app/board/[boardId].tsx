@@ -509,6 +509,7 @@ export default function BoardDetailScreen() {
                   name={board.shaper.name ?? board.shaper.handle}
                   size={56}
                   verified={board.shaper.verified ?? false}
+                  userType="shaper"
                 />
                 <View style={{ marginLeft: 12, flex: 1 }}>
                   <View style={s.nameRow}>

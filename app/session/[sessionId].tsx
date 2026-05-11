@@ -963,19 +963,13 @@ export default function SessionDetailScreen() {
                       name={session.user_name ?? sessionHandle}
                       size={56}
                       verified={session.user_verified}
+                      userType={session.user_type}
                     />
                     <View style={{ marginLeft: 12, flex: 1 }}>
                       <View style={styles.nameRow}>
                         <Text style={[styles.photographerName, { color: isDark ? '#fff' : '#111827' }]}>
                           {session.user_name ?? sessionHandle}
                         </Text>
-                        {session.user_type && (
-                          session.user_type === 'photographer' ? (
-                            <Ionicons name="camera-outline" size={14} color="#9ca3af" style={styles.typeIcon} />
-                          ) : (
-                            <MaterialCommunityIcons name="surfing" size={15} color="#9ca3af" style={styles.typeIcon} />
-                          )
-                        )}
                         {(taggedUsers.length > 0 || isOwner) && (
                           <Pressable
                             onPress={(e) => { e.stopPropagation(); setTagSheetVisible(true); }}
