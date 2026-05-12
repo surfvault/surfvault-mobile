@@ -12,6 +12,7 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
@@ -24,6 +25,7 @@ import {
   useUpdateUserEmailMutation,
   useCancelEmailChangeMutation,
   useResendEmailChangeMutation,
+  useGetSelfQuery,
 } from '../../src/store';
 
 const PLANS: Record<string, string> = {
@@ -80,6 +82,20 @@ export default function AccountScreen() {
   const [updateEmail, { isLoading: isUpdatingEmail }] = useUpdateUserEmailMutation();
   const [cancelEmailChange, { isLoading: isCancellingEmail }] = useCancelEmailChangeMutation();
   const [resendEmailChange, { isLoading: isResendingEmail }] = useResendEmailChangeMutation();
+
+  // Reuse the already-active getSelf subscription from _layout.tsx — RTK
+  // Query dedupes the request and gives us the refetch handle for pull-to-
+  // refresh.
+  const { refetch: refetchSelf } = useGetSelfQuery(undefined);
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refetchSelf();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refetchSelf]);
 
   const [emailModalOpen, setEmailModalOpen] = useState(false);
   const [emailDraft, setEmailDraft] = useState('');
@@ -173,7 +189,7 @@ export default function AccountScreen() {
   const handleCloseAccount = useCallback(() => {
     Alert.alert(
       'Close Your Account?',
-      'Your account will be scheduled for permanent deletion in 30 days. During this time you can log back in to cancel.\n\n⚠️ Download any photos you want to keep before the 30 days are up. After that, all your photos, sessions, and data will be permanently deleted and cannot be recovered.\n\nYour subscription (if any) will be set to cancel at the end of your current billing period. If you cancel the deletion before then, your subscription will continue normally.',
+      'Your account will be scheduled for permanent deletion in 30 days. During this time you can log back in to cancel.\n\nDownload any photos you want to keep before the 30 days are up. After that, all your photos, sessions, and data will be permanently deleted and cannot be recovered.\n\nYour subscription (if any) will be set to cancel at the end of your current billing period. If you cancel the deletion before then, your subscription will continue normally.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -212,7 +228,17 @@ export default function AccountScreen() {
         }
       />
 
-      <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={isDark ? '#fff' : '#000'}
+          />
+        }
+      >
         {/* Account Details */}
         <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
           <Text style={[s.sectionTitle, { color: primaryText }]}>Account details</Text>
