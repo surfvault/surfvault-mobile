@@ -46,7 +46,6 @@ const getNotifIcon = (type: string): { name: string; color: string } => {
     case 'newFollower': return { name: 'person-add-outline', color: '#f59e0b' };
     case 'userAccessRequest': return { name: 'lock-open-outline', color: '#ef4444' };
     case 'userAccessRequestApproval': return { name: 'checkmark-circle-outline', color: '#22c55e' };
-    case 'welcomeUser': return { name: 'hand-right-outline', color: '#0ea5e9' };
     default: return { name: 'notifications-outline', color: '#6b7280' };
   }
 };
@@ -62,7 +61,6 @@ const getNotifTitle = (n: any): string => {
     case 'newFollower': return 'New Follower';
     case 'userAccessRequest': return 'Access Request';
     case 'userAccessRequestApproval': return 'Access Approved';
-    case 'welcomeUser': return 'Welcome to SurfVault';
     default: return 'Notification';
   }
 };
@@ -116,7 +114,7 @@ export default function NotificationsScreen() {
     const status = n.resource_user_access_request?.access_status;
     // Already decided — no-op (status pill is rendered on the card)
     if (status === 'approved' || status === 'rejected') return;
-    const handle = n.body?.split(' has ')?.[0] ?? n.metadata_user?.handle ?? '';
+    const handle = n.metadata_user?.handle ?? '';
     setAccessTarget({ requestId: n.resource_id, notificationId: n.id, handle });
     setActionSheetVisible(true);
   }, []);
