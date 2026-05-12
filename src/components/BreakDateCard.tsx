@@ -7,6 +7,7 @@ import ActionSheet, { type ActionSheetOption, type ActionSheetSection } from './
 import ReportSessionSheet from './ReportSessionSheet';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import { useTrackedPush } from '../context/NavigationContext';
+import { resolveAspect } from '../helpers/aspectRatio';
 
 /**
  * Discover/Favorites grouped card. Mirrors web `BreakDateCard.jsx`. Two
@@ -35,6 +36,7 @@ interface SessionInGroup {
   user_verified?: boolean;
   user_type?: string;
   hide_location?: boolean;
+  aspect_ratio?: string | null;
   surf_break_country?: string;
   surf_break_country_name?: string;
   surf_break_region?: string;
@@ -146,6 +148,11 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
     return out;
   }, [slides]);
 
+  // Card height is locked to the first visible slide's owner-set ratio so the
+  // card doesn't jump as the user swipes. Subsequent slides center-crop via
+  // `resizeMode: 'cover'` (expo-image default `contentFit="cover"`).
+  const cardAspect = resolveAspect(slides[0] ?? group.sessions?.[0], 4 / 5);
+
   const showBreakInfo = !group.hide_location && !!(group.surf_break_name || group.surf_break_identifier);
   const breakName = showBreakInfo
     ? (group.surf_break_name || group.surf_break_identifier?.replace(/_/g, ' '))
@@ -217,6 +224,7 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
       });
     }
     if (soloPrimary.length > 0) soloSections.push({ options: soloPrimary });
+
     soloSections.push({
       options: [{
         label: 'Report',
@@ -263,17 +271,17 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
         {/* Inlined thumbnail — same exact structure as SessionCard's
             non-carousel branch so layout is identical. */}
         <View>
-          <View style={[styles.thumbnail, styles.emptyThumb, { aspectRatio: 4 / 5, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+          <View style={[styles.thumbnail, styles.emptyThumb, { aspectRatio: cardAspect, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
             <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
           </View>
           {solo.thumbnail && (
             <Pressable
               onPress={() => trackedPush(`/session/${solo.session_id}` as any)}
-              style={[styles.thumbnail, { aspectRatio: 4 / 5, position: 'absolute', top: 0, left: 0 }]}
+              style={[styles.thumbnail, { aspectRatio: cardAspect, position: 'absolute', top: 0, left: 0 }]}
             >
               <Image
                 source={{ uri: solo.thumbnail }}
-                style={[styles.thumbnail, { aspectRatio: 4 / 5 }]}
+                style={[styles.thumbnail, { aspectRatio: cardAspect }]}
                 contentFit="cover"
                 transition={200}
               />
@@ -406,7 +414,7 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
 
       {/* Carousel — one slide per session, all routed to break+date page. */}
       <View onLayout={(e: LayoutChangeEvent) => setSlideWidth(e.nativeEvent.layout.width)}>
-        <View style={[styles.thumbnail, styles.emptyThumb, { aspectRatio: 4 / 5, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+        <View style={[styles.thumbnail, styles.emptyThumb, { aspectRatio: cardAspect, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
           <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
         </View>
         {slideWidth > 0 && (
@@ -420,10 +428,10 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
             viewabilityConfig={viewabilityConfig}
             style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
             renderItem={({ item }) => (
-              <Pressable onPress={goToBreakOnDate} style={{ width: slideWidth, aspectRatio: 4 / 5 }}>
+              <Pressable onPress={goToBreakOnDate} style={{ width: slideWidth, aspectRatio: cardAspect }}>
                 <Image
                   source={{ uri: item.thumbnail! }}
-                  style={{ width: slideWidth, aspectRatio: 4 / 5 }}
+                  style={{ width: slideWidth, aspectRatio: cardAspect }}
                   contentFit="cover"
                   transition={200}
                 />

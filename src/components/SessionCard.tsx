@@ -11,7 +11,9 @@ import ReportSessionSheet from './ReportSessionSheet';
 import { useUser } from '../context/UserProvider';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import { useTrackedPush } from '../context/NavigationContext';
-import { useFollowUserMutation, useUpdateUserFavoritesMutation } from '../store';
+import { useFollowUserMutation, useUpdateUserFavoritesMutation, useUpdateSessionMutation } from '../store';
+import { resolveAspect, type AspectRatioKey } from '../helpers/aspectRatio';
+import AspectRatioSheet from './AspectRatioSheet';
 
 const formatCount = (n: number): string => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
@@ -35,6 +37,11 @@ interface SessionCardProps {
   // portrait). Set on profile-list-tab usages so list rows stay compact.
   compact?: boolean;
   hideFavoriteBreak?: boolean;
+  // Suppress the owner-only "Aspect Ratio" entry. Set on home-feed usages —
+  // we only want the picker to appear in profile list + surf-break feed so
+  // the photographer can see the effect in the surfaces where it visually
+  // matters most. Defaults to false.
+  hideAspectRatioOption?: boolean;
   onPress?: () => void;
   onDelete?: () => void;
   isViewable?: boolean;
@@ -57,6 +64,7 @@ interface SessionCardProps {
     region?: string;
     surf_break_identifier?: string;
     hide_location?: boolean;
+    aspect_ratio?: string | null;
     view_count?: number;
     tagged_users?: TaggedUser[];
   };
@@ -121,8 +129,10 @@ type Slide =
   | { kind: 'photo'; url: string; id: string }
   | { kind: 'cta' };
 
-export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, compact = false, hideFavoriteBreak = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
-  const thumbAspect = compact ? 5 / 4 : 4 / 5;
+export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, compact = false, hideFavoriteBreak = false, hideAspectRatioOption = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
+  // Owner-set aspect ratio wins. Fallback: compact list rows stay 5:4
+  // landscape, feed cards stay 4:5 portrait.
+  const thumbAspect = resolveAspect(session, compact ? 5 / 4 : 4 / 5);
   const router = useRouter();
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
@@ -131,8 +141,10 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
   const requireAuth = useRequireAuth();
   const [followUser] = useFollowUserMutation();
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
+  const [updateSession] = useUpdateSessionMutation();
   const [sheetVisible, setSheetVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  const [aspectSheetVisible, setAspectSheetVisible] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
   const [slideWidth, setSlideWidth] = useState(0);
 
@@ -202,6 +214,13 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
     if (handle) trackedPush(`/user/${handle}`);
   };
 
+  // RTK Query invalidation on `Session | SurfBreak | User` reflows this
+  // exact card on the next render. `null` clears back to the surface default.
+  const handleAspectRatioSelect = (next: AspectRatioKey | null) => {
+    if (!sessionId) return;
+    updateSession({ sessionId, aspectRatio: next });
+  };
+
   const sheetSections: ActionSheetSection[] = [];
 
   // Section 1: User/break actions
@@ -243,6 +262,30 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
         const country = (session as any).surf_break_country ?? (session as any).country_code ?? '';
         const region = (session as any).surf_break_region ?? (session as any).region ?? '0';
         trackedPush(`/break/${country}/${region}/${id}`);
+      },
+    });
+  }
+
+  // Owner-only: change the card's aspect ratio. Lives here (rather than the
+  // session detail page) so the photographer sees the change apply to this
+  // exact card on dismiss.
+  //
+  // Two signals:
+  //   1. `onDelete` is wired — parent treats this as owner-actionable (used
+  //      on profile-list tab, where `getUserSessions` strips user_handle).
+  //   2. `handle === user?.handle` — for home/break feeds where the API
+  //      returns user_handle and the parent isn't owner-aware.
+  const isOwnSession = !!sessionId && (!!onDelete || (!!handle && handle === user?.handle));
+  if (isOwnSession && !hideAspectRatioOption) {
+    primaryOptions.push({
+      label: 'Aspect Ratio',
+      icon: 'resize-outline',
+      onPress: () => {
+        setSheetVisible(false);
+        // 220ms stagger so the ellipsis sheet finishes closing before the
+        // aspect sheet opens — stacked modals on iOS look glitchy if they
+        // animate simultaneously.
+        setTimeout(() => setAspectSheetVisible(true), 220);
       },
     });
   }
@@ -484,6 +527,14 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
         visible={reportVisible}
         sessionId={session.session_id ?? session.id}
         onClose={() => setReportVisible(false)}
+      />
+
+      <AspectRatioSheet
+        visible={aspectSheetVisible}
+        current={((session as any).aspect_ratio ?? null) as AspectRatioKey | null}
+        thumbnailUri={session.thumbnail}
+        onClose={() => setAspectSheetVisible(false)}
+        onSelect={handleAspectRatioSelect}
       />
     </View>
   );

@@ -103,7 +103,7 @@ const surfApi = rootApi.injectEndpoints({
       }),
     }),
     getSurfBreakSessions: builder.query({
-      providesTags: [],
+      providesTags: [ApiTag.SurfBreak, ApiTag.Session],
       query: ({
         surfBreakId,
         limit,
@@ -316,20 +316,103 @@ const surfApi = rootApi.injectEndpoints({
       }),
     }),
     updateSession: builder.mutation({
-      invalidatesTags: [ApiTag.SurfBreak],
+      // Skip invalidation for aspect-ratio-only updates. Both the profile
+      // and surf-break feeds accumulate paginated pages in component state;
+      // invalidating would refetch page 1 and snap the user back to the top
+      // with all scrolled-in pages dropped. The `onQueryStarted` patch below
+      // already updates every cache that contains this session, so the UI
+      // stays consistent without a refetch. When the user navigates away
+      // and remounts the feed, RTK Query's standard refetch-on-mount picks
+      // up server truth.
+      invalidatesTags: (_result, _err, arg) => {
+        const isAspectOnly =
+          arg.aspectRatio !== undefined &&
+          arg.sessionName === undefined &&
+          arg.hideLocation === undefined;
+        return isAspectOnly ? [] : [ApiTag.SurfBreak, ApiTag.Session, ApiTag.User];
+      },
       query: ({
         sessionId,
         sessionName,
         hideLocation,
+        aspectRatio,
       }: {
         sessionId: string;
         sessionName?: string;
         hideLocation?: boolean;
+        aspectRatio?: '4:5' | '1:1' | '5:4' | '16:9' | null;
       }) => ({
         url: `/surf-sessions/${sessionId}`,
         method: 'PATCH',
-        body: { sessionName, hideLocation },
+        body: { sessionName, hideLocation, aspectRatio },
       }),
+      // Optimistic update: patch every cached feed/detail entry that
+      // contains this session BEFORE the server replies. Card reflows
+      // immediately on chip tap. Reverts if the PATCH fails.
+      async onQueryStarted(arg, { dispatch, queryFulfilled, getState }) {
+        if (arg.aspectRatio === undefined) return; // not an aspect-ratio update
+        const nextRatio = arg.aspectRatio; // string | null
+        const targetId = arg.sessionId;
+
+        // Walks every cached entry of `endpointName` and runs `mutator` on
+        // its `draft` (immer draft). Collects patch results for revert.
+        const patches: { undo: () => void }[] = [];
+        const patchEndpoint = (endpointName: string, mutator: (draft: any) => void) => {
+          const state: any = getState();
+          const queries = state?.rootApiSlice?.queries ?? {};
+          for (const key of Object.keys(queries)) {
+            if (!key.startsWith(`${endpointName}(`)) continue;
+            const entry = queries[key];
+            const originalArgs = entry?.originalArgs;
+            if (originalArgs === undefined) continue;
+            const patch = dispatch(
+              (surfApi.util as any).updateQueryData(endpointName, originalArgs, mutator)
+            );
+            patches.push(patch);
+          }
+        };
+
+        // getSession → { results: { session: {...} } } — single session
+        patchEndpoint('getSession', (draft: any) => {
+          const s = draft?.results?.session;
+          if (s && (s.id === targetId || s.session_id === targetId)) {
+            s.aspect_ratio = nextRatio;
+          }
+        });
+
+        // getUserSessions / getSurfBreakSessions →
+        // { results: { sessions: [...] } } — flat list, may have session_id or id
+        const flatListMutator = (draft: any) => {
+          const arr = draft?.results?.sessions;
+          if (!Array.isArray(arr)) return;
+          for (const row of arr) {
+            if (row && (row.id === targetId || row.session_id === targetId)) {
+              row.aspect_ratio = nextRatio;
+            }
+          }
+        };
+        patchEndpoint('getUserSessions', flatListMutator);
+        patchEndpoint('getSurfBreakSessions', flatListMutator);
+
+        // getSurfBreakWithLatestSessions →
+        // { results: { surfBreak, sessions: [...] } } — break detail page
+        patchEndpoint('getSurfBreakWithLatestSessions', (draft: any) => {
+          const arr = draft?.results?.sessions;
+          if (!Array.isArray(arr)) return;
+          for (const row of arr) {
+            if (row && (row.session_id === targetId || row.id === targetId)) {
+              row.aspect_ratio = nextRatio;
+            }
+          }
+        });
+
+        try {
+          await queryFulfilled;
+        } catch {
+          // Server rejected — undo every patch so caches revert to truth.
+          patches.forEach((p) => p.undo());
+        }
+      },
     }),
     deleteSession: builder.mutation({
       invalidatesTags: [ApiTag.SurfBreak, ApiTag.Session, ApiTag.User],

@@ -821,6 +821,7 @@ export default function HomeScreen() {
                 session={item}
                 isViewable={viewable}
                 enableCarousel
+                hideAspectRatioOption
                 onPress={() => {
                   const sid = item.session_id ?? item.id;
                   if (sid) trackedPush(`/session/${sid}` as any);
