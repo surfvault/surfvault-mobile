@@ -178,7 +178,12 @@ export default function MessagesScreen() {
       ? item.participant_one_unread_count
       : item.participant_two_unread_count;
     const hasUnread = unreadCount > 0;
-    const lastMessage = item.last_message?.body ?? '';
+    const rawLastMessage = item.last_message?.body ?? '';
+    const lastMessage = rawLastMessage.includes('Photo Access Request:')
+      ? 'Photo Access Request'
+      : rawLastMessage.includes('Surf Media Access Granted:')
+        ? 'Photos Granted!'
+        : rawLastMessage;
 
     return (
       <Pressable
