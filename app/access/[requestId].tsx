@@ -86,6 +86,7 @@ export default function AccessRequestScreen() {
   const requestUser = accessRequest?.request_user;
   const targetUser = accessRequest?.target_user;
   const otherUser = isOwner ? requestUser : targetUser;
+  const canSaveToVault = requestUser?.user_type === 'surfer';
   const session = accessRequest?.session;
   const surfBreak = accessRequest?.surf_break;
 
@@ -348,28 +349,30 @@ export default function AccessRequestScreen() {
 
         {!isOwner && isApproved && (
           <>
-            <Pressable
-              onPress={handleSaveToVault}
-              disabled={savingToVault || Boolean(accessRequest?.saved_to_vault_at)}
-              style={[
-                s.actionBtn,
-                { backgroundColor: accessRequest?.saved_to_vault_at ? '#64748b' : '#0ea5e9' },
-                accessRequest?.saved_to_vault_at && { opacity: 0.7 },
-              ]}
-            >
-              <Ionicons
-                name={accessRequest?.saved_to_vault_at ? 'checkmark-circle' : 'cloud-upload-outline'}
-                size={18}
-                color="#fff"
-              />
-              <Text style={s.actionBtnText}>
-                {savingToVault
-                  ? 'Saving...'
-                  : accessRequest?.saved_to_vault_at
-                    ? 'Saved to Vault'
-                    : 'Save to Vault'}
-              </Text>
-            </Pressable>
+            {canSaveToVault && (
+              <Pressable
+                onPress={handleSaveToVault}
+                disabled={savingToVault || Boolean(accessRequest?.saved_to_vault_at)}
+                style={[
+                  s.actionBtn,
+                  { backgroundColor: accessRequest?.saved_to_vault_at ? '#64748b' : '#0ea5e9' },
+                  accessRequest?.saved_to_vault_at && { opacity: 0.7 },
+                ]}
+              >
+                <Ionicons
+                  name={accessRequest?.saved_to_vault_at ? 'checkmark-circle' : 'cloud-upload-outline'}
+                  size={18}
+                  color="#fff"
+                />
+                <Text style={s.actionBtnText}>
+                  {savingToVault
+                    ? 'Saving...'
+                    : accessRequest?.saved_to_vault_at
+                      ? 'Saved to Vault'
+                      : 'Save to Vault'}
+                </Text>
+              </Pressable>
+            )}
             <Pressable onPress={handleSaveAllToPhotos} disabled={savingAll} style={[s.actionBtn, { backgroundColor: '#38bdf8' }]}>
               {savingAll ? (
                 <ActivityIndicator size="small" color="#fff" />
