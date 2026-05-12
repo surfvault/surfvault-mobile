@@ -46,6 +46,11 @@ export interface ActionSheetHeader {
   title: string;
   subtitle?: string;
   imageUri?: string;
+  /**
+   * Custom left-side node (e.g. an avatar stack). Renders in the same slot as
+   * `imageUri` would and takes precedence when both are set.
+   */
+  imageNode?: ReactNode;
 }
 
 interface ActionSheetProps {
@@ -200,7 +205,9 @@ export default function ActionSheet({ visible, options, sections, title, header,
           {/* Header — contextual info about what was selected */}
           {header ? (
             <View style={styles.headerSection}>
-              {header.imageUri ? (
+              {header.imageNode ? (
+                <View style={styles.headerImageNode}>{header.imageNode}</View>
+              ) : header.imageUri ? (
                 <Image
                   source={{ uri: header.imageUri }}
                   style={styles.headerImage}
@@ -386,6 +393,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 8,
+    marginRight: 12,
+  },
+  headerImageNode: {
     marginRight: 12,
   },
   headerText: {

@@ -1,8 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, FlatList, useColorScheme, type LayoutChangeEvent, type ViewToken } from 'react-native';
+import { View, Text, Pressable, StyleSheet, FlatList, Platform, Share, useColorScheme, type LayoutChangeEvent, type ViewToken } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
+import ActionSheet, { type ActionSheetOption, type ActionSheetSection } from './ActionSheet';
+import ReportSessionSheet from './ReportSessionSheet';
+import { useRequireAuth } from '../hooks/useRequireAuth';
 import { useTrackedPush } from '../context/NavigationContext';
 
 /**
@@ -112,8 +115,11 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const trackedPush = useTrackedPush();
+  const requireAuth = useRequireAuth();
   const [activeSlide, setActiveSlide] = useState(0);
   const [slideWidth, setSlideWidth] = useState(0);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [reportSessionId, setReportSessionId] = useState<string | null>(null);
 
   // Group sessions by photographer so carousel order matches subtitle.
   const slides = useMemo(() => {
@@ -177,6 +183,52 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
       else goToProfile(solo.user_handle);
     };
 
+    // Solo sheet — mirrors SessionCard's menu where data is available. The
+    // grouped feed doesn't carry is_following / surf_break_is_favorited yet, so
+    // Follow / Favorite Break are omitted (TODO: extend services/surf grouped
+    // feed to include those flags, then add the actions here).
+    const soloSections: ActionSheetSection[] = [];
+    soloSections.push({
+      options: [{
+        label: 'Share',
+        icon: 'share-outline',
+        onPress: () => {
+          const url = `https://share.surf-vault.com/s/${solo.session_id}`;
+          Share.share(Platform.OS === 'ios' ? { url } : { message: url });
+        },
+      }],
+    });
+    const soloPrimary: ActionSheetOption[] = [];
+    if (solo.user_handle) {
+      soloPrimary.push({
+        label: 'View Profile',
+        icon: 'person-outline',
+        onPress: () => goToProfile(solo.user_handle),
+      });
+    }
+    if (showBreakInfo && group.surf_break_identifier && group.surf_break_country) {
+      soloPrimary.push({
+        label: 'View Break',
+        icon: 'location-outline',
+        onPress: () => {
+          const region = group.surf_break_region || '0';
+          trackedPush(`/break/${group.surf_break_country}/${region}/${group.surf_break_identifier}` as any);
+        },
+      });
+    }
+    if (soloPrimary.length > 0) soloSections.push({ options: soloPrimary });
+    soloSections.push({
+      options: [{
+        label: 'Report',
+        icon: 'flag-outline',
+        destructive: true,
+        onPress: () => {
+          if (!requireAuth()) return;
+          setReportSessionId(solo.session_id);
+        },
+      }],
+    });
+
     return (
       <View style={styles.card}>
         <View style={styles.header}>
@@ -202,6 +254,9 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
                 </View>
               )}
             </View>
+          </Pressable>
+          <Pressable onPress={() => setSheetVisible(true)} hitSlop={8}>
+            <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
           </Pressable>
         </View>
 
@@ -247,11 +302,59 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
             </View>
           )}
         </View>
+
+        <ActionSheet
+          visible={sheetVisible}
+          sections={soloSections}
+          header={{
+            title: solo.session_name || (showBreakInfo ? (breakName ?? 'Session') : (solo.user_handle ?? 'Session')),
+            subtitle: [
+              solo.user_handle ? `@${solo.user_handle}` : undefined,
+              showBreakInfo ? breakName : undefined,
+              group.session_date ? formatDate(group.session_date) : undefined,
+            ].filter(Boolean).join(' · ') || undefined,
+            imageUri: solo.thumbnail,
+          }}
+          onClose={() => setSheetVisible(false)}
+        />
+        <ReportSessionSheet
+          visible={!!reportSessionId}
+          sessionId={reportSessionId ?? undefined}
+          onClose={() => setReportSessionId(null)}
+        />
       </View>
     );
   }
 
   // ──────────────────────────────────────── MULTI ────────────────────────────────────────
+  // Multi sheet — actions that map naturally to N sessions/photographers.
+  // Skip Follow (which photographer?) and Report (which session?); both would
+  // need disambiguation UI. The whole-group share goes to the break+date page.
+  const multiSections: ActionSheetSection[] = [];
+  const multiShareUrl = showBreakInfo && group.surf_break_country && group.surf_break_identifier
+    ? `https://share.surf-vault.com/${group.surf_break_country}/${group.surf_break_region || '0'}/${group.surf_break_identifier}${group.session_date ? `?date=${String(group.session_date).split('T')[0]}` : ''}`
+    : null;
+  if (multiShareUrl) {
+    multiSections.push({
+      options: [{
+        label: 'Share',
+        icon: 'share-outline',
+        onPress: () => {
+          Share.share(Platform.OS === 'ios' ? { url: multiShareUrl } : { message: multiShareUrl });
+        },
+      }],
+    });
+  }
+  if (showBreakInfo && group.surf_break_identifier && group.surf_break_country) {
+    multiSections.push({
+      options: [{
+        label: 'View Break',
+        icon: 'location-outline',
+        onPress: goToBreakOnDate,
+      }],
+    });
+  }
+
   return (
     <View style={styles.card}>
       <View style={styles.header}>
@@ -294,6 +397,11 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
             </Text>
           </View>
         </Pressable>
+        {multiSections.length > 0 && (
+          <Pressable onPress={() => setSheetVisible(true)} hitSlop={8}>
+            <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+          </Pressable>
+        )}
       </View>
 
       {/* Carousel — one slide per session, all routed to break+date page. */}
@@ -376,6 +484,38 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
           })}
         </View>
       )}
+
+      <ActionSheet
+        visible={sheetVisible}
+        sections={multiSections}
+        header={{
+          title: breakName ?? 'Sessions',
+          subtitle: [
+            group.session_date ? formatDate(group.session_date) : undefined,
+            `${group.sessions.length} session${group.sessions.length === 1 ? '' : 's'}`,
+          ].filter(Boolean).join(' · ') || undefined,
+          imageNode: (
+            <View style={styles.avatarStack}>
+              {photographers.slice(0, 3).map((p, i) => (
+                <View
+                  key={p.user_handle}
+                  style={{ marginLeft: i > 0 ? -STACK_OVERLAP : 0, zIndex: 30 - i }}
+                >
+                  <UserAvatar uri={p.user_picture} name={p.user_name ?? p.user_handle} size={STACK_AVATAR_SIZE} />
+                </View>
+              ))}
+              {photographers.length > 3 && (
+                <View style={[styles.stackOverflow, { marginLeft: -STACK_OVERLAP, backgroundColor: isDark ? '#374151' : '#e5e7eb' }]}>
+                  <Text style={[styles.stackOverflowText, { color: isDark ? '#e5e7eb' : '#374151' }]}>
+                    +{photographers.length - 3}
+                  </Text>
+                </View>
+              )}
+            </View>
+          ),
+        }}
+        onClose={() => setSheetVisible(false)}
+      />
     </View>
   );
 }

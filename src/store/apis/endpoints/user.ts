@@ -255,6 +255,27 @@ const userApi = rootApi.injectEndpoints({
         method: 'PATCH',
       }),
     }),
+    updateUserEmail: builder.mutation<{ success: boolean; pendingEmail?: string; unchanged?: boolean }, { email: string }>({
+      invalidatesTags: [ApiTag.User],
+      query: ({ email }) => ({
+        url: '/user/update-email',
+        method: 'PATCH',
+        body: { email },
+      }),
+    }),
+    cancelEmailChange: builder.mutation<{ success: boolean }, void>({
+      invalidatesTags: [ApiTag.User],
+      query: () => ({
+        url: '/user/cancel-email-change',
+        method: 'PATCH',
+      }),
+    }),
+    resendEmailChange: builder.mutation<{ success: boolean }, void>({
+      query: () => ({
+        url: '/user/resend-email-change',
+        method: 'PATCH',
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -282,6 +303,9 @@ export const {
   useUpdateUserRecentSearchesMutation,
   useRequestAccountDeletionMutation,
   useCancelAccountDeletionMutation,
+  useUpdateUserEmailMutation,
+  useCancelEmailChangeMutation,
+  useResendEmailChangeMutation,
   useRegisterDeviceMutation,
   useUnregisterDeviceMutation,
   useGetLinkedAccountsQuery,

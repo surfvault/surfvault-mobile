@@ -88,6 +88,11 @@ function TabsInner() {
           ? {
               backgroundColor: isDark ? '#000000' : '#ffffff',
               borderTopColor: isDark ? '#1f2937' : '#e5e7eb',
+              // Default iOS tab bar has zero top padding, so icons crowd the
+              // top border. Bump the content area for breathing room; height
+              // is left unset so the safe-area inset is handled automatically
+              // (home-indicator vs home-button devices need different totals).
+              paddingTop: 4,
             }
           : { display: 'none' },
       }}

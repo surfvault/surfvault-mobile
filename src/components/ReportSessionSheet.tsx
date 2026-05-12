@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -49,6 +50,7 @@ export default function ReportSessionSheet({ visible, sessionId, onClose }: Repo
 
   const [selected, setSelected] = useState<string>('');
   const [details, setDetails] = useState<string>('');
+  const scrollRef = useRef<ScrollView | null>(null);
 
   // Reset form each time the sheet opens
   useEffect(() => {
@@ -121,8 +123,16 @@ export default function ReportSessionSheet({ visible, sessionId, onClose }: Repo
 
         <KeyboardAvoidingView
           style={s.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+          <ScrollView
+            ref={scrollRef}
+            style={s.flex}
+            contentContainerStyle={{ paddingBottom: 32 }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+            showsVerticalScrollIndicator={false}
+          >
           <View style={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 16 }}>
             <Text style={[s.intro, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
               Help us understand the issue. Your report is anonymous to the uploader — our team
@@ -198,6 +208,12 @@ export default function ReportSessionSheet({ visible, sessionId, onClose }: Repo
               <TextInput
                 value={details}
                 onChangeText={(t) => t.length <= DETAILS_MAX && setDetails(t)}
+                onFocus={() => {
+                  // Wait for the keyboard to start animating up, then scroll
+                  // the textarea into view. iOS reports the keyboard frame
+                  // ~250ms after focus; 300ms is a safe single delay.
+                  setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 300);
+                }}
                 placeholder={selected === 'other'
                   ? 'Tell us what\'s wrong...'
                   : 'Add any context that would help our review'}
@@ -223,6 +239,7 @@ export default function ReportSessionSheet({ visible, sessionId, onClose }: Repo
               </Text>
             </View>
           )}
+          </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
