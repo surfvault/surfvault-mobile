@@ -49,6 +49,8 @@ export default function SearchBar({
         autoCapitalize="none"
         autoCorrect={false}
         className="flex-1 ml-2 text-base text-gray-900 dark:text-white"
+        style={{ padding: 0, margin: 0, lineHeight: 20 }}
+        textAlignVertical="center"
       />
       {value.length > 0 && (
         <Pressable onPress={handleClear} hitSlop={8}>
