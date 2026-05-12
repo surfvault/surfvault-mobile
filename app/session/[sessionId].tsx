@@ -1246,17 +1246,32 @@ export default function SessionDetailScreen() {
                 <View style={[styles.modalHandle, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
               </Pressable>
             </View>
-            <Text style={[styles.modalTitle, { color: isDark ? '#ffffff' : '#111827' }]}>Tag Users</Text>
+            <Text style={[styles.modalTitle, { color: isDark ? '#ffffff' : '#111827' }]}>{isOwner ? 'Tag Users' : 'Tagged Users'}</Text>
             <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
-              <SearchBar onSearch={setTagSearch} placeholder="Search users to tag..." />
+              <SearchBar onSearch={setTagSearch} placeholder={isOwner ? 'Search users to tag...' : 'Search...'} />
             </View>
             <ScrollView style={{ maxHeight: kbVisible ? 200 : 350 }} keyboardShouldPersistTaps="handled">
               {(() => {
                 const searchResults = (tagSearchData?.results?.availableUsers ?? []).filter((u: any) => !taggedUsers.some((tu: any) => tu.id === u.id));
                 const isSearching = tagSearch.length > 0;
+                // Non-owners see a read-only roster: search filters the
+                // already-tagged list, taps navigate to the user's profile.
+                const filteredTagged = isSearching
+                  ? taggedUsers.filter((tu: any) => {
+                      const q = tagSearch.toLowerCase();
+                      return (tu.handle ?? '').toLowerCase().includes(q) || (tu.name ?? '').toLowerCase().includes(q);
+                    })
+                  : taggedUsers;
 
-                // Show search results when searching
-                if (isSearching) {
+                const goToProfile = (handle?: string) => {
+                  if (!handle) return;
+                  setTagSheetVisible(false);
+                  trackedPush(`/user/${handle}` as any);
+                };
+
+                // Show search results when searching (owner only — non-owner
+                // searches within the already-tagged list below).
+                if (isSearching && isOwner) {
                   if (searchResults.length === 0) {
                     return (
                       <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', textAlign: 'center', paddingVertical: 24, fontSize: 14 }}>
@@ -1287,10 +1302,15 @@ export default function SessionDetailScreen() {
                   ));
                 }
 
-                // Show tagged users when not searching
-                if (taggedUsers.length > 0) {
-                  return taggedUsers.map((tu: any) => (
-                    <View key={tu.id ?? tu.handle} style={styles.tagResultRow}>
+                // Show tagged users (full list for owner when not searching,
+                // filtered list for non-owner when searching, full otherwise).
+                if (filteredTagged.length > 0) {
+                  return filteredTagged.map((tu: any) => (
+                    <Pressable
+                      key={tu.id ?? tu.handle}
+                      onPress={isOwner ? undefined : () => goToProfile(tu.handle)}
+                      style={styles.tagResultRow}
+                    >
                       <UserAvatar uri={tu.picture} name={tu.name ?? tu.handle} size={36} />
                       <View style={styles.tagResultInfo}>
                         <Text style={[styles.tagResultName, { color: isDark ? '#ffffff' : '#111827' }]}>{tu.name ?? tu.handle}</Text>
@@ -1310,14 +1330,23 @@ export default function SessionDetailScreen() {
                           <Text style={[styles.tagActionText, { color: '#ef4444' }]}>Remove</Text>
                         </Pressable>
                       )}
-                    </View>
+                    </Pressable>
                   ));
+                }
+
+                // Non-owner with a search that matched nothing in tagged list.
+                if (isSearching && !isOwner) {
+                  return (
+                    <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', textAlign: 'center', paddingVertical: 24, fontSize: 14 }}>
+                      No tagged users matching "{tagSearch}"
+                    </Text>
+                  );
                 }
 
                 // No tagged users and not searching
                 return (
                   <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', textAlign: 'center', paddingVertical: 24, fontSize: 14 }}>
-                    No tagged users yet. Search to tag surfers.
+                    {isOwner ? 'No tagged users yet. Search to tag surfers.' : 'No tagged users yet.'}
                   </Text>
                 );
               })()}

@@ -21,6 +21,8 @@ import {
   useGetConversationWithMessagesQuery,
   useReplyToConversationMutation,
   useReadConversationMutation,
+  useStartConversationWithUserMutation,
+  useGetUserQuery,
 } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
@@ -119,7 +121,8 @@ const formatDateSeparator = (dateStr: string) => {
 const getDateKey = (dateStr: string) => new Date(dateStr).toDateString();
 
 export default function ConversationDetailScreen() {
-  const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
+  const { conversationId, recipientHandle } = useLocalSearchParams<{ conversationId: string; recipientHandle?: string }>();
+  const isNew = conversationId === 'new';
   const router = useRouter();
   const smartBack = useSmartBack();
   const trackedPush = useTrackedPush();
@@ -133,19 +136,31 @@ export default function ConversationDetailScreen() {
 
   const { data, isLoading } = useGetConversationWithMessagesQuery(
     { conversationId: conversationId ?? '' },
-    { skip: !conversationId }
+    { skip: !conversationId || isNew }
   );
 
+  // New-conversation mode: fetch the recipient by handle so we can render the
+  // header chrome and have a userId to send the first message to.
+  const { data: recipientData, isLoading: isLoadingRecipient } = useGetUserQuery(
+    { handle: recipientHandle ?? '', viewerId: user?.id },
+    { skip: !isNew || !recipientHandle }
+  );
+  const recipientUser =
+    recipientData?.results?.photographer ?? recipientData?.results?.user ?? null;
+
   const [replyToConversation, { isLoading: sending }] = useReplyToConversationMutation();
+  const [startConversationWithUser, { isLoading: starting }] = useStartConversationWithUserMutation();
   const [readConversation] = useReadConversationMutation();
 
   const conversation = data?.results?.conversation;
-  const messages = data?.results?.messages ?? [];
+  const messages = isNew ? [] : (data?.results?.messages ?? []);
 
   // Determine other participant
-  const otherUser = user?.id === conversation?.participant_one?.id
-    ? conversation?.participant_two
-    : conversation?.participant_one;
+  const otherUser = isNew
+    ? recipientUser
+    : user?.id === conversation?.participant_one?.id
+      ? conversation?.participant_two
+      : conversation?.participant_one;
 
   const isOtherUserDeleted = !!otherUser?.deleted_at;
 
@@ -163,7 +178,7 @@ export default function ConversationDetailScreen() {
 
   // Mark as read on load
   useEffect(() => {
-    if (!conversationId || !user?.id || !conversation) return;
+    if (isNew || !conversationId || !user?.id || !conversation) return;
     const unread = user.id === conversation.participant_one?.id
       ? conversation.participant_one_unread_count
       : conversation.participant_two_unread_count;
@@ -200,14 +215,28 @@ export default function ConversationDetailScreen() {
 
   const handleSend = useCallback(async () => {
     const trimmed = message.trim();
-    if (!trimmed || !conversationId) return;
+    if (!trimmed) return;
+    if (isNew) {
+      const recipientId = (recipientUser as any)?.id;
+      if (!recipientId) return;
+      setMessage('');
+      try {
+        const res: any = await startConversationWithUser({ userId: recipientId, message: trimmed }).unwrap();
+        const newId = res?.results?.conversationId;
+        if (newId) router.replace(`/conversation/${newId}` as any);
+      } catch {
+        setMessage(trimmed);
+      }
+      return;
+    }
+    if (!conversationId) return;
     setMessage('');
     await replyToConversation({ conversationId, message: trimmed });
     // Scroll after send — multiple attempts to catch the data refetch
     [300, 600, 1000].forEach((ms) => {
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), ms);
     });
-  }, [message, conversationId, replyToConversation]);
+  }, [message, conversationId, replyToConversation, isNew, recipientUser, startConversationWithUser, router]);
 
   const renderItem = ({ item }: { item: any }) => {
     if (item.type === 'date') {
@@ -251,7 +280,7 @@ export default function ConversationDetailScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
-          {isLoading ? (
+          {isLoading || (isNew && isLoadingRecipient) ? (
             <ConversationSkeleton topPadding={insets.top + 70} />
           ) : (
             <FlatList
@@ -335,7 +364,7 @@ export default function ConversationDetailScreen() {
                 />
                 <Pressable
                   onPress={handleSend}
-                  disabled={!message.trim() || sending}
+                  disabled={!message.trim() || sending || starting}
                   style={[styles.sendBtn, { backgroundColor: message.trim() ? '#3b82f6' : (isDark ? '#374151' : '#d1d5db') }]}
                 >
                   <Ionicons name="send" size={16} color="#fff" />

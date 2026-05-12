@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,15 +7,21 @@ import {
   RefreshControl,
   ActivityIndicator,
   StyleSheet,
+  TextInput,
+  Keyboard,
+  ScrollView,
   useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
-import { Ionicons } from '@expo/vector-icons';
+import { useTabBar } from '../../src/context/TabBarContext';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
-import { useGetConversationsQuery } from '../../src/store';
+import {
+  useGetConversationsQuery,
+  useGetMapSearchContentQuery,
+} from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
 import MessagesSkeleton from '../../src/components/MessagesSkeleton';
@@ -36,15 +42,21 @@ const formatTime = (dateStr?: string) => {
 };
 
 export default function MessagesScreen() {
-  const router = useRouter();
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
   const { isAuthenticated, login } = useAuth();
+  const { setTabBarVisible } = useTabBar();
   const [searchTerm, setSearchTerm] = useState('');
 
   const [refreshing, setRefreshing] = useState(false);
+
+  // Compose overlay state
+  const [composeVisible, setComposeVisible] = useState(false);
+  const [composeQuery, setComposeQuery] = useState('');
+  const composeInputRef = useRef<TextInput>(null);
+  const composeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { data, isLoading, error, refetch } = useGetConversationsQuery(undefined, {
     skip: !isAuthenticated,
@@ -58,6 +70,16 @@ export default function MessagesScreen() {
 
   const conversations = data?.results?.conversations ?? [];
 
+  // Map other-user-id → conversation id so compose can route to an existing
+  // thread instead of double-creating one.
+  const userIdToConvoId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of conversations) {
+      const other = user?.id === c.participant_one?.id ? c.participant_two : c.participant_one;
+      if (other?.id) m.set(other.id, c.id);
+    }
+    return m;
+  }, [conversations, user?.id]);
 
   // Filter by search
   const filtered = searchTerm
@@ -70,6 +92,49 @@ export default function MessagesScreen() {
         return handle.toLowerCase().includes(term) || name.toLowerCase().includes(term) || lastMsg.toLowerCase().includes(term);
       })
     : conversations;
+
+  // ---- Compose overlay handlers ----
+  const openCompose = useCallback(() => {
+    setComposeVisible(true);
+    setTabBarVisible(false);
+    setTimeout(() => composeInputRef.current?.focus(), 100);
+  }, [setTabBarVisible]);
+
+  const closeCompose = useCallback(() => {
+    Keyboard.dismiss();
+    setComposeVisible(false);
+    setComposeQuery('');
+    setTabBarVisible(true);
+  }, [setTabBarVisible]);
+
+  const handleComposeInput = useCallback((text: string) => {
+    if (composeDebounceRef.current) clearTimeout(composeDebounceRef.current);
+    composeDebounceRef.current = setTimeout(() => setComposeQuery(text), 300);
+  }, []);
+
+  const { data: composeSearchData, isFetching: composeSearching } = useGetMapSearchContentQuery(
+    { search: composeQuery, type: 'user', tags: [] },
+    { skip: !composeVisible || composeQuery.length < 2 }
+  );
+  const composeResults = (composeSearchData?.results?.searchContent ?? []).filter(
+    (item: any) => item?.handle && item?.id !== user?.id
+  );
+
+  const handlePickComposeUser = useCallback(
+    (picked: any) => {
+      const existingConvoId = picked?.id ? userIdToConvoId.get(picked.id) : undefined;
+      Keyboard.dismiss();
+      setComposeVisible(false);
+      setComposeQuery('');
+      setTabBarVisible(true);
+      if (existingConvoId) {
+        trackedPush(`/conversation/${existingConvoId}` as any);
+      } else {
+        trackedPush(`/conversation/new?recipientHandle=${encodeURIComponent(picked.handle)}` as any);
+      }
+    },
+    [userIdToConvoId, setTabBarVisible, trackedPush]
+  );
 
   // Initial load — show skeleton rather than a spinner so the layout is stable
   if (isAuthenticated && isLoading && !data) {
@@ -162,17 +227,96 @@ export default function MessagesScreen() {
     );
   };
 
+  // ---- Compose overlay (people search) ----
+  if (composeVisible) {
+    const showingResults = composeQuery.length >= 2;
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
+        <View style={styles.composeHeader}>
+          <Text style={[styles.composeTitle, { color: isDark ? '#fff' : '#111827' }]}>New Message</Text>
+          <Pressable onPress={closeCompose} hitSlop={8}>
+            <Ionicons name="close" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
+          </Pressable>
+        </View>
+
+        <View style={[styles.composeInputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+          <Ionicons name="search-outline" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
+          <TextInput
+            ref={composeInputRef}
+            placeholder="Search people..."
+            placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
+            onChangeText={handleComposeInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={[styles.composeInput, { color: isDark ? '#fff' : '#111827' }]}
+          />
+        </View>
+
+        <ScrollView
+          style={styles.flex}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
+          {showingResults ? (
+            composeSearching ? (
+              <View style={styles.centered}><ActivityIndicator /></View>
+            ) : composeResults.length > 0 ? (
+              composeResults.map((item: any) => {
+                const hasExisting = !!userIdToConvoId.get(item.id);
+                return (
+                  <Pressable
+                    key={item.id ?? item.handle}
+                    onPress={() => handlePickComposeUser(item)}
+                    style={[styles.resultRow, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
+                  >
+                    <UserAvatar
+                      uri={item.picture}
+                      name={item.name ?? item.handle}
+                      size={44}
+                      verified={item.verified}
+                      userType={item.user_type}
+                    />
+                    <View style={styles.resultInfo}>
+                      <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                        {item.name ?? item.handle}
+                      </Text>
+                      <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+                        @{item.handle}
+                      </Text>
+                    </View>
+                    {hasExisting && (
+                      <Ionicons name="chatbubble" size={16} color="#0ea5e9" />
+                    )}
+                  </Pressable>
+                );
+              })
+            ) : (
+              <Text style={[styles.emptyText, { color: '#9ca3af' }]}>No people found</Text>
+            )
+          ) : (
+            <View style={styles.centered}>
+              <Text style={{ color: '#9ca3af', fontSize: 14 }}>Search for people to message</Text>
+            </View>
+          )}
+        </ScrollView>
+
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={['top']}>
       <View style={styles.header}>
         <Text style={[styles.headerTitle, { color: isDark ? '#fff' : '#111827' }]}>Messages</Text>
+        <Pressable onPress={openCompose} hitSlop={8}>
+          <MaterialCommunityIcons name="square-edit-outline" size={26} color={isDark ? '#e5e7eb' : '#374151'} />
+        </Pressable>
       </View>
 
-      {conversations.length > 3 && (
-        <View style={styles.searchWrap}>
-          <SearchBar placeholder="Search messages..." onSearch={setSearchTerm} debounceMs={250} />
-        </View>
-      )}
+      <View style={styles.searchWrap}>
+        <SearchBar placeholder="Search messages..." onSearch={setSearchTerm} debounceMs={250} />
+      </View>
 
       {isLoading ? (
         <View style={styles.emptyWrap}><ActivityIndicator size="large" /></View>
@@ -199,10 +343,21 @@ export default function MessagesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingVertical: 12 },
+  flex: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
   headerTitle: { fontSize: 24, fontWeight: '700' },
   searchWrap: { paddingHorizontal: 16, paddingBottom: 8 },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80, paddingHorizontal: 32 },
+  emptyWrap: {
+    alignItems: 'center',
+    paddingTop: 140,
+    paddingHorizontal: 32,
+  },
   emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },
   emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
   emptyTitle: { fontSize: 18, fontWeight: '700', marginTop: 16, textAlign: 'center' },
@@ -228,4 +383,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   unreadText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  composeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  composeTitle: { fontSize: 18, fontWeight: '700' },
+  composeInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  composeInput: { flex: 1, marginLeft: 8, fontSize: 16 },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  resultInfo: { marginLeft: 12, flex: 1 },
+  resultName: { fontSize: 15, fontWeight: '600' },
+  resultSub: { fontSize: 13, marginTop: 1 },
+  centered: { paddingVertical: 48, alignItems: 'center' },
+  emptyText: { textAlign: 'center', paddingVertical: 48 },
 });
