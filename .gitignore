@@ -37,6 +37,9 @@ yarn-error.*
 google-services.json
 GoogleService-Info.plist
 
+# play store service account
+play-store-service-account.json
+
 # typescript
 *.tsbuildinfo
 

@@ -31,6 +31,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     edgeToEdgeEnabled: true,
     package: 'com.surfvaultapp.mobile',
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
+    permissions: [
+      'ACCESS_FINE_LOCATION',
+      'ACCESS_COARSE_LOCATION',
+      'READ_MEDIA_IMAGES',
+      'READ_EXTERNAL_STORAGE',
+      'WRITE_EXTERNAL_STORAGE',
+      'POST_NOTIFICATIONS',
+    ],
     config: {
       googleMaps: {
         apiKey: process.env.GOOGLE_MAPS_API_KEY ?? '',
@@ -52,6 +60,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           imageWidth: 680,
           resizeMode: 'contain',
           backgroundColor: '#000000',
+        },
+        // Android 12+ clips the splash image to a circle. Use the wordmark
+        // logo sized to fit cleanly inside the splash circle.
+        android: {
+          image: './assets/surfvault-logo.png',
+          imageWidth: 200,
+          resizeMode: 'contain',
+          backgroundColor: '#ffffff',
+          dark: {
+            image: './assets/surfvault-logo-dark.png',
+            imageWidth: 200,
+            resizeMode: 'contain',
+            backgroundColor: '#000000',
+          },
         },
       },
     ],

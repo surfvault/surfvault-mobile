@@ -6,6 +6,8 @@ import {
   StyleSheet,
   Dimensions,
   FlatList,
+  Platform,
+  Share,
   useColorScheme,
   type ViewToken,
 } from 'react-native';
@@ -16,6 +18,10 @@ import type { BoardroomShaper, Board } from '../store';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
 import { pickThumbnailPhoto } from './ShaperBoardsGrid';
 import UserAvatar from './UserAvatar';
+import { useRequireAuth } from '../hooks/useRequireAuth';
+import ActionSheet from './ActionSheet';
+import type { ActionSheetOption } from './ActionSheet';
+import ReportBoardSheet from './ReportBoardSheet';
 
 interface ShaperFeedCardProps {
   shaper: BoardroomShaper;
@@ -41,8 +47,11 @@ type Slide = { kind: 'board'; board: Board } | { kind: 'cta' };
 export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
   const isDark = useColorScheme() === 'dark';
   const trackedPush = useTrackedPush();
+  const requireAuth = useRequireAuth();
   const [width, setWidth] = useState(Dimensions.get('window').width);
   const [activeIdx, setActiveIdx] = useState(0);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [reportBoardId, setReportBoardId] = useState<string | null>(null);
 
   const boards = useMemo<Board[]>(() => shaper.featured_boards ?? [], [shaper.featured_boards]);
 
@@ -108,6 +117,9 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
             ) : null}
           </View>
         </Pressable>
+        <Pressable onPress={() => setSheetVisible(true)} hitSlop={8}>
+          <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+        </Pressable>
       </View>
 
       {/* Hero — slides include boards + trailing CTA. Slide Pressables go
@@ -165,6 +177,58 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
           })}
         </View>
       )}
+
+      <ActionSheet
+        visible={sheetVisible}
+        sections={[
+          {
+            options: [{
+              label: 'Share',
+              icon: 'share-outline',
+              onPress: () => {
+                const url = `https://app.surf-vault.com/${shaper.handle}`;
+                Share.share(Platform.OS === 'ios' ? { url } : { message: url });
+              },
+            }],
+          },
+          {
+            options: [{
+              label: 'View Shaper',
+              icon: 'person-outline',
+              onPress: openShaperProfile,
+            }],
+          },
+          {
+            options: [{
+              label: 'Report',
+              icon: 'flag-outline',
+              destructive: true,
+              onPress: () => {
+                if (!requireAuth()) return;
+                // Report the currently visible board; fall back to first board
+                // when the CTA slide is active. ReportBoardSheet handles a
+                // missing id gracefully (Submit stays disabled).
+                const active = slides[activeIdx];
+                const targetBoardId =
+                  active?.kind === 'board' ? active.board.id : (boards[0]?.id ?? null);
+                setReportBoardId(targetBoardId);
+              },
+            } as ActionSheetOption],
+          },
+        ]}
+        header={{
+          title: shaper.name ?? shaper.handle,
+          subtitle: shaper.surf_break_name || `@${shaper.handle}`,
+          imageUri: shaper.picture || undefined,
+        }}
+        onClose={() => setSheetVisible(false)}
+      />
+
+      <ReportBoardSheet
+        visible={reportBoardId !== null}
+        boardId={reportBoardId ?? undefined}
+        onClose={() => setReportBoardId(null)}
+      />
     </View>
   );
 }

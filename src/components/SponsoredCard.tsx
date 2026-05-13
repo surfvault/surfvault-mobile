@@ -5,6 +5,8 @@ import {
   Pressable,
   StyleSheet,
   Linking,
+  Platform,
+  Share,
   useColorScheme,
   FlatList,
   Dimensions,
@@ -14,6 +16,10 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useRecordAdImpressionMutation } from '../store';
 import { buildAdClickUrl, currentDevice } from '../helpers/adTracking';
+import { useRequireAuth } from '../hooks/useRequireAuth';
+import ActionSheet from './ActionSheet';
+import type { ActionSheetOption } from './ActionSheet';
+import ReportAdSheet from './ReportAdSheet';
 
 interface Ad {
   id: string;
@@ -61,6 +67,9 @@ export default function SponsoredCard({
 }: SponsoredCardProps) {
   const isDark = useColorScheme() === 'dark';
   const [recordImpression] = useRecordAdImpressionMutation();
+  const requireAuth = useRequireAuth();
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [reportVisible, setReportVisible] = useState(false);
 
   const slides = useMemo<Ad[]>(() => {
     if (ads && ads.length) return ads.filter(Boolean);
@@ -133,12 +142,14 @@ export default function SponsoredCard({
       {/* Header — partner identity stays static; body text below mirrors active slide */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            {avatarSource ? (
-              <Image source={{ uri: avatarSource }} style={styles.avatarImg} contentFit="cover" />
-            ) : (
-              <Ionicons name="business-outline" size={18} color="#9ca3af" />
-            )}
+          <View style={styles.avatarShadow}>
+            <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+              {avatarSource ? (
+                <Image source={{ uri: avatarSource }} style={styles.avatarImg} contentFit="cover" />
+              ) : (
+                <Ionicons name="business-outline" size={18} color="#9ca3af" />
+              )}
+            </View>
           </View>
           <View style={styles.headerInfo}>
             <View style={styles.headerNameRow}>
@@ -160,6 +171,9 @@ export default function SponsoredCard({
             ) : null}
           </View>
         </View>
+        <Pressable onPress={() => setSheetVisible(true)} hitSlop={8}>
+          <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+        </Pressable>
       </View>
 
       {/* Hero — carousel when multi-slide, single Pressable otherwise */}
@@ -239,6 +253,46 @@ export default function SponsoredCard({
           </Text>
         </Pressable>
       ) : null}
+
+      <ActionSheet
+        visible={sheetVisible}
+        sections={[
+          {
+            options: [{
+              label: 'Share',
+              icon: 'share-outline',
+              onPress: () => {
+                const url = buildAdClickUrl(active.id, { placement, surfBreakId, device: currentDevice() });
+                Share.share(Platform.OS === 'ios' ? { url } : { message: url });
+              },
+            }],
+          },
+          {
+            options: [{
+              label: 'Report',
+              icon: 'flag-outline',
+              destructive: true,
+              onPress: () => {
+                // Auth required — keeps moderation reports accountable.
+                if (!requireAuth()) return;
+                setReportVisible(true);
+              },
+            } as ActionSheetOption],
+          },
+        ]}
+        header={{
+          title: partner.company_name || 'Sponsored',
+          subtitle: active.headline || undefined,
+          imageUri: partner.partner_logo_url || partner.media_url || undefined,
+        }}
+        onClose={() => setSheetVisible(false)}
+      />
+
+      <ReportAdSheet
+        visible={reportVisible}
+        adId={active.id}
+        onClose={() => setReportVisible(false)}
+      />
     </View>
   );
 }
@@ -258,6 +312,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+  },
+  avatarShadow: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 4,
   },
   avatar: {
     width: 44,

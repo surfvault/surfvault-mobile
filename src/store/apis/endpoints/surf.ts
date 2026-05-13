@@ -283,6 +283,13 @@ const surfApi = rootApi.injectEndpoints({
         },
       }),
     }),
+    reportAd: builder.mutation({
+      query: ({ adId, reason, details }: { adId: string; reason: string; details?: string }) => ({
+        url: `/ads/${adId}/report`,
+        method: 'POST',
+        body: { reason, details: details ?? '' },
+      }),
+    }),
     updateSessionThumbnail: builder.mutation({
       invalidatesTags: [ApiTag.SurfBreak, ApiTag.Session, ApiTag.User],
       query: ({ sessionId, photoId }: { sessionId: string; photoId: string }) => ({
@@ -442,6 +449,7 @@ export const {
   useGetSessionPhotosQuery,
   useGetAdsQuery,
   useRecordAdImpressionMutation,
+  useReportAdMutation,
   useGetSurfBreakWithLatestSessionsQuery,
   useGetSurfBreakSessionsQuery,
   useUpdateSessionThumbnailMutation,
