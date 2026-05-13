@@ -108,6 +108,7 @@ export {
   useDoesSurfBreakExistQuery,
   useGetAdsQuery,
   useRecordAdImpressionMutation,
+  useReportAdMutation,
   useGetLatestSessionsQuery,
   useGetSessionGroupsQuery,
   useGetSessionPhotosQuery,
