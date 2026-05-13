@@ -31,6 +31,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     edgeToEdgeEnabled: true,
     package: 'com.surfvaultapp.mobile',
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
+    permissions: [
+      'ACCESS_FINE_LOCATION',
+      'ACCESS_COARSE_LOCATION',
+      'READ_MEDIA_IMAGES',
+      'READ_EXTERNAL_STORAGE',
+      'WRITE_EXTERNAL_STORAGE',
+      'POST_NOTIFICATIONS',
+    ],
     config: {
       googleMaps: {
         apiKey: process.env.GOOGLE_MAPS_API_KEY ?? '',
