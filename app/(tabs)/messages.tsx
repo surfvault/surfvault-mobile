@@ -359,8 +359,10 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 24, fontWeight: '700' },
   searchWrap: { paddingHorizontal: 16, paddingBottom: 8 },
   emptyWrap: {
+    flex: 1,
     alignItems: 'center',
-    paddingTop: 140,
+    justifyContent: 'center',
+    paddingBottom: 80,
     paddingHorizontal: 32,
   },
   emptyIconRow: { flexDirection: 'row', gap: 12, marginBottom: 20 },

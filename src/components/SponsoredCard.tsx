@@ -133,12 +133,14 @@ export default function SponsoredCard({
       {/* Header — partner identity stays static; body text below mirrors active slide */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-            {avatarSource ? (
-              <Image source={{ uri: avatarSource }} style={styles.avatarImg} contentFit="cover" />
-            ) : (
-              <Ionicons name="business-outline" size={18} color="#9ca3af" />
-            )}
+          <View style={styles.avatarShadow}>
+            <View style={[styles.avatar, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+              {avatarSource ? (
+                <Image source={{ uri: avatarSource }} style={styles.avatarImg} contentFit="cover" />
+              ) : (
+                <Ionicons name="business-outline" size={18} color="#9ca3af" />
+              )}
+            </View>
           </View>
           <View style={styles.headerInfo}>
             <View style={styles.headerNameRow}>
@@ -258,6 +260,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+  },
+  avatarShadow: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 4,
   },
   avatar: {
     width: 44,

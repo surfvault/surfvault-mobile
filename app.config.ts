@@ -61,6 +61,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
           resizeMode: 'contain',
           backgroundColor: '#000000',
         },
+        // Android 12+ clips the splash image to a circle. Use the wordmark
+        // logo sized to fit cleanly inside the splash circle.
+        android: {
+          image: './assets/surfvault-logo.png',
+          imageWidth: 200,
+          resizeMode: 'contain',
+          backgroundColor: '#ffffff',
+          dark: {
+            image: './assets/surfvault-logo-dark.png',
+            imageWidth: 200,
+            resizeMode: 'contain',
+            backgroundColor: '#000000',
+          },
+        },
       },
     ],
     [

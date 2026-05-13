@@ -10,11 +10,12 @@ import {
   ScrollView,
   Keyboard,
   InteractionManager,
+  Platform,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT } from 'react-native-maps';
+import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
@@ -540,7 +541,7 @@ export default function MapScreen() {
         style={styles.map}
         initialRegion={initialMapRegion}
         onRegionChangeComplete={handleRegionChange}
-        provider={PROVIDER_DEFAULT}
+        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : PROVIDER_DEFAULT}
         customMapStyle={isDark ? DARK_MAP_STYLE : undefined}
         userInterfaceStyle={isDark ? 'dark' : 'light'}
         showsUserLocation={locationGranted}
