@@ -1,11 +1,17 @@
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { ExpoConfig, ConfigContext } from 'expo/config';
+
+const envFile = existsSync(join(__dirname, '.env.local')) ? '.env.local' : '.env';
+loadEnv({ path: join(__dirname, envFile) });
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'SurfVault',
   slug: 'surfvault-mobile',
   version: '1.0.0',
+  platforms: ['ios', 'android'],
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
@@ -122,7 +128,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     auth0ClientId: process.env.AUTH0_CLIENT_ID ?? '',
     auth0Audience: process.env.AUTH0_AUDIENCE ?? '',
     pusherAppKey: process.env.PUSHER_APP_KEY ?? '',
-    pusherBeamsInstanceId: process.env.PUSHER_BEAMS_INSTANCE_ID ?? '',
     pusherCluster: process.env.PUSHER_CLUSTER ?? 'us2',
     revenuecatApiKey: process.env.REVENUCAT_API_KEY ?? '',
     googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
