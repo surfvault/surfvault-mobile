@@ -10,6 +10,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
+  runtimeVersion: { policy: 'fingerprint' },
+  updates: {
+    url: 'https://u.expo.dev/f0f75cbd-8e64-43a6-b251-438dcd684772',
+  },
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.surfvaultapp.mobile',

@@ -7,6 +7,7 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "channel": "development",
       "android": {
         "buildType": "apk"
       },
@@ -25,6 +26,7 @@
     "production": {
       "autoIncrement": true,
       "node": "22.22.2",
+      "channel": "production",
       "android": {
         "buildType": "app-bundle"
       },
@@ -49,7 +51,7 @@
         "ascAppId": "6768126465"
       },
       "android": {
-        "serviceAccountKeyPath": "./play-store-service-account.json",
+        "serviceAccountKeyPath": "./secrets/play-store-service-account.json",
         "track": "internal"
       }
     }

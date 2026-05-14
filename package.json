@@ -16,7 +16,9 @@
     "build:android:dev": "eas build --profile development --platform android",
     "build:android:prod": "eas build --profile production --platform android",
     "submit:ios": "eas submit --platform ios",
-    "submit:android": "eas submit --platform android"
+    "submit:android": "eas submit --platform android",
+    "update:dev": "eas update --branch development",
+    "update:prod": "eas update --branch production"
   },
   "dependencies": {
     "@expo/react-native-action-sheet": "^4.1.1",
@@ -45,6 +47,7 @@
     "expo-secure-store": "~15.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
+    "expo-updates": "~29.0.17",
     "nativewind": "^4.2.3",
     "pusher-js": "^8.5.0",
     "react": "19.1.0",

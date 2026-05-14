@@ -27,6 +27,7 @@ expo-env.d.ts
 .env
 .env.local
 .env.*.local
+secrets/
 
 # Metro / debug
 .metro-health-check*

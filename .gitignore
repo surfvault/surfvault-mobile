@@ -39,6 +39,7 @@ GoogleService-Info.plist
 
 # play store service account
 play-store-service-account.json
+secrets/
 
 # typescript
 *.tsbuildinfo
