@@ -15,7 +15,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useReportUserMutation } from '../store';
+import { useReportUserMutation, useBlockUserMutation } from '../store';
+import { promptBlockAfterReport } from '../helpers/promptBlockAfterReport';
 
 // Keep values in sync with USER_REPORT_REASONS in surfvault-api/services/user/handler.ts
 const REPORT_REASONS = [
@@ -34,26 +35,22 @@ interface ReportUserSheetProps {
   userId?: string;
   userHandle?: string;
   onClose: () => void;
-  onBlocked?: () => void;
 }
 
-export default function ReportUserSheet({ visible, userId, userHandle, onClose, onBlocked }: ReportUserSheetProps) {
+export default function ReportUserSheet({ visible, userId, userHandle, onClose }: ReportUserSheetProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const [report, { isLoading }] = useReportUserMutation();
+  const [blockUser] = useBlockUserMutation();
 
   const [selected, setSelected] = useState<string>('');
   const [details, setDetails] = useState<string>('');
-  // Apple Guideline 1.2: pair reporting with blocking by default so the
-  // reporter immediately stops seeing the abuser's content.
-  const [alsoBlock, setAlsoBlock] = useState<boolean>(true);
   const scrollRef = useRef<ScrollView | null>(null);
 
   useEffect(() => {
     if (visible) {
       setSelected('');
       setDetails('');
-      setAlsoBlock(true);
     }
   }, [visible]);
 
@@ -70,20 +67,18 @@ export default function ReportUserSheet({ visible, userId, userHandle, onClose, 
     }
     Keyboard.dismiss();
     try {
-      await report({ userId, reason: selected, details: details.trim(), alsoBlock }).unwrap();
+      await report({ userId, reason: selected, details: details.trim() }).unwrap();
       onClose();
-      if (alsoBlock && onBlocked) onBlocked();
-      Alert.alert(
-        'Report submitted',
-        alsoBlock
-          ? `Thanks — our team will review it.${userHandle ? ` @${userHandle} has been blocked.` : ' This user has been blocked.'}`
-          : 'Thanks — our team will review it and take appropriate action.'
-      );
+      promptBlockAfterReport({
+        userId,
+        handle: userHandle,
+        blockUser: (args) => blockUser(args).unwrap(),
+      });
     } catch (e: any) {
       const msg = e?.data?.message || 'Could not submit report. Please try again.';
       Alert.alert('Error', msg);
     }
-  }, [report, userId, userHandle, selected, details, alsoBlock, onClose, onBlocked]);
+  }, [report, userId, userHandle, selected, details, onClose, blockUser]);
 
   const canSubmit = !!selected && (selected !== 'other' || details.trim().length > 0) && !isLoading;
 
@@ -200,39 +195,6 @@ export default function ReportUserSheet({ visible, userId, userHandle, onClose, 
                 </Text>
               </View>
             )}
-
-            <Pressable
-              onPress={() => setAlsoBlock((v) => !v)}
-              style={{
-                marginTop: 20,
-                marginHorizontal: 20,
-                paddingHorizontal: 14,
-                paddingVertical: 14,
-                borderRadius: 12,
-                flexDirection: 'row',
-                alignItems: 'center',
-                backgroundColor: isDark ? 'rgba(148,163,184,0.1)' : '#f8fafc',
-              }}
-            >
-              <View style={{
-                width: 22, height: 22, borderRadius: 6, borderWidth: 2,
-                borderColor: alsoBlock ? '#ef4444' : (isDark ? '#4b5563' : '#cbd5e1'),
-                backgroundColor: alsoBlock ? '#ef4444' : 'transparent',
-                alignItems: 'center', justifyContent: 'center', marginRight: 12,
-              }}>
-                {alsoBlock && (
-                  <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700', lineHeight: 16 }}>✓</Text>
-                )}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: isDark ? '#fff' : '#111827' }}>
-                  Also block this user
-                </Text>
-                <Text style={{ fontSize: 12, color: isDark ? '#9ca3af' : '#6b7280', marginTop: 2 }}>
-                  Their content will be hidden from your feed and they won't be able to contact you.
-                </Text>
-              </View>
-            </Pressable>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>

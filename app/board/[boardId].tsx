@@ -786,6 +786,8 @@ export default function BoardDetailScreen() {
       <ReportBoardSheet
         visible={reportOpen}
         boardId={board.id}
+        shaperUserId={board.shaper_user_id}
+        shaperHandle={board.shaper?.handle}
         onClose={() => setReportOpen(false)}
       />
 

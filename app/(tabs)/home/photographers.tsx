@@ -10,6 +10,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
 import { useGetPhotographersQuery } from '../../../src/store';
 import PhotographerCard from '../../../src/components/PhotographerCard';
+import { useUser } from '../../../src/context/UserProvider';
+import { useAuth } from '../../../src/context/AuthProvider';
 
 const CONTINENTS = [
   { label: 'All', value: '' },
@@ -23,8 +25,13 @@ const CONTINENTS = [
 
 export default function PhotographersScreen() {
   const [continent, setContinent] = useState('');
+  const { user } = useUser();
+  const { isAuthenticated } = useAuth();
 
-  const { data, isLoading } = useGetPhotographersQuery({ continent });
+  const { data, isLoading } = useGetPhotographersQuery(
+    { continent, viewerId: user?.id },
+    { skip: isAuthenticated && !user?.id }
+  );
   const photographers = data?.results?.photographers ?? [];
 
   return (

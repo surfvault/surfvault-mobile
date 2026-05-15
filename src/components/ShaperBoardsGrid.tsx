@@ -332,6 +332,8 @@ export default function ShaperBoardsGrid({
       <ReportBoardSheet
         visible={reportBoardId !== null}
         boardId={reportBoardId ?? undefined}
+        shaperUserId={(boards[0] as any)?.shaper_user_id}
+        shaperHandle={handle}
         onClose={() => setReportBoardId(null)}
       />
     </View>

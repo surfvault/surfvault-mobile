@@ -465,6 +465,11 @@ export default function ProfileScreen() {
           icon: 'heart-outline',
           onPress: () => trackedPush('/manage-favorites'),
         },
+        {
+          label: 'Blocked Users',
+          icon: 'shield-outline',
+          onPress: () => trackedPush('/blocked-users'),
+        },
       ],
     },
     {
@@ -473,11 +478,6 @@ export default function ProfileScreen() {
           label: 'Manage Accounts',
           icon: 'people-outline',
           onPress: () => trackedPush('/manage-accounts'),
-        },
-        {
-          label: 'Blocked Users',
-          icon: 'shield-outline',
-          onPress: () => trackedPush('/blocked-users'),
         },
         {
           label: 'Account',

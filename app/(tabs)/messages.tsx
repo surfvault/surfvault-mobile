@@ -113,8 +113,8 @@ export default function MessagesScreen() {
   }, []);
 
   const { data: composeSearchData, isFetching: composeSearching } = useGetMapSearchContentQuery(
-    { search: composeQuery, type: 'user', tags: [] },
-    { skip: !composeVisible || composeQuery.length < 2 }
+    { search: composeQuery, type: 'user', tags: [], viewerId: user?.id },
+    { skip: !composeVisible || composeQuery.length < 2 || (isAuthenticated && !user?.id) }
   );
   const composeResults = (composeSearchData?.results?.searchContent ?? []).filter(
     (item: any) => item?.handle && item?.id !== user?.id

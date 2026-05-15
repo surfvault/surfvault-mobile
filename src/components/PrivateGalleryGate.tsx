@@ -147,6 +147,68 @@ export function PrivateGalleryCard({
   );
 }
 
+// Shown on a blocked user's profile in place of their session grid. Mirrors
+// PrivateGalleryCard's chrome so the experience reads as "intentional gate,
+// not an error." Calls back to the parent to fire the unblock mutation.
+export function BlockedGalleryCard({
+  handle,
+  onUnblock,
+  isUnblocking,
+}: {
+  handle?: string;
+  onUnblock: () => void;
+  isUnblocking: boolean;
+}) {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  return (
+    <View style={styles.cardWrap}>
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: isDark ? 'rgba(17,24,39,0.7)' : '#ffffff',
+            borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.lockIconWrap,
+            {
+              backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2',
+              borderColor: isDark ? 'rgba(239,68,68,0.3)' : '#fecaca',
+            },
+          ]}
+        >
+          <Ionicons name="ban" size={22} color="#ef4444" />
+        </View>
+
+        <Text style={[styles.cardTitle, { color: isDark ? '#fff' : '#0f172a' }]}>
+          {handle ? `You blocked @${handle}` : 'You blocked this user'}
+        </Text>
+        <Text style={[styles.cardBody, { color: isDark ? 'rgba(255,255,255,0.75)' : '#475569' }]}>
+          Their content is hidden from your feeds, search, and notifications. Unblock to see their
+          sessions again.
+        </Text>
+
+        <TouchableOpacity
+          onPress={onUnblock}
+          disabled={isUnblocking}
+          activeOpacity={0.8}
+          style={styles.requestBtn}
+        >
+          {isUnblocking ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
+            <Text style={styles.requestBtnText}>Unblock</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   banner: {
     flexDirection: 'row',

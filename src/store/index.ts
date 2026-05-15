@@ -157,7 +157,15 @@ export {
   useGetLinkedAccountsQuery,
   useLinkAccountMutation,
   useUnlinkAccountMutation,
+  useBlockUserMutation,
+  useUnblockUserMutation,
+  useGetUserBlocksQuery,
+  useReportUserMutation,
 } from './apis/endpoints/user';
+
+export {
+  useReportMessageMutation,
+} from './apis/endpoints/conversation';
 
 export {
   useCreateAdMediaPresignedUrlsMutation,

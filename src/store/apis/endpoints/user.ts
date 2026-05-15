@@ -191,15 +191,17 @@ const userApi = rootApi.injectEndpoints({
     }),
     getPhotographers: builder.query({
       providesTags: [ApiTag.User],
-      query: ({ continent }: { continent: string }) => ({
-        url: `/photographers?continent=${continent}`,
+      // viewerId required for server-side block filtering — endpoint has no
+      // authorizer. Anonymous callers pass empty.
+      query: ({ continent, viewerId }: { continent: string; viewerId?: string }) => ({
+        url: `/photographers?continent=${continent}&viewerId=${viewerId ?? ''}`,
         method: 'GET',
       }),
     }),
     getPhotographersAtBreak: builder.query({
       providesTags: [ApiTag.User],
-      query: ({ breakId }: { breakId: string }) => ({
-        url: `/surf-breaks/${breakId}/photographers`,
+      query: ({ breakId, viewerId }: { breakId: string; viewerId?: string }) => ({
+        url: `/surf-breaks/${breakId}/photographers?viewerId=${viewerId ?? ''}`,
         method: 'GET',
       }),
     }),

@@ -4,16 +4,20 @@ const mapApi = rootApi.injectEndpoints({
   endpoints: (builder) => ({
     getMapSearchContent: builder.query({
       providesTags: [ApiTag.Map],
+      // viewerId required for server-side block filtering — endpoint has no
+      // authorizer. Anonymous callers pass empty.
       query: ({
         search,
         type,
         tags,
+        viewerId,
       }: {
         search: string;
         type?: string;
         tags?: string[];
+        viewerId?: string;
       }) => ({
-        url: `/map/search?term=${search}&type=${type ?? 'all'}&tags=${(tags ?? []).join(',')}`,
+        url: `/map/search?term=${search}&type=${type ?? 'all'}&tags=${(tags ?? []).join(',')}&viewerId=${viewerId ?? ''}`,
         method: 'GET',
       }),
     }),
@@ -26,8 +30,8 @@ const mapApi = rootApi.injectEndpoints({
     }),
     getNearbyPhotographers: builder.query({
       providesTags: [ApiTag.Map],
-      query: ({ lat, long }: { lat: number; long: number }) => ({
-        url: `/map/nearby-photographers?lat=${lat}&long=${long}`,
+      query: ({ lat, long, viewerId }: { lat: number; long: number; viewerId?: string }) => ({
+        url: `/map/nearby-photographers?lat=${lat}&long=${long}&viewerId=${viewerId ?? ''}`,
         method: 'GET',
       }),
     }),

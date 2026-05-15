@@ -23,7 +23,9 @@ import {
   useReadConversationMutation,
   useStartConversationWithUserMutation,
   useGetUserQuery,
+  useGetUserBlocksQuery,
 } from '../../src/store';
+import { useAuth } from '../../src/context/AuthProvider';
 import * as Clipboard from 'expo-clipboard';
 import UserAvatar from '../../src/components/UserAvatar';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
@@ -171,6 +173,14 @@ export default function ConversationDetailScreen() {
       : conversation?.participant_one;
 
   const isOtherUserDeleted = !!otherUser?.deleted_at;
+
+  // Block state — checked from the canonical blocks list. New messages are
+  // rejected server-side (areUsersBlocked gate in conversation handler) so
+  // this is purely UI: hide the composer + show a banner.
+  const { isAuthenticated } = useAuth();
+  const { data: blocksData } = useGetUserBlocksQuery(undefined, { skip: !isAuthenticated });
+  const blockedUsers = blocksData?.results?.blockedUsers ?? [];
+  const isOtherUserBlocked = !!otherUser?.id && blockedUsers.some((b) => b.id === otherUser.id);
 
   // Auto-scroll to bottom when messages load
   const hasScrolledRef = useRef(false);
@@ -365,6 +375,17 @@ export default function ConversationDetailScreen() {
 
           {/* Composer */}
           <View style={[styles.composer, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb', backgroundColor: isDark ? '#000000' : '#fff', paddingBottom: Math.max(insets.bottom, 8) }]}>
+            {isOtherUserBlocked && (
+              <Text style={{
+                color: isDark ? '#6b7280' : '#9ca3af',
+                fontSize: 12,
+                textAlign: 'center',
+                paddingTop: 6,
+                paddingBottom: 4,
+              }}>
+                Unblock {otherUser?.handle ? `@${otherUser.handle}` : 'this user'} to send messages.
+              </Text>
+            )}
             {isOtherUserDeleted ? (
               <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', justifyContent: 'center', paddingVertical: 12 }]}>
                 <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 14, textAlign: 'center' }}>
@@ -384,8 +405,8 @@ export default function ConversationDetailScreen() {
                 />
                 <Pressable
                   onPress={handleSend}
-                  disabled={!message.trim() || sending || starting}
-                  style={[styles.sendBtn, { backgroundColor: message.trim() ? '#3b82f6' : (isDark ? '#374151' : '#d1d5db') }]}
+                  disabled={!message.trim() || sending || starting || isOtherUserBlocked}
+                  style={[styles.sendBtn, { backgroundColor: (message.trim() && !isOtherUserBlocked) ? '#3b82f6' : (isDark ? '#374151' : '#d1d5db') }]}
                 >
                   <Ionicons name="send" size={16} color="#fff" />
                 </Pressable>
@@ -430,6 +451,8 @@ export default function ConversationDetailScreen() {
       <ReportMessageSheet
         visible={!!reportMessageId}
         messageId={reportMessageId ?? undefined}
+        senderUserId={otherUser?.id}
+        senderHandle={otherUser?.handle}
         onClose={() => setReportMessageId(null)}
       />
     </>

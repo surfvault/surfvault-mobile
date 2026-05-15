@@ -265,8 +265,9 @@ export default function ProfileHeader({
         )}
         {!isSelf && (
         <View style={s.actionRow}>
-          {/* Follow — hidden on private profiles (matches web) */}
-          {profile?.access !== 'private' && (
+          {/* Follow — hidden on private profiles (matches web) and when the
+              caller passes no handler (e.g. blocked profile). */}
+          {profile?.access !== 'private' && onFollow && (
           <Pressable
             onPress={onFollow}
             disabled={isFollowLoading}
@@ -303,6 +304,7 @@ export default function ProfileHeader({
             )}
           </Pressable>
           )}
+          {onMessage && (
           <Pressable
             onPress={onMessage}
             disabled={isMessageLoading}
@@ -317,6 +319,7 @@ export default function ProfileHeader({
               <Text style={[s.actionBtnText, { color: isDark ? '#fff' : '#111827' }]}>Message</Text>
             )}
           </Pressable>
+          )}
           {onShare && (
             <Pressable onPress={onShare} style={[s.iconBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
               <Ionicons name="share-outline" size={18} color={isDark ? '#fff' : '#374151'} />

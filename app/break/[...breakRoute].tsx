@@ -15,6 +15,7 @@ import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../src/context/UserProvider';
+import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useSmartBack } from '../../src/context/NavigationContext';
 import {
@@ -57,6 +58,7 @@ export default function SurfBreakDetailScreen() {
   const router = useRouter();
   const smartBack = useSmartBack();
   const { user } = useUser();
+  const { isAuthenticated } = useAuth();
   const requireAuth = useRequireAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -79,10 +81,18 @@ export default function SurfBreakDetailScreen() {
 
   const dateStr = selectedDate ? formatDateParam(selectedDate) : '';
 
-  const { data: initialData, isLoading } = useGetSurfBreakWithLatestSessionsQuery({
-    userId: user?.id, country, region, surfBreak,
-    date: dateStr || undefined,
-  }, { refetchOnMountOrArgChange: true });
+  const { data: initialData, isLoading } = useGetSurfBreakWithLatestSessionsQuery(
+    {
+      userId: user?.id, country, region, surfBreak,
+      date: dateStr || undefined,
+    },
+    {
+      refetchOnMountOrArgChange: true,
+      // Wait for the user's id before firing — the server uses it to filter
+      // out sessions from blocked photographers. Anonymous users fetch as-is.
+      skip: isAuthenticated && !user?.id,
+    }
+  );
 
   const breakData = initialData?.results?.surfBreak;
   const initialSessions = initialData?.results?.sessions ?? [];
@@ -147,7 +157,7 @@ export default function SurfBreakDetailScreen() {
   }, [initialData]);
 
   const { data: moreData, isFetching: loadingMore } = useGetSurfBreakSessionsQuery(
-    { surfBreakId: breakData?.id ?? '', limit: 10, continuationToken },
+    { surfBreakId: breakData?.id ?? '', limit: 10, continuationToken, viewerId: user?.id },
     { skip: !continuationToken || !breakData?.id }
   );
 

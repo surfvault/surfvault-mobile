@@ -121,7 +121,7 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
   const [activeSlide, setActiveSlide] = useState(0);
   const [slideWidth, setSlideWidth] = useState(0);
   const [sheetVisible, setSheetVisible] = useState(false);
-  const [reportSessionId, setReportSessionId] = useState<string | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ sessionId: string; ownerUserId?: string; ownerHandle?: string } | null>(null);
 
   // Group sessions by photographer so carousel order matches subtitle.
   const slides = useMemo(() => {
@@ -232,7 +232,11 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
         destructive: true,
         onPress: () => {
           if (!requireAuth()) return;
-          setReportSessionId(solo.session_id);
+          setReportTarget({
+            sessionId: solo.session_id,
+            ownerUserId: (solo as any).user_id,
+            ownerHandle: (solo as any).user_handle ?? (solo as any).handle,
+          });
         },
       }],
     });
@@ -326,9 +330,11 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
           onClose={() => setSheetVisible(false)}
         />
         <ReportSessionSheet
-          visible={!!reportSessionId}
-          sessionId={reportSessionId ?? undefined}
-          onClose={() => setReportSessionId(null)}
+          visible={!!reportTarget}
+          sessionId={reportTarget?.sessionId}
+          ownerUserId={reportTarget?.ownerUserId}
+          ownerHandle={reportTarget?.ownerHandle}
+          onClose={() => setReportTarget(null)}
         />
       </View>
     );

@@ -34,11 +34,12 @@ import {
   useGetUserBlocksQuery,
 } from '../../src/store';
 import ReportUserSheet from '../../src/components/ReportUserSheet';
+import ActionSheet from '../../src/components/ActionSheet';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
-import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
+import { AccessBanner, PrivateGalleryCard, BlockedGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
@@ -64,11 +65,12 @@ export default function UserProfileScreen() {
 
   const isSelf = currentUser?.handle === handle;
 
-  // Block / report state. The ellipsis on the non-self profile header opens an
-  // ActionSheet (iOS) / Alert (Android) with Report → opens ReportUserSheet,
-  // Block / Unblock → confirm + mutate. RTK Query cache invalidation on the
-  // block mutation refetches feeds/follow lists/conversations server-side.
+  // Block / report state. The ellipsis on the non-self profile header opens
+  // the bottom ActionSheet (Share / Report / Block / Unblock). RTK Query
+  // cache invalidation on the block mutation refetches feeds/follow lists/
+  // conversations server-side.
   const [reportVisible, setReportVisible] = useState(false);
+  const [actionSheetVisible, setActionSheetVisible] = useState(false);
   const [blockUser, { isLoading: isBlocking }] = useBlockUserMutation();
   const [unblockUser, { isLoading: isUnblocking }] = useUnblockUserMutation();
   const { data: blocksData } = useGetUserBlocksQuery(undefined, { skip: isSelf });
@@ -256,7 +258,10 @@ export default function UserProfileScreen() {
     trackedPush(`/conversation/${conversationId}` as any);
   }, [trackedPush]);
 
-  const isBlocked = !!profile?.id && blockedUsers.some((b) => b.id === profile.id);
+  // Source of truth: API flag (computed server-side in getUser). Fallback to
+  // the local blocks list so optimistic states render correctly between the
+  // block mutation and the profile refetch.
+  const isBlocked = !!profile?.isBlockedByMe || (!!profile?.id && blockedUsers.some((b) => b.id === profile.id));
 
   const handleBlock = useCallback(() => {
     if (!profile?.id || !profile?.handle) return;
@@ -303,19 +308,8 @@ export default function UserProfileScreen() {
 
   const handleMoreOptions = useCallback(() => {
     if (!requireAuth()) return;
-    if (isBlocked) {
-      Alert.alert(`@${profile?.handle}`, undefined, [
-        { text: 'Unblock', onPress: handleUnblock },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
-      return;
-    }
-    Alert.alert(`@${profile?.handle ?? 'User'}`, undefined, [
-      { text: 'Report user', style: 'destructive', onPress: () => setReportVisible(true) },
-      { text: 'Block user', style: 'destructive', onPress: handleBlock },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  }, [requireAuth, isBlocked, profile, handleBlock, handleUnblock]);
+    setActionSheetVisible(true);
+  }, [requireAuth]);
 
   const UserProfileHeader = () => (
     <ProfileHeader
@@ -325,10 +319,18 @@ export default function UserProfileScreen() {
       isFollowing={profile?.isFollowing}
       isFollowLoading={isFollowLoading}
       currentBreakName={profile?.surf_break_name}
-      onFollow={handleFollow}
-      onMessage={handleMessage}
-      onShare={handleShare}
-      onMoreOptions={isSelf ? undefined : handleMoreOptions}
+      // Hide Follow/Message when blocked — those actions would 403 server-side.
+      // The unblock CTA in the BlockedGalleryCard + ellipsis menu carries the
+      // single sensible action.
+      onFollow={isBlocked ? undefined : handleFollow}
+      onMessage={isBlocked ? undefined : handleMessage}
+      // Share moved into the more-options ActionSheet on non-self profiles
+      // so the header chrome stays minimal (Follow / Message / •••).
+      onShare={isSelf ? handleShare : undefined}
+      // When blocked, the only sensible action is Unblock — already exposed
+      // on the BlockedGalleryCard below. Hide the ellipsis to avoid an empty
+      // sheet duplicating the same CTA.
+      onMoreOptions={isSelf || isBlocked ? undefined : handleMoreOptions}
       onViewStats={(tab) => {
         if (handle) trackedPush(`/follow-stats/${handle}?tab=${tab}` as any);
       }}
@@ -393,10 +395,10 @@ export default function UserProfileScreen() {
           />
         ) : (
           <FlatList
-            data={isLocked ? [] : sessions}
+            data={isBlocked || isLocked ? [] : sessions}
             keyExtractor={(item) => item.session_id ?? item.id}
-            numColumns={isLocked ? 1 : (activeTab === 'grid' ? 3 : 1)}
-            key={isLocked ? 'locked' : (activeTab === 'grid' ? 'grid' : 'list')}
+            numColumns={isBlocked || isLocked ? 1 : (activeTab === 'grid' ? 3 : 1)}
+            key={isBlocked ? 'blocked' : (isLocked ? 'locked' : (activeTab === 'grid' ? 'grid' : 'list'))}
             renderItem={({ item }) => {
               if (activeTab === 'grid') {
                 const GAP = 1;
@@ -454,8 +456,8 @@ export default function UserProfileScreen() {
             ListHeaderComponent={
               <>
                 <UserProfileHeader />
-                {/* Grid / List tabs — hidden while gallery is locked */}
-                {!isLocked && (
+                {/* Grid / List tabs — hidden while gallery is locked or blocked */}
+                {!isLocked && !isBlocked && (
                   <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
                     <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
                       <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
@@ -469,7 +471,13 @@ export default function UserProfileScreen() {
               </>
             }
             ListEmptyComponent={
-              isLocked ? (
+              isBlocked ? (
+                <BlockedGalleryCard
+                  handle={profile?.handle}
+                  onUnblock={handleUnblock}
+                  isUnblocking={isUnblocking}
+                />
+              ) : isLocked ? (
                 <PrivateGalleryCard
                   scope="profile"
                   accessRequest={accessRequest}
@@ -520,6 +528,49 @@ export default function UserProfileScreen() {
         userId={profile?.id}
         userHandle={profile?.handle}
         onClose={() => setReportVisible(false)}
+      />
+
+      <ActionSheet
+        visible={actionSheetVisible}
+        onClose={() => setActionSheetVisible(false)}
+        header={{
+          title: profile?.name ?? profile?.handle ?? 'User',
+          subtitle: profile?.handle ? `@${profile.handle}` : undefined,
+          imageUri: profile?.picture || undefined,
+        }}
+        sections={[
+          {
+            options: [{
+              label: 'Share Profile',
+              icon: 'share-outline',
+              onPress: handleShare,
+            }],
+          },
+          ...(isBlocked
+            ? [{
+                options: [{
+                  label: 'Unblock User',
+                  icon: 'lock-open-outline' as const,
+                  onPress: handleUnblock,
+                }],
+              }]
+            : [{
+                options: [
+                  {
+                    label: 'Report User',
+                    icon: 'flag-outline' as const,
+                    destructive: true,
+                    onPress: () => setReportVisible(true),
+                  },
+                  {
+                    label: 'Block User',
+                    icon: 'ban-outline' as const,
+                    destructive: true,
+                    onPress: handleBlock,
+                  },
+                ],
+              }]),
+        ]}
       />
     </>
   );

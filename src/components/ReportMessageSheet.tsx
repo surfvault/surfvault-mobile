@@ -15,7 +15,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useReportMessageMutation } from '../store';
+import { useReportMessageMutation, useBlockUserMutation } from '../store';
+import { promptBlockAfterReport } from '../helpers/promptBlockAfterReport';
 
 // Keep values in sync with MESSAGE_REPORT_REASONS in surfvault-api/services/conversation/handler.ts
 const REPORT_REASONS = [
@@ -31,13 +32,18 @@ const DETAILS_MAX = 500;
 interface ReportMessageSheetProps {
   visible: boolean;
   messageId?: string;
+  // Sender of the reported message. Surfaces the post-submit "Also block?"
+  // alert. Optional — falls back to plain success if missing.
+  senderUserId?: string | null;
+  senderHandle?: string | null;
   onClose: () => void;
 }
 
-export default function ReportMessageSheet({ visible, messageId, onClose }: ReportMessageSheetProps) {
+export default function ReportMessageSheet({ visible, messageId, senderUserId, senderHandle, onClose }: ReportMessageSheetProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const [report, { isLoading }] = useReportMessageMutation();
+  const [blockUser] = useBlockUserMutation();
 
   const [selected, setSelected] = useState<string>('');
   const [details, setDetails] = useState<string>('');
@@ -65,12 +71,16 @@ export default function ReportMessageSheet({ visible, messageId, onClose }: Repo
     try {
       await report({ messageId, reason: selected, details: details.trim() }).unwrap();
       onClose();
-      Alert.alert('Report submitted', 'Thanks — our team will review it and take appropriate action.');
+      promptBlockAfterReport({
+        userId: senderUserId,
+        handle: senderHandle,
+        blockUser: (args) => blockUser(args).unwrap(),
+      });
     } catch (e: any) {
       const msg = e?.data?.message || 'Could not submit report. Please try again.';
       Alert.alert('Error', msg);
     }
-  }, [report, messageId, selected, details, onClose]);
+  }, [report, messageId, selected, details, onClose, senderUserId, senderHandle, blockUser]);
 
   const canSubmit = !!selected && (selected !== 'other' || details.trim().length > 0) && !isLoading;
 

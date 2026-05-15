@@ -227,6 +227,8 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
       <ReportBoardSheet
         visible={reportBoardId !== null}
         boardId={reportBoardId ?? undefined}
+        shaperUserId={shaper.id}
+        shaperHandle={shaper.handle}
         onClose={() => setReportBoardId(null)}
       />
     </View>

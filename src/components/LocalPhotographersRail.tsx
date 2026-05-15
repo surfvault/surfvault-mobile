@@ -5,6 +5,8 @@ import GradientRing, { ACTIVE_STOPS, NOTE_STOPS } from './GradientRing';
 import UserTypeBadge from './UserTypeBadge';
 import { useGetPhotographersAtBreakQuery } from '../store';
 import { useTrackedPush } from '../context/NavigationContext';
+import { useUser } from '../context/UserProvider';
+import { useAuth } from '../context/AuthProvider';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const isNoteActive = (setAt?: string | null) => {
@@ -26,9 +28,11 @@ export default function LocalPhotographersRail({ breakId }: Props) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
+  const { user } = useUser();
+  const { isAuthenticated } = useAuth();
   const { data } = useGetPhotographersAtBreakQuery(
-    { breakId: breakId ?? '' },
-    { skip: !breakId }
+    { breakId: breakId ?? '', viewerId: user?.id },
+    { skip: !breakId || (isAuthenticated && !user?.id) }
   );
 
   const photographers = data?.results?.photographers ?? [];

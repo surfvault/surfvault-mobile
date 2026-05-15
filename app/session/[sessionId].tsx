@@ -1223,6 +1223,8 @@ export default function SessionDetailScreen() {
       <ReportSessionSheet
         visible={reportSheetVisible}
         sessionId={session?.id}
+        ownerUserId={session?.user_id}
+        ownerHandle={session?.handle ?? session?.user_handle}
         onClose={() => setReportSheetVisible(false)}
       />
 

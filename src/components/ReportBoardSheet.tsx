@@ -14,7 +14,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useReportBoardMutation } from '../store';
+import { useReportBoardMutation, useBlockUserMutation } from '../store';
+import { promptBlockAfterReport } from '../helpers/promptBlockAfterReport';
 
 export interface ReportReason {
   value: string;
@@ -36,15 +37,21 @@ export const BOARD_REPORT_REASONS: ReportReason[] = [
 const DETAILS_MAX = 500;
 
 interface ReportBoardSheetProps {
+  // Shaper who owns the board. Surfaced in the post-submit "Also block?"
+  // alert. Optional — boards in feeds always carry shaper id+handle; if
+  // missing the alert falls back to plain success.
+  shaperUserId?: string | null;
+  shaperHandle?: string | null;
   visible: boolean;
   boardId?: string;
   onClose: () => void;
 }
 
-export default function ReportBoardSheet({ visible, boardId, onClose }: ReportBoardSheetProps) {
+export default function ReportBoardSheet({ visible, boardId, shaperUserId, shaperHandle, onClose }: ReportBoardSheetProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const [report, { isLoading }] = useReportBoardMutation();
+  const [blockUser] = useBlockUserMutation();
 
   const [selected, setSelected] = useState<string>('');
   const [details, setDetails] = useState<string>('');
@@ -72,15 +79,16 @@ export default function ReportBoardSheet({ visible, boardId, onClose }: ReportBo
     try {
       await report({ boardId, reason: selected, details: details.trim() }).unwrap();
       onClose();
-      Alert.alert(
-        'Report submitted',
-        'Thanks — our team will review it and take appropriate action.',
-      );
+      promptBlockAfterReport({
+        userId: shaperUserId,
+        handle: shaperHandle,
+        blockUser: (args) => blockUser(args).unwrap(),
+      });
     } catch (e: any) {
       const msg = e?.data?.message || 'Could not submit report. Please try again.';
       Alert.alert('Error', msg);
     }
-  }, [report, boardId, selected, details, onClose]);
+  }, [report, boardId, selected, details, onClose, shaperUserId, shaperHandle, blockUser]);
 
   const canSubmit = !!selected && (selected !== 'other' || details.trim().length > 0) && !isLoading;
 

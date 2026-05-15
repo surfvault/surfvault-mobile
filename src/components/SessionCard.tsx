@@ -526,6 +526,8 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
       <ReportSessionSheet
         visible={reportVisible}
         sessionId={session.session_id ?? session.id}
+        ownerUserId={(session as any).user_id}
+        ownerHandle={(session as any).user_handle ?? (session as any).handle}
         onClose={() => setReportVisible(false)}
       />
 
