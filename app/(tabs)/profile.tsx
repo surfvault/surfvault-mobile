@@ -475,6 +475,11 @@ export default function ProfileScreen() {
           onPress: () => trackedPush('/manage-accounts'),
         },
         {
+          label: 'Blocked Users',
+          icon: 'shield-outline',
+          onPress: () => trackedPush('/blocked-users'),
+        },
+        {
           label: 'Account',
           icon: 'person-circle-outline',
           onPress: () => trackedPush('/account'),

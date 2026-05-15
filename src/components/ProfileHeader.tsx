@@ -30,6 +30,9 @@ interface ProfileHeaderProps {
   onFollow?: () => void;
   onMessage?: () => void;
   onShare?: () => void;
+  // Opens an action sheet with Report / Block / Unblock (parent decides).
+  // Surfaced on the non-self profile header next to the share button.
+  onMoreOptions?: () => void;
   // Tap a stat count to open followers/following list
   onViewStats?: (tab: 'followers' | 'following') => void;
 }
@@ -51,6 +54,7 @@ export default function ProfileHeader({
   onFollow,
   onMessage,
   onShare,
+  onMoreOptions,
   onViewStats,
   showStorage = false,
   showActiveToggle = false,
@@ -316,6 +320,11 @@ export default function ProfileHeader({
           {onShare && (
             <Pressable onPress={onShare} style={[s.iconBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
               <Ionicons name="share-outline" size={18} color={isDark ? '#fff' : '#374151'} />
+            </Pressable>
+          )}
+          {onMoreOptions && (
+            <Pressable onPress={onMoreOptions} style={[s.iconBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+              <Ionicons name="ellipsis-horizontal" size={18} color={isDark ? '#fff' : '#374151'} />
             </Pressable>
           )}
         </View>

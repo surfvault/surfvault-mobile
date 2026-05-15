@@ -24,9 +24,12 @@ import {
   useStartConversationWithUserMutation,
   useGetUserQuery,
 } from '../../src/store';
+import * as Clipboard from 'expo-clipboard';
 import UserAvatar from '../../src/components/UserAvatar';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
 import ConversationSkeleton from '../../src/components/ConversationSkeleton';
+import ReportMessageSheet from '../../src/components/ReportMessageSheet';
+import ActionSheet from '../../src/components/ActionSheet';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_REGEX = /(https?:\/\/[^\s]+)/gi;
@@ -133,6 +136,11 @@ export default function ConversationDetailScreen() {
   const flatListRef = useRef<FlatList>(null);
 
   const [message, setMessage] = useState('');
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  // Long-press on a message bubble opens the ActionSheet. Tracks the targeted
+  // message so the sheet can both copy its body and (for inbound only) open
+  // ReportMessageSheet keyed to its id.
+  const [actionTarget, setActionTarget] = useState<{ id: string; body: string; isOutbound: boolean } | null>(null);
 
   const { data, isLoading } = useGetConversationWithMessagesQuery(
     { conversationId: conversationId ?? '' },
@@ -253,17 +261,29 @@ export default function ConversationDetailScreen() {
     const isSeen = item.id === lastSeenOutboundId;
     const time = formatMessageTime(item.created_at);
 
+    // Long-press opens a bottom action sheet (Copy on both directions, Report
+    // on inbound only). Suppressed on resource-link messages like access
+    // requests — they have their own surface.
+    const isResourceLink = String(item.body || '').includes('Photo Access Request:');
+    const onLongPress = !isResourceLink && !!item.id
+      ? () => setActionTarget({ id: item.id, body: String(item.body || ''), isOutbound })
+      : undefined;
+
     return (
       <View style={[styles.messageBubbleWrap, isOutbound ? styles.outbound : styles.inbound]}>
         <Text style={[styles.messageTime, { color: isDark ? '#6b7280' : '#9ca3af' }]}>{time}</Text>
-        <View style={[
-          styles.messageBubble,
-          isOutbound
-            ? { backgroundColor: '#3b82f6', borderBottomRightRadius: 4 }
-            : { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', borderTopLeftRadius: 4 },
-        ]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[
+            styles.messageBubble,
+            isOutbound
+              ? { backgroundColor: '#3b82f6', borderBottomRightRadius: 4 }
+              : { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', borderTopLeftRadius: 4 },
+          ]}
+        >
           <MessageBody body={item.body} isOutbound={isOutbound} isDark={isDark} onNavigate={trackedPush} />
-        </View>
+        </Pressable>
         {isSeen && (
           <Text style={[styles.seenText, { color: isDark ? '#6b7280' : '#9ca3af' }]}>Seen</Text>
         )}
@@ -374,6 +394,44 @@ export default function ConversationDetailScreen() {
           </View>
         </KeyboardAvoidingView>
       </View>
+
+      <ActionSheet
+        visible={!!actionTarget}
+        onClose={() => setActionTarget(null)}
+        sections={[
+          {
+            options: [
+              {
+                label: 'Copy',
+                icon: 'copy-outline',
+                onPress: async () => {
+                  if (actionTarget?.body) {
+                    await Clipboard.setStringAsync(actionTarget.body);
+                  }
+                },
+              },
+            ],
+          },
+          ...(actionTarget && !actionTarget.isOutbound
+            ? [{
+                options: [{
+                  label: 'Report Message',
+                  icon: 'flag-outline' as const,
+                  destructive: true,
+                  onPress: () => {
+                    if (actionTarget) setReportMessageId(actionTarget.id);
+                  },
+                }],
+              }]
+            : []),
+        ]}
+      />
+
+      <ReportMessageSheet
+        visible={!!reportMessageId}
+        messageId={reportMessageId ?? undefined}
+        onClose={() => setReportMessageId(null)}
+      />
     </>
   );
 }

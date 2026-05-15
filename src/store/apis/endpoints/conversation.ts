@@ -46,6 +46,16 @@ const conversationApi = rootApi.injectEndpoints({
         method: 'POST',
       }),
     }),
+    reportMessage: builder.mutation<
+      { message: string },
+      { messageId: string; reason: string; details?: string }
+    >({
+      query: ({ messageId, reason, details }) => ({
+        url: `/message/${messageId}/report`,
+        method: 'POST',
+        body: { reason, details: details ?? '' },
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -57,6 +67,7 @@ export const {
   useGetConversationWithMessagesQuery,
   useReplyToConversationMutation,
   useReadConversationMutation,
+  useReportMessageMutation,
 } = conversationApi;
 
 export { conversationApi };

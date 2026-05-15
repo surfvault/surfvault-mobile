@@ -29,7 +29,11 @@ import {
   useGetAccessRequestQuery,
   useRequestAccessToUserMutation,
   useDeleteSessionMutation,
+  useBlockUserMutation,
+  useUnblockUserMutation,
+  useGetUserBlocksQuery,
 } from '../../src/store';
+import ReportUserSheet from '../../src/components/ReportUserSheet';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
@@ -59,6 +63,16 @@ export default function UserProfileScreen() {
   const isFetchingMoreRef = useRef(false);
 
   const isSelf = currentUser?.handle === handle;
+
+  // Block / report state. The ellipsis on the non-self profile header opens an
+  // ActionSheet (iOS) / Alert (Android) with Report → opens ReportUserSheet,
+  // Block / Unblock → confirm + mutate. RTK Query cache invalidation on the
+  // block mutation refetches feeds/follow lists/conversations server-side.
+  const [reportVisible, setReportVisible] = useState(false);
+  const [blockUser, { isLoading: isBlocking }] = useBlockUserMutation();
+  const [unblockUser, { isLoading: isUnblocking }] = useUnblockUserMutation();
+  const { data: blocksData } = useGetUserBlocksQuery(undefined, { skip: isSelf });
+  const blockedUsers = blocksData?.results?.blockedUsers ?? [];
 
   // Self-only: tile ellipsis confirms delete via the existing session
   // mutation. Mirrors the chrome of the shaper grid ellipsis.
@@ -242,6 +256,67 @@ export default function UserProfileScreen() {
     trackedPush(`/conversation/${conversationId}` as any);
   }, [trackedPush]);
 
+  const isBlocked = !!profile?.id && blockedUsers.some((b) => b.id === profile.id);
+
+  const handleBlock = useCallback(() => {
+    if (!profile?.id || !profile?.handle) return;
+    Alert.alert(
+      `Block @${profile.handle}?`,
+      "They won't be able to message you or request access to your photos. You'll stop seeing their content. Existing conversations stay visible.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser({ userId: profile.id }).unwrap();
+            } catch (e: any) {
+              Alert.alert('Could not block', e?.data?.message || 'Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  }, [profile, blockUser]);
+
+  const handleUnblock = useCallback(() => {
+    if (!profile?.id || !profile?.handle) return;
+    Alert.alert(
+      `Unblock @${profile.handle}?`,
+      "They'll be able to message you and you'll see their content again.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unblock',
+          onPress: async () => {
+            try {
+              await unblockUser({ userId: profile.id }).unwrap();
+            } catch (e: any) {
+              Alert.alert('Could not unblock', e?.data?.message || 'Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  }, [profile, unblockUser]);
+
+  const handleMoreOptions = useCallback(() => {
+    if (!requireAuth()) return;
+    if (isBlocked) {
+      Alert.alert(`@${profile?.handle}`, undefined, [
+        { text: 'Unblock', onPress: handleUnblock },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+      return;
+    }
+    Alert.alert(`@${profile?.handle ?? 'User'}`, undefined, [
+      { text: 'Report user', style: 'destructive', onPress: () => setReportVisible(true) },
+      { text: 'Block user', style: 'destructive', onPress: handleBlock },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }, [requireAuth, isBlocked, profile, handleBlock, handleUnblock]);
+
   const UserProfileHeader = () => (
     <ProfileHeader
       profile={profile}
@@ -253,6 +328,7 @@ export default function UserProfileScreen() {
       onFollow={handleFollow}
       onMessage={handleMessage}
       onShare={handleShare}
+      onMoreOptions={isSelf ? undefined : handleMoreOptions}
       onViewStats={(tab) => {
         if (handle) trackedPush(`/follow-stats/${handle}?tab=${tab}` as any);
       }}
@@ -437,6 +513,13 @@ export default function UserProfileScreen() {
         user={profile ? { id: profile.id, handle: profile.handle } : null}
         onClose={() => setContactSheetVisible(false)}
         onSent={handleConversationStarted}
+      />
+
+      <ReportUserSheet
+        visible={reportVisible}
+        userId={profile?.id}
+        userHandle={profile?.handle}
+        onClose={() => setReportVisible(false)}
       />
     </>
   );
