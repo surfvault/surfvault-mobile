@@ -191,15 +191,17 @@ const userApi = rootApi.injectEndpoints({
     }),
     getPhotographers: builder.query({
       providesTags: [ApiTag.User],
-      query: ({ continent }: { continent: string }) => ({
-        url: `/photographers?continent=${continent}`,
+      // viewerId required for server-side block filtering — endpoint has no
+      // authorizer. Anonymous callers pass empty.
+      query: ({ continent, viewerId }: { continent: string; viewerId?: string }) => ({
+        url: `/photographers?continent=${continent}&viewerId=${viewerId ?? ''}`,
         method: 'GET',
       }),
     }),
     getPhotographersAtBreak: builder.query({
       providesTags: [ApiTag.User],
-      query: ({ breakId }: { breakId: string }) => ({
-        url: `/surf-breaks/${breakId}/photographers`,
+      query: ({ breakId, viewerId }: { breakId: string; viewerId?: string }) => ({
+        url: `/surf-breaks/${breakId}/photographers?viewerId=${viewerId ?? ''}`,
         method: 'GET',
       }),
     }),
@@ -276,6 +278,65 @@ const userApi = rootApi.injectEndpoints({
         method: 'PATCH',
       }),
     }),
+    // Block / unblock. The mutations invalidate caches that surface user
+    // content so feeds, follow lists, conversations, and search re-fetch with
+    // the blocked user filtered out (server-side).
+    blockUser: builder.mutation<{ message?: string }, { userId: string }>({
+      invalidatesTags: [
+        ApiTag.Block,
+        ApiTag.User,
+        ApiTag.Follow,
+        ApiTag.Conversation,
+        ApiTag.Map,
+        ApiTag.Session,
+        ApiTag.SurfBreak,
+      ],
+      query: ({ userId }) => ({
+        url: '/user/block',
+        method: 'PATCH',
+        body: { userId },
+      }),
+    }),
+    unblockUser: builder.mutation<{ message?: string }, { userId: string }>({
+      invalidatesTags: [
+        ApiTag.Block,
+        ApiTag.User,
+        ApiTag.Follow,
+        ApiTag.Conversation,
+        ApiTag.Map,
+        ApiTag.Session,
+        ApiTag.SurfBreak,
+      ],
+      query: ({ userId }) => ({
+        url: '/user/unblock',
+        method: 'PATCH',
+        body: { userId },
+      }),
+    }),
+    getUserBlocks: builder.query<
+      { message: string; results: { blockedUsers: Array<{ id: string; handle: string; name: string; picture: string | null; user_type: string | null; created_at: string }> } },
+      void
+    >({
+      providesTags: [ApiTag.Block],
+      query: () => ({
+        url: '/user/blocks',
+        method: 'GET',
+      }),
+    }),
+    reportUser: builder.mutation<
+      { message: string },
+      { userId: string; reason: string; details?: string; alsoBlock?: boolean }
+    >({
+      invalidatesTags: (_r, _e, arg) =>
+        arg.alsoBlock
+          ? [ApiTag.Block, ApiTag.User, ApiTag.Follow, ApiTag.Conversation, ApiTag.Map, ApiTag.Session, ApiTag.SurfBreak]
+          : [],
+      query: ({ userId, reason, details, alsoBlock }) => ({
+        url: `/user/${userId}/report`,
+        method: 'POST',
+        body: { reason, details, alsoBlock },
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -311,6 +372,10 @@ export const {
   useGetLinkedAccountsQuery,
   useLinkAccountMutation,
   useUnlinkAccountMutation,
+  useBlockUserMutation,
+  useUnblockUserMutation,
+  useGetUserBlocksQuery,
+  useReportUserMutation,
 } = userApi;
 
 export { userApi };

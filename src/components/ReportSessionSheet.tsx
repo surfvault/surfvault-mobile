@@ -16,7 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useReportSurfSessionMutation } from '../store';
+import { useReportSurfSessionMutation, useBlockUserMutation } from '../store';
+import { promptBlockAfterReport } from '../helpers/promptBlockAfterReport';
 
 export interface ReportReason {
   value: string;
@@ -40,13 +41,18 @@ const DETAILS_MAX = 500;
 interface ReportSessionSheetProps {
   visible: boolean;
   sessionId?: string;
+  // Owner of the reported session. Passed through so the post-submit alert
+  // can offer "Also block @handle?" — the standard pattern across the app.
+  ownerUserId?: string | null;
+  ownerHandle?: string | null;
   onClose: () => void;
 }
 
-export default function ReportSessionSheet({ visible, sessionId, onClose }: ReportSessionSheetProps) {
+export default function ReportSessionSheet({ visible, sessionId, ownerUserId, ownerHandle, onClose }: ReportSessionSheetProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const [report, { isLoading }] = useReportSurfSessionMutation();
+  const [blockUser] = useBlockUserMutation();
 
   const [selected, setSelected] = useState<string>('');
   const [details, setDetails] = useState<string>('');
@@ -75,15 +81,16 @@ export default function ReportSessionSheet({ visible, sessionId, onClose }: Repo
     try {
       await report({ sessionId, reason: selected, details: details.trim() }).unwrap();
       onClose();
-      Alert.alert(
-        'Report submitted',
-        'Thanks — our team will review it and take appropriate action.',
-      );
+      promptBlockAfterReport({
+        userId: ownerUserId,
+        handle: ownerHandle,
+        blockUser: (args) => blockUser(args).unwrap(),
+      });
     } catch (e: any) {
       const msg = e?.data?.message || 'Could not submit report. Please try again.';
       Alert.alert('Error', msg);
     }
-  }, [report, sessionId, selected, details, onClose]);
+  }, [report, sessionId, selected, details, onClose, ownerUserId, ownerHandle, blockUser]);
 
   const canSubmit = !!selected && (selected !== 'other' || details.trim().length > 0) && !isLoading;
 

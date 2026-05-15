@@ -23,10 +23,15 @@ import {
   useReadConversationMutation,
   useStartConversationWithUserMutation,
   useGetUserQuery,
+  useGetUserBlocksQuery,
 } from '../../src/store';
+import { useAuth } from '../../src/context/AuthProvider';
+import * as Clipboard from 'expo-clipboard';
 import UserAvatar from '../../src/components/UserAvatar';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
 import ConversationSkeleton from '../../src/components/ConversationSkeleton';
+import ReportMessageSheet from '../../src/components/ReportMessageSheet';
+import ActionSheet from '../../src/components/ActionSheet';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_REGEX = /(https?:\/\/[^\s]+)/gi;
@@ -133,6 +138,11 @@ export default function ConversationDetailScreen() {
   const flatListRef = useRef<FlatList>(null);
 
   const [message, setMessage] = useState('');
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  // Long-press on a message bubble opens the ActionSheet. Tracks the targeted
+  // message so the sheet can both copy its body and (for inbound only) open
+  // ReportMessageSheet keyed to its id.
+  const [actionTarget, setActionTarget] = useState<{ id: string; body: string; isOutbound: boolean } | null>(null);
 
   const { data, isLoading } = useGetConversationWithMessagesQuery(
     { conversationId: conversationId ?? '' },
@@ -163,6 +173,14 @@ export default function ConversationDetailScreen() {
       : conversation?.participant_one;
 
   const isOtherUserDeleted = !!otherUser?.deleted_at;
+
+  // Block state — checked from the canonical blocks list. New messages are
+  // rejected server-side (areUsersBlocked gate in conversation handler) so
+  // this is purely UI: hide the composer + show a banner.
+  const { isAuthenticated } = useAuth();
+  const { data: blocksData } = useGetUserBlocksQuery(undefined, { skip: !isAuthenticated });
+  const blockedUsers = blocksData?.results?.blockedUsers ?? [];
+  const isOtherUserBlocked = !!otherUser?.id && blockedUsers.some((b) => b.id === otherUser.id);
 
   // Auto-scroll to bottom when messages load
   const hasScrolledRef = useRef(false);
@@ -253,17 +271,29 @@ export default function ConversationDetailScreen() {
     const isSeen = item.id === lastSeenOutboundId;
     const time = formatMessageTime(item.created_at);
 
+    // Long-press opens a bottom action sheet (Copy on both directions, Report
+    // on inbound only). Suppressed on resource-link messages like access
+    // requests — they have their own surface.
+    const isResourceLink = String(item.body || '').includes('Photo Access Request:');
+    const onLongPress = !isResourceLink && !!item.id
+      ? () => setActionTarget({ id: item.id, body: String(item.body || ''), isOutbound })
+      : undefined;
+
     return (
       <View style={[styles.messageBubbleWrap, isOutbound ? styles.outbound : styles.inbound]}>
         <Text style={[styles.messageTime, { color: isDark ? '#6b7280' : '#9ca3af' }]}>{time}</Text>
-        <View style={[
-          styles.messageBubble,
-          isOutbound
-            ? { backgroundColor: '#3b82f6', borderBottomRightRadius: 4 }
-            : { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', borderTopLeftRadius: 4 },
-        ]}>
+        <Pressable
+          onLongPress={onLongPress}
+          delayLongPress={350}
+          style={[
+            styles.messageBubble,
+            isOutbound
+              ? { backgroundColor: '#3b82f6', borderBottomRightRadius: 4 }
+              : { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', borderTopLeftRadius: 4 },
+          ]}
+        >
           <MessageBody body={item.body} isOutbound={isOutbound} isDark={isDark} onNavigate={trackedPush} />
-        </View>
+        </Pressable>
         {isSeen && (
           <Text style={[styles.seenText, { color: isDark ? '#6b7280' : '#9ca3af' }]}>Seen</Text>
         )}
@@ -345,6 +375,17 @@ export default function ConversationDetailScreen() {
 
           {/* Composer */}
           <View style={[styles.composer, { borderTopColor: isDark ? '#1f2937' : '#e5e7eb', backgroundColor: isDark ? '#000000' : '#fff', paddingBottom: Math.max(insets.bottom, 8) }]}>
+            {isOtherUserBlocked && (
+              <Text style={{
+                color: isDark ? '#6b7280' : '#9ca3af',
+                fontSize: 12,
+                textAlign: 'center',
+                paddingTop: 6,
+                paddingBottom: 4,
+              }}>
+                Unblock {otherUser?.handle ? `@${otherUser.handle}` : 'this user'} to send messages.
+              </Text>
+            )}
             {isOtherUserDeleted ? (
               <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', justifyContent: 'center', paddingVertical: 12 }]}>
                 <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 14, textAlign: 'center' }}>
@@ -364,8 +405,8 @@ export default function ConversationDetailScreen() {
                 />
                 <Pressable
                   onPress={handleSend}
-                  disabled={!message.trim() || sending || starting}
-                  style={[styles.sendBtn, { backgroundColor: message.trim() ? '#3b82f6' : (isDark ? '#374151' : '#d1d5db') }]}
+                  disabled={!message.trim() || sending || starting || isOtherUserBlocked}
+                  style={[styles.sendBtn, { backgroundColor: (message.trim() && !isOtherUserBlocked) ? '#3b82f6' : (isDark ? '#374151' : '#d1d5db') }]}
                 >
                   <Ionicons name="send" size={16} color="#fff" />
                 </Pressable>
@@ -374,6 +415,46 @@ export default function ConversationDetailScreen() {
           </View>
         </KeyboardAvoidingView>
       </View>
+
+      <ActionSheet
+        visible={!!actionTarget}
+        onClose={() => setActionTarget(null)}
+        sections={[
+          {
+            options: [
+              {
+                label: 'Copy',
+                icon: 'copy-outline',
+                onPress: async () => {
+                  if (actionTarget?.body) {
+                    await Clipboard.setStringAsync(actionTarget.body);
+                  }
+                },
+              },
+            ],
+          },
+          ...(actionTarget && !actionTarget.isOutbound
+            ? [{
+                options: [{
+                  label: 'Report Message',
+                  icon: 'flag-outline' as const,
+                  destructive: true,
+                  onPress: () => {
+                    if (actionTarget) setReportMessageId(actionTarget.id);
+                  },
+                }],
+              }]
+            : []),
+        ]}
+      />
+
+      <ReportMessageSheet
+        visible={!!reportMessageId}
+        messageId={reportMessageId ?? undefined}
+        senderUserId={otherUser?.id}
+        senderHandle={otherUser?.handle}
+        onClose={() => setReportMessageId(null)}
+      />
     </>
   );
 }

@@ -22,6 +22,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import * as Location from 'expo-location';
 import { setCoordinates } from '../../src/store/slices/location';
 import { useUser } from '../../src/context/UserProvider';
+import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
@@ -107,6 +108,7 @@ export default function MapScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
+  const { isAuthenticated } = useAuth();
   const requireAuth = useRequireAuth();
   const dispatch = useDispatch();
   const mapRef = useRef<MapView>(null);
@@ -329,8 +331,8 @@ export default function MapScreen() {
     { skip: !hasNearbyCoords }
   );
   const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
-    { skip: !hasNearbyCoords }
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id },
+    { skip: !hasNearbyCoords || (isAuthenticated && !user?.id) }
   );
   const nearbyBreaks = nearbyBreaksData?.results?.nearbyBreaks ?? nearbyBreaksData?.results?.surfBreaks ?? [];
   const nearbyPhotographers = nearbyPhotographersData?.results?.nearbyPhotographers ?? nearbyPhotographersData?.results?.photographers ?? [];

@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import ScreenHeader from '../../../../../src/components/ScreenHeader';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../../../../src/context/UserProvider';
+import { useAuth } from '../../../../../src/context/AuthProvider';
 import { useRequireAuth } from '../../../../../src/hooks/useRequireAuth';
 import {
   useGetSurfBreakWithLatestSessionsQuery,
@@ -44,6 +45,7 @@ export default function SurfBreakDetailScreen() {
   }>();
   const router = useRouter();
   const { user } = useUser();
+  const { isAuthenticated } = useAuth();
   const requireAuth = useRequireAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -55,13 +57,20 @@ export default function SurfBreakDetailScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Initial data — pass date if selected
-  const { data: initialData, isLoading } = useGetSurfBreakWithLatestSessionsQuery({
-    userId: user?.id,
-    country: country ?? '',
-    region: region ?? '',
-    surfBreak: surfBreak ?? '',
-    date: selectedDate ? formatDateParam(selectedDate) : undefined,
-  });
+  const { data: initialData, isLoading } = useGetSurfBreakWithLatestSessionsQuery(
+    {
+      userId: user?.id,
+      country: country ?? '',
+      region: region ?? '',
+      surfBreak: surfBreak ?? '',
+      date: selectedDate ? formatDateParam(selectedDate) : undefined,
+    },
+    {
+      // Wait for the authed user's id so the server can apply the block
+      // filter on the first request.
+      skip: isAuthenticated && !user?.id,
+    }
+  );
 
   const breakData = initialData?.results?.surfBreak;
   const initialSessions = initialData?.results?.sessions ?? [];
@@ -87,7 +96,7 @@ export default function SurfBreakDetailScreen() {
 
   // Pagination
   const { data: moreData, isFetching: loadingMore } = useGetSurfBreakSessionsQuery(
-    { surfBreakId: breakData?.id ?? '', limit: 10, continuationToken },
+    { surfBreakId: breakData?.id ?? '', limit: 10, continuationToken, viewerId: user?.id },
     { skip: !continuationToken || !breakData?.id }
   );
 

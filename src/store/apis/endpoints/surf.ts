@@ -108,12 +108,17 @@ const surfApi = rootApi.injectEndpoints({
         surfBreakId,
         limit,
         continuationToken,
+        viewerId,
       }: {
         surfBreakId: string;
         limit?: number;
         continuationToken?: string;
+        // Optional but required for block filtering: this endpoint has no
+        // authorizer so the API can't derive the caller. Pass current user id
+        // when known so blocked photographers' sessions get filtered out.
+        viewerId?: string;
       }) => ({
-        url: `/surf-session/${surfBreakId}/posts?limit=${limit ?? ''}&continuationToken=${continuationToken ?? ''}`,
+        url: `/surf-session/${surfBreakId}/posts?limit=${limit ?? ''}&continuationToken=${continuationToken ?? ''}&viewerId=${viewerId ?? ''}`,
         method: 'GET',
       }),
     }),

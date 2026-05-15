@@ -30,6 +30,7 @@ import {
   useGetShapersFromFollowingQuery,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
+import { useAuth } from '../../src/context/AuthProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
 import SessionCard from '../../src/components/SessionCard';
 import BreakDateCard, { type BreakDateGroup } from '../../src/components/BreakDateCard';
@@ -72,6 +73,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
+  const { isAuthenticated } = useAuth();
   const { setTabBarVisible } = useTabBar();
 
   // Cache the top inset so it never drops to 0 mid-session (safe-area-context
@@ -191,7 +193,15 @@ export default function HomeScreen() {
       feed: feedQueryArg,
       groupByBreakDate: useGroupedFeed,
     },
-    { skip: feedType === 'boardroom' || ((feedType === 'following' || feedType === 'favorites') && !user?.id) }
+    {
+      // Wait for the authed user's id to land before fetching — otherwise
+      // the first fetch goes out with no viewerId and the server-side block
+      // filter is a no-op. Anonymous users (not logged in) fetch immediately.
+      skip:
+        feedType === 'boardroom'
+        || (isAuthenticated && !user?.id)
+        || ((feedType === 'following' || feedType === 'favorites') && !user?.id),
+    }
   );
 
   useEffect(() => {
@@ -319,8 +329,8 @@ export default function HomeScreen() {
     { skip: !hasNearbyAnchor }
   );
   const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
-    { skip: !hasNearbyAnchor }
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id },
+    { skip: !hasNearbyAnchor || (isAuthenticated && !user?.id) }
   );
 
   // Search — uses /map/search which returns { results: { searchContent: [...] } }
@@ -331,8 +341,9 @@ export default function HomeScreen() {
       search: searchTerm,
       type: searchType, // "surf_break" or "user" — "user" returns surfers + photographers
       tags: searchType === 'user' ? selectedTags : [],
+      viewerId: user?.id,
     },
-    { skip: searchTerm.length < 2 && !hasTagFilter }
+    { skip: (searchTerm.length < 2 && !hasTagFilter) || (isAuthenticated && !user?.id) }
   );
 
   const { data: tagsData } = useGetPopularTagsQuery(undefined);
