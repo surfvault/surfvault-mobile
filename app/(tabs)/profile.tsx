@@ -596,7 +596,7 @@ export default function ProfileScreen() {
         profile={profileWithCounts}
         isDark={isDark}
         isSelf
-        showStorage
+        showStorage={user?.user_type !== 'advertiser'}
         showActiveToggle
         onEditProfile={() => trackedPush('/edit-profile')}
         onToggleActive={handleToggleActive}
@@ -855,6 +855,8 @@ export default function ProfileScreen() {
                 name={
                   activeTab === 'favorites' ? 'heart-outline'
                   : activeTab === 'tagged'  ? 'pricetag-outline'
+                  : user?.user_type === 'advertiser' ? 'megaphone-outline'
+                  : user?.user_type === 'shaper' ? 'grid-outline'
                   : 'camera-outline'
                 }
                 size={40}
@@ -863,6 +865,8 @@ export default function ProfileScreen() {
               <Text style={{ color: '#9ca3af', marginTop: 8, fontSize: 14 }}>
                 {activeTab === 'favorites' ? 'No favorites yet'
                 : activeTab === 'tagged'  ? "You haven't been tagged in any sessions yet"
+                : user?.user_type === 'advertiser' ? 'No advertisements'
+                : user?.user_type === 'shaper' ? 'No boards yet'
                 : 'No sessions yet'}
               </Text>
             </View>

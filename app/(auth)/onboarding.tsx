@@ -59,11 +59,14 @@ export default function OnboardingScreen() {
   const [handleError, setHandleError] = useState('');
 
   // Type step
-  const [userType, setUserType] = useState<'surfer' | 'photographer' | 'shaper' | null>(null);
+  const [userType, setUserType] = useState<'surfer' | 'photographer' | 'shaper' | 'advertiser' | null>(null);
   const [isPublic, setIsPublic] = useState(true);
-  // Shapers are always public — they're discoverable content. The toggle is
-  // hidden when shaper is picked, and we force-send isPublic: true.
+  // Shapers + advertisers are always public — they're discoverable content
+  // (Boardroom / sponsored feed). The visibility toggle is hidden for them
+  // and we force-send isPublic: true.
   const isShaper = userType === 'shaper';
+  const isAdvertiser = userType === 'advertiser';
+  const forcePublic = isShaper || isAdvertiser;
 
   // Picture step
   const [profilePicUri, setProfilePicUri] = useState<string | null>(null);
@@ -102,9 +105,10 @@ export default function OnboardingScreen() {
   const onSubmitType = useCallback(async () => {
     if (!userType) return;
     try {
-      // Shapers are forced public regardless of the toggle's last value
-      // (the backend also enforces this — belt + suspenders).
-      const effectiveIsPublic = userType === 'shaper' ? true : isPublic;
+      // Shapers + advertisers are forced public regardless of the toggle's
+      // last value (the backend also enforces this — belt + suspenders).
+      const effectiveIsPublic =
+        userType === 'shaper' || userType === 'advertiser' ? true : isPublic;
       await updateType({ type: userType, isPublic: effectiveIsPublic }).unwrap();
       setStep('picture');
     } catch {
@@ -315,14 +319,36 @@ export default function OnboardingScreen() {
             </View>
           </Pressable>
 
-          {/* Shaper profiles are always public — Boardroom + Discover need
-              them visible to be useful. Hide the toggle entirely when shaper
-              is selected and surface a short hint instead. */}
-          {!isShaper && (
+          <Pressable
+            onPress={() => setUserType('advertiser')}
+            style={[
+              s.optionCard,
+              { backgroundColor: cardBg, borderColor: userType === 'advertiser' ? '#0ea5e9' : cardBorder },
+              userType === 'advertiser' && s.optionCardSelected,
+            ]}
+          >
+            <View style={s.optionRow}>
+              <View style={[s.optionIconWrap, { backgroundColor: userType === 'advertiser' ? '#e0f2fe' : (isDark ? 'rgba(255,255,255,0.08)' : '#f1f5f9') }]}>
+                <Ionicons name="megaphone-outline" size={24} color={userType === 'advertiser' ? '#0ea5e9' : mutedColor} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[s.optionTitle, { color: textColor }]}>Advertiser</Text>
+                <Text style={[s.optionDescription, { color: mutedColor }]}>
+                  Promote my brand to the SurfVault community
+                </Text>
+              </View>
+              {userType === 'advertiser' && <Ionicons name="checkmark-circle" size={22} color="#0ea5e9" />}
+            </View>
+          </Pressable>
+
+          {/* Shaper + advertiser profiles are always public — they're
+              discoverable content (Boardroom / sponsored feed). Hide the
+              visibility toggle for them and surface a short hint instead. */}
+          {!forcePublic && (
             <Text style={[s.sectionLabel, { color: textColor, marginTop: 24 }]}>Profile visibility</Text>
           )}
 
-          {!isShaper && (
+          {!forcePublic && (
             <View style={s.toggleRow}>
               <Pressable
                 onPress={() => setIsPublic(true)}
@@ -358,6 +384,8 @@ export default function OnboardingScreen() {
           <Text style={[s.hintText, { color: mutedColor, marginTop: 8 }]}>
             {isShaper
               ? 'Shaper profiles are always public so nearby surfers can find your boards in Discover and Boardroom.'
+              : isAdvertiser
+              ? 'Advertiser profiles are always public so the community can discover your brand.'
               : isPublic
               ? 'Your sessions will be visible to everyone. You can still hide the location of individual sessions if you wish.'
               : 'Your profile is still discoverable, but users must request access to view your sessions and photos.'}

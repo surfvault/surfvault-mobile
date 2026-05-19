@@ -171,7 +171,7 @@ function TabsInner() {
                     }}
                     contentFit="cover"
                   />
-                  {user?.active && (
+                  {user?.active && (user as any)?.user_type === 'photographer' && (
                     <View style={{
                       position: 'absolute',
                       bottom: -1,

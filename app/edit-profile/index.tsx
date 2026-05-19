@@ -77,6 +77,7 @@ export default function EditProfileScreen() {
   // Shapers are always public; the access toggle is hidden for them and
   // enforced server-side in services/user/handler.ts.
   const isShaper = userType === 'shaper';
+  const canEditAccess = userType === 'photographer' || userType === 'surfer';
 
   // Initialize form from user data
   useEffect(() => {
@@ -384,8 +385,8 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Privacy — hidden for shapers (always public). */}
-            {!isShaper && (
+            {/* Privacy — only surfers/photographers can toggle. Shapers always public; other types (e.g. advertisers) hidden. */}
+            {canEditAccess && (
               <View style={s.field}>
                 <View style={s.switchRow}>
                   <View style={{ flex: 1 }}>

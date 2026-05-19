@@ -63,6 +63,7 @@ export default function ProfileHeader({
   const hasActiveNote = !!profile?.status_note && isNoteActive(profile?.status_note_set_at);
   const userType = profile?.user_type ?? profile?.type;
   const isShaper = userType === 'shaper';
+  const isAdvertiser = userType === 'advertiser';
   // For shapers we replace the spots stat with their board count. RTK Query
   // dedupes against the same handle, so this re-uses the gallery's fetch
   // (no extra network call when the boards grid is also mounted).
@@ -113,11 +114,13 @@ export default function ProfileHeader({
               <Text style={[s.nameText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
                 {profile?.name ?? profile?.handle ?? ''}
               </Text>
-              <View style={[s.activeDot, {
-                backgroundColor: profile?.active ? '#10b981' : 'transparent',
-                borderWidth: profile?.active ? 0 : 1,
-                borderColor: '#9ca3af',
-              }]} />
+              {userType === 'photographer' && (
+                <View style={[s.activeDot, {
+                  backgroundColor: profile?.active ? '#10b981' : 'transparent',
+                  borderWidth: profile?.active ? 0 : 1,
+                  borderColor: '#9ca3af',
+                }]} />
+              )}
             </View>
             {(profile?.instagram || profile?.youtube || profile?.website) && (
               <View style={s.socialIcons}>
@@ -154,9 +157,11 @@ export default function ProfileHeader({
                   <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
                     {isShaper
                       ? boardsCount
-                      : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
+                      : isAdvertiser
+                        ? (profile?.adsCount ?? profile?.ads_count ?? 0)
+                        : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
                   </Text>
-                  <Text style={s.statLabel}>{isShaper ? 'boards' : 'spots'}</Text>
+                  <Text style={s.statLabel}>{isShaper ? 'boards' : isAdvertiser ? 'ads' : 'spots'}</Text>
                 </View>
                 <Pressable
                   onPress={statsTappable ? () => onViewStats?.('followers') : undefined}

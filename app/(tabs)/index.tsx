@@ -398,7 +398,9 @@ export default function HomeScreen() {
     }));
     const adGroups = groupAdsByPartner(ads);
     const shaperGroups = shapers.map((s: any) => [s]);
-    return zipPromoGroups(adGroups, shaperGroups);
+    // TEMP: shaper-first so the first promo slot in Discover is a shaper.
+    // Revert to `zipPromoGroups(adGroups, shaperGroups)` to restore ad-first.
+    return zipPromoGroups(shaperGroups, adGroups);
   }, [adsData, nearbyShapersData, followedShapersData, feedType]);
 
   // Interleave alternating ad/shaper groups into the session feed at the
