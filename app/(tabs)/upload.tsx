@@ -299,9 +299,9 @@ function SessionOrBoardCreate() {
 
       // Build file list for upload manager
       // presignedUrlMap is keyed by file UUID, uploadFileIdMap maps UUID -> DB row ID
-      const uploadFiles = filesMapped.map((f) => ({
+      const uploadFiles = filesMapped.map((f, idx) => ({
         name: f.name,
-        uri: files.find((orig) => orig.name === f.name)!.uri,
+        uri: files[idx].uri,
         type: f.type,
         uploadFileId: uploadFileIdMap?.[f.uuid] ?? '',
         presignedUrl: presignedUrlMap[f.uuid] ?? '',
