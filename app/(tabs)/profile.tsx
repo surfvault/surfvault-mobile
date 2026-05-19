@@ -45,6 +45,7 @@ import ProfileHeader from '../../src/components/ProfileHeader';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
 import SessionCard from '../../src/components/SessionCard';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
+import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
@@ -114,6 +115,7 @@ export default function ProfileScreen() {
   // Tagged + Favorites stay available so shapers can still favorite breaks
   // they shoot near and see sessions they were tagged in.
   const isShaperSelf = user?.user_type === 'shaper';
+  const isAdvertiserSelf = user?.user_type === 'advertiser';
 
   // Session long-press action sheet
   const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
@@ -287,7 +289,7 @@ export default function ProfileScreen() {
 
   const { data: sessionsData, isFetching, refetch: refetchSessions } = useGetUserSessionsQuery(
     { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken },
-    { skip: !user?.handle || isShaperSelf }
+    { skip: !user?.handle || isShaperSelf || isAdvertiserSelf }
   );
 
   // Tagged-in sessions (separate paginated list)
@@ -697,6 +699,24 @@ export default function ProfileScreen() {
           {listHeader}
           {user?.handle ? (
             <ShaperBoardsGrid handle={user.handle} mode={activeTab} isSelf />
+          ) : null}
+        </ScrollView>
+      ) : isAdvertiserSelf && (activeTab === 'grid' || activeTab === 'list') ? (
+        // Advertiser grid shows their campaign tiles. Self-view returns
+        // every status (pending/approved/rejected/paused) with status
+        // pills, so the advertiser sees submissions immediately after
+        // creating them.
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {listHeader}
+          {user?.handle ? (
+            <AdvertiserAdsGrid handle={user.handle} isSelf />
           ) : null}
         </ScrollView>
       ) : (

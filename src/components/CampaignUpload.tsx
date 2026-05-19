@@ -51,8 +51,13 @@ export default function CampaignUpload() {
   const [surfBreakSearch, setSurfBreakSearch] = useState('');
   const [targetedBreaks, setTargetedBreaks] = useState<SurfBreak[]>([]);
 
-  // Creative
-  const [creative, setCreative] = useState<{ uri: string; uuid: string; type: string } | null>(null);
+  // Creatives — up to MAX_MEDIA slides. Order in this array becomes the
+  // carousel sort order. `thumbnailIndex` marks the slide used wherever we
+  // need one representative image (sidebar, profile gallery, in-feed
+  // carousel's first visible slide).
+  const MAX_MEDIA = 10;
+  const [creatives, setCreatives] = useState<{ uri: string; uuid: string; type: string }[]>([]);
+  const [thumbnailIndex, setThumbnailIndex] = useState(0);
 
   // Submit
   const [submitting, setSubmitting] = useState(false);
@@ -66,21 +71,41 @@ export default function CampaignUpload() {
   );
   const surfBreakResults: any[] = (surfBreaksData as any)?.results?.surfBreaks ?? [];
 
-  const pickCreative = useCallback(async () => {
+  const pickCreatives = useCallback(async () => {
+    const remaining = MAX_MEDIA - creatives.length;
+    if (remaining <= 0) {
+      Alert.alert('Slide limit reached', `A campaign can have at most ${MAX_MEDIA} slides.`);
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
+      allowsMultipleSelection: true,
+      selectionLimit: remaining,
       allowsEditing: false,
       quality: 0.9,
     });
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    // ImagePicker doesn't always return the original file extension, so we
-    // infer from the mime type or fall back to jpg. Backend accepts these
-    // verbatim into the S3 key (e.g. `${uuid}.jpg`).
-    const mime = asset.mimeType || 'image/jpeg';
-    const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-    setCreative({ uri: asset.uri, uuid: generateUUID(), type: ext });
-  }, []);
+    if (result.canceled || !result.assets?.length) return;
+    const newOnes = result.assets.map((asset) => {
+      // ImagePicker doesn't always return the original file extension, so
+      // we infer from the mime type or fall back to jpg. Backend accepts
+      // these verbatim into the S3 key (e.g. `${uuid}.jpg`).
+      const mime = asset.mimeType || 'image/jpeg';
+      const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+      return { uri: asset.uri, uuid: generateUUID(), type: ext };
+    });
+    setCreatives((prev) => [...prev, ...newOnes].slice(0, MAX_MEDIA));
+  }, [creatives.length]);
+
+  const removeCreativeAt = (idx: number) => {
+    setCreatives((prev) => prev.filter((_, i) => i !== idx));
+    setThumbnailIndex((prevIdx) => {
+      if (idx === prevIdx) return 0;
+      if (idx < prevIdx) return Math.max(0, prevIdx - 1);
+      return prevIdx;
+    });
+  };
+
+  const setAsThumbnail = (idx: number) => setThumbnailIndex(idx);
 
   const addBreak = (b: SurfBreak) => {
     if (!b?.id || targetedBreaks.find((x) => x.id === b.id)) return;
@@ -89,37 +114,53 @@ export default function CampaignUpload() {
   };
   const removeBreak = (id: string) => setTargetedBreaks((prev) => prev.filter((b) => b.id !== id));
 
-  const canSubmit = headline.trim().length > 0 && !!creative && !submitting;
+  // At least one targeting surface — without it `getAds` will never select
+  // this ad, so we block submit instead of shipping a dead row.
+  const hasReach = targetedBreaks.length > 0 || showOnDiscover;
+
+  // Submit gates: headline + CTA destination + at least one creative + at
+  // least one targeting surface (breaks OR Discover).
+  const canSubmit =
+    headline.trim().length > 0 &&
+    clickUrl.trim().length > 0 &&
+    creatives.length > 0 &&
+    hasReach &&
+    !submitting;
 
   const submit = useCallback(async () => {
-    if (!canSubmit || !creative) return;
+    if (!canSubmit || creatives.length === 0) return;
     setSubmitting(true);
     try {
+      // 1) Mint presigned URLs for all creatives in one round-trip.
       const presigned = await createMyAdMediaPresignedUrls({
-        files: [{ file_uuid: creative.uuid, file_type: creative.type }],
+        files: creatives.map((c) => ({ file_uuid: c.uuid, file_type: c.type })),
       }).unwrap();
-      const mapping = presigned?.results?.idMappedPresignedUrls?.[0];
-      if (!mapping?.url || !mapping?.media_url) {
-        throw new Error('Failed to provision upload URL');
-      }
+      const mappings = presigned?.results?.idMappedPresignedUrls ?? [];
+      const byUuid = new Map(mappings.map((m) => [m.file_uuid, m]));
 
-      // Direct PUT to S3. fetch + blob works on iOS + Android; matches the
-      // existing pattern used in edit-profile/index.tsx for avatar upload.
-      const blobResp = await fetch(creative.uri);
-      const blob = await blobResp.blob();
-      const putResp = await fetch(mapping.url, {
-        method: 'PUT',
-        body: blob,
-        headers: { 'Content-Type': `image/${creative.type === 'jpg' ? 'jpeg' : creative.type}` },
-      });
-      if (!putResp.ok) {
-        throw new Error(`S3 upload failed: ${putResp.status}`);
-      }
+      // 2) PUT each creative to S3 in parallel. fetch + blob works on
+      //    iOS + Android (same pattern used by avatar upload).
+      await Promise.all(creatives.map(async (c) => {
+        const m = byUuid.get(c.uuid);
+        if (!m?.url) throw new Error(`Failed to provision upload URL for slide ${c.uuid}`);
+        const blobResp = await fetch(c.uri);
+        const blob = await blobResp.blob();
+        const putResp = await fetch(m.url, {
+          method: 'PUT',
+          body: blob,
+          headers: { 'Content-Type': `image/${c.type === 'jpg' ? 'jpeg' : c.type}` },
+        });
+        if (!putResp.ok) throw new Error(`S3 upload failed: ${putResp.status}`);
+      }));
 
+      // 3) Create the ad. media_urls preserves the picked order; thumbnail
+      //    is whichever slide they marked.
+      const mediaUrls = creatives.map((c) => byUuid.get(c.uuid)!.media_url);
       await createMyAd({
         placement_key: placement,
         media_type: 'image',
-        media_url: mapping.media_url,
+        media_urls: mediaUrls,
+        thumbnail_index: thumbnailIndex,
         click_url: clickUrl.trim() || null,
         headline: headline.trim(),
         body: body.trim() || null,
@@ -128,7 +169,22 @@ export default function CampaignUpload() {
         daily_impression_cap_per_user: Number(dailyCap) || 3,
         show_on_discover: showOnDiscover,
         surf_break_ids: targetedBreaks.map((b) => b.id),
-      }).unwrap();
+      } as any).unwrap();
+
+      // Reset the form so the Campaign tab is clean if the advertiser
+      // swipes back to it later (tab navigator keeps the screen mounted).
+      setHeadline('');
+      setBody('');
+      setClickUrl('');
+      setCtaLabel('');
+      setCtaType('url');
+      setPlacement('content');
+      setDailyCap('3');
+      setShowOnDiscover(true);
+      setTargetedBreaks([]);
+      setSurfBreakSearch('');
+      setCreatives([]);
+      setThumbnailIndex(0);
 
       Alert.alert(
         'Submitted for review',
@@ -142,7 +198,7 @@ export default function CampaignUpload() {
       setSubmitting(false);
     }
   }, [
-    canSubmit, creative, placement, clickUrl, headline, body, ctaLabel, ctaType,
+    canSubmit, creatives, thumbnailIndex, placement, clickUrl, headline, body, ctaLabel, ctaType,
     dailyCap, showOnDiscover, targetedBreaks, createMyAdMediaPresignedUrls, createMyAd, router,
   ]);
 
@@ -178,6 +234,11 @@ export default function CampaignUpload() {
         <ScrollView
           contentContainerStyle={s.scroll}
           keyboardShouldPersistTaps="handled"
+          // Swiping down dismisses the keyboard mid-drag (iOS) or releases it
+          // on touch release (Android) — same affordance Mail / Instagram use.
+          // "interactive" gives the iOS pull-to-dismiss feel; falls back to
+          // "on-drag" on Android.
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           showsVerticalScrollIndicator={false}
         >
           {/* Headline */}
@@ -234,7 +295,7 @@ export default function CampaignUpload() {
 
           {/* CTA */}
           <View style={s.field}>
-            <Text style={[s.label, { color: text }]}>Call to action</Text>
+            <Text style={[s.label, { color: text }]}>Call to action *</Text>
             <View style={s.chipRow}>
               <Chip active={ctaType === 'url'} onPress={() => setCtaType('url')} text="Link" isDark={isDark} />
               <Chip active={ctaType === 'tel'} onPress={() => setCtaType('tel')} text="Phone" isDark={isDark} />
@@ -302,17 +363,22 @@ export default function CampaignUpload() {
             </Text>
           </View>
 
-          {/* Daily cap */}
+          {/* Daily cap — bounded chip selection mirrors the Placement / CTA
+              chip rows. Caps user-side at 10; admin can set higher for
+              premium partnerships. Backend clamp is still 1-100. */}
           <View style={s.field}>
             <Text style={[s.label, { color: text }]}>Daily impression cap per user</Text>
-            <TextInput
-              value={dailyCap}
-              onChangeText={setDailyCap}
-              keyboardType="number-pad"
-              placeholder="3"
-              placeholderTextColor={muted}
-              style={[s.input, { backgroundColor: inputBg, color: text }]}
-            />
+            <View style={s.chipRow}>
+              {(['1', '3', '5', '10'] as const).map((n) => (
+                <Chip
+                  key={n}
+                  active={dailyCap === n}
+                  onPress={() => setDailyCap(n)}
+                  text={n === '1' ? '1 · once/day' : n === '3' ? '3 · default' : n === '10' ? '10 · max' : n}
+                  isDark={isDark}
+                />
+              ))}
+            </View>
           </View>
 
           {/* Show on discover */}
@@ -329,36 +395,102 @@ export default function CampaignUpload() {
               trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
             />
           </View>
-
-          {/* Creative — last, matching the session/board create pattern (all
-              config first, media at the bottom). */}
-          <View style={s.field}>
-            <Text style={[s.label, { color: text }]}>Creative *</Text>
-            <Pressable
-              onPress={pickCreative}
+          {!hasReach && (
+            <View
               style={[
-                s.creativePicker,
-                { backgroundColor: inputBg, borderColor: border },
+                s.placementNote,
+                {
+                  backgroundColor: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb',
+                  borderColor: isDark ? 'rgba(245,158,11,0.25)' : '#fde68a',
+                  marginBottom: 12,
+                },
               ]}
             >
-              {creative ? (
-                <Image source={{ uri: creative.uri }} style={s.creativePreview} contentFit="cover" />
-              ) : (
+              <Ionicons name="information-circle-outline" size={14} color="#f59e0b" />
+              <Text style={[s.placementNoteText, { color: isDark ? '#fcd34d' : '#92400e' }]}>
+                Pick at least one surf break to target, or turn on Show on Discover — otherwise this campaign won't appear anywhere.
+              </Text>
+            </View>
+          )}
+
+          {/* Creative — last, matching the session/board create pattern (all
+              config first, media at the bottom). Up to MAX_MEDIA slides;
+              tap a tile to set it as the thumbnail. */}
+          <View style={s.field}>
+            <View style={s.creativeHeader}>
+              <Text style={[s.label, { color: text, marginBottom: 0 }]}>
+                Creative * {creatives.length > 0 && (
+                  <Text style={{ color: muted, fontWeight: '400' }}>
+                    {`(${creatives.length} / ${MAX_MEDIA})`}
+                  </Text>
+                )}
+              </Text>
+              {creatives.length > 0 && creatives.length < MAX_MEDIA && (
+                <Pressable onPress={pickCreatives} hitSlop={8}>
+                  <Text style={{ color: '#0ea5e9', fontSize: 13, fontWeight: '600' }}>+ Add more</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {creatives.length === 0 ? (
+              <Pressable
+                onPress={pickCreatives}
+                style={[
+                  s.creativePicker,
+                  { backgroundColor: inputBg, borderColor: border },
+                ]}
+              >
                 <View style={s.creativePlaceholder}>
                   <Ionicons name="image-outline" size={32} color={muted} />
                   <Text style={[s.creativePlaceholderText, { color: muted }]}>
-                    Tap to select image
+                    Tap to select images
                   </Text>
                   <Text style={[s.creativeHint, { color: muted }]}>
-                    JPG, PNG, or WEBP
+                    Up to {MAX_MEDIA} slides · JPG, PNG, or WEBP
                   </Text>
                 </View>
-              )}
-            </Pressable>
-            {creative && (
-              <Pressable onPress={() => setCreative(null)} style={s.removeCreative}>
-                <Text style={{ color: '#ef4444', fontSize: 13, fontWeight: '600' }}>Remove</Text>
               </Pressable>
+            ) : (
+              <>
+                <Text style={[s.hint, { color: muted, marginBottom: 8 }]}>
+                  Tap a slide to set it as the thumbnail — that's the image shown in the sidebar, profile gallery card, and as the first slide in the in-feed carousel.
+                </Text>
+                <View style={s.slideGrid}>
+                  {creatives.map((c, idx) => {
+                    const isThumb = idx === thumbnailIndex;
+                    return (
+                      <Pressable
+                        key={c.uuid}
+                        onPress={() => setAsThumbnail(idx)}
+                        style={[
+                          s.slideTile,
+                          {
+                            borderColor: isThumb ? '#0ea5e9' : border,
+                            borderWidth: isThumb ? 2 : StyleSheet.hairlineWidth,
+                          },
+                        ]}
+                      >
+                        <Image source={{ uri: c.uri }} style={s.slideTileImage} contentFit="cover" />
+                        {isThumb && (
+                          <View style={s.thumbnailBadge}>
+                            <Text style={s.thumbnailBadgeText}>Thumbnail</Text>
+                          </View>
+                        )}
+                        <View style={s.slideIndexBadge}>
+                          <Text style={s.slideIndexText}>{idx + 1}</Text>
+                        </View>
+                        <Pressable
+                          onPress={() => removeCreativeAt(idx)}
+                          hitSlop={6}
+                          style={s.slideRemoveBtn}
+                        >
+                          <Ionicons name="close" size={14} color="#fff" />
+                        </Pressable>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </>
             )}
           </View>
 
@@ -454,6 +586,62 @@ const s = StyleSheet.create({
   creativePlaceholderText: { fontSize: 14, fontWeight: '600' },
   creativeHint: { fontSize: 11 },
   removeCreative: { marginTop: 6, alignSelf: 'flex-start' },
+  creativeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  slideGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  slideTile: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: 10,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  slideTileImage: { width: '100%', height: '100%' },
+  thumbnailBadge: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: '#0ea5e9',
+  },
+  thumbnailBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  slideIndexBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  slideIndexText: { color: '#fff', fontSize: 10, fontWeight: '700' },
+  slideRemoveBtn: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   searchResults: {
     marginTop: 6,
     borderRadius: 10,

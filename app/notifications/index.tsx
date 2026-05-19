@@ -17,12 +17,28 @@ import ScreenHeader from '../../src/components/ScreenHeader';
 import ActionSheet, { type ActionSheetOption } from '../../src/components/ActionSheet';
 import ApproveAccessRequestSheet from '../../src/components/ApproveAccessRequestSheet';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import {
+  useApproveAdminAdMutation,
   useGetNotificationsQuery,
   useMarkNotificationsAsReadMutation,
+  useRejectAdminAdMutation,
   useUpdateAccessRequestMutation,
 } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
+
+// Pre-defined rejection reasons surfaced inline from the notification card.
+// Mirrors the web admin Campaigns tab so advertisers see consistent
+// rejection language regardless of which surface the admin used. Admins who
+// want custom notes go to /admin (web only).
+const CAMPAIGN_REJECT_REASONS: ActionSheetOption[] = [];
+const CAMPAIGN_REJECT_REASON_TEMPLATES = [
+  { label: 'NSFW or inappropriate', template: "Contains inappropriate content for the SurfVault audience." },
+  { label: 'Off-topic for surf community', template: "Not relevant to surfing or the SurfVault community." },
+  { label: 'Broken or unsafe link', template: "The destination link is broken, redirects unexpectedly, or doesn't load." },
+  { label: 'Scam or misleading', template: "The claim or offer appears misleading or unverifiable." },
+  { label: 'Creative quality', template: "Image quality is too low or the creative is hard to read at the placement size." },
+];
 
 const formatDate = (dateStr: string) => {
   const d = new Date(dateStr);
@@ -46,6 +62,8 @@ const getNotifIcon = (type: string): { name: string; color: string } => {
     case 'newFollower': return { name: 'person-add-outline', color: '#f59e0b' };
     case 'userAccessRequest': return { name: 'lock-open-outline', color: '#ef4444' };
     case 'userAccessRequestApproval': return { name: 'checkmark-circle-outline', color: '#22c55e' };
+    case 'adApproved': return { name: 'megaphone-outline', color: '#22c55e' };
+    case 'adRejected': return { name: 'megaphone-outline', color: '#ef4444' };
     default: return { name: 'notifications-outline', color: '#6b7280' };
   }
 };
@@ -61,6 +79,8 @@ const getNotifTitle = (n: any): string => {
     case 'newFollower': return 'New Follower';
     case 'userAccessRequest': return 'Access Request';
     case 'userAccessRequestApproval': return 'Access Approved';
+    case 'adApproved': return 'Campaign Approved';
+    case 'adRejected': return 'Campaign Rejected';
     default: return 'Notification';
   }
 };
@@ -86,6 +106,71 @@ export default function NotificationsScreen() {
   }, [refetch]);
   const [markAsRead, { isLoading: marking }] = useMarkNotificationsAsReadMutation();
   const [updateAccessRequest, { isLoading: processingAccess }] = useUpdateAccessRequestMutation();
+  const [approveAdminAd, { isLoading: approvingCampaign }] = useApproveAdminAdMutation();
+  const [rejectAdminAd, { isLoading: rejectingCampaign }] = useRejectAdminAdMutation();
+
+  // Campaign-submission inline approve/reject state. `decidedCampaignIds`
+  // tracks which notification rows have been acted on so the buttons get
+  // replaced with a "Approved" / "Rejected" pill until refetch.
+  const [campaignRejectTarget, setCampaignRejectTarget] = useState<{
+    adId: string;
+    notificationId: string;
+    headline: string;
+  } | null>(null);
+  const [campaignRejectSheetVisible, setCampaignRejectSheetVisible] = useState(false);
+  const [decidedCampaigns, setDecidedCampaigns] = useState<Record<string, 'approved' | 'rejected'>>({});
+
+  const approveCampaignSubmission = useCallback(async (n: any) => {
+    const adId = n.body_metadata?.adId ?? n.resource_id;
+    const headline = n.body_metadata?.headline ?? 'Campaign';
+    if (!adId) return;
+    try {
+      await approveAdminAd({ adId }).unwrap();
+      setDecidedCampaigns((prev) => ({ ...prev, [n.id]: 'approved' }));
+      if (!n.is_read) await markAsRead({ notificationIds: [n.id] });
+    } catch (err: any) {
+      Alert.alert('Error', err?.data?.message || `Failed to approve "${headline}"`);
+    }
+  }, [approveAdminAd, markAsRead]);
+
+  const openCampaignRejectSheet = useCallback((n: any) => {
+    const adId = n.body_metadata?.adId ?? n.resource_id;
+    if (!adId) return;
+    setCampaignRejectTarget({
+      adId,
+      notificationId: n.id,
+      headline: n.body_metadata?.headline ?? 'Campaign',
+    });
+    setCampaignRejectSheetVisible(true);
+  }, []);
+
+  const submitCampaignReject = useCallback(async (template: string) => {
+    const target = campaignRejectTarget;
+    if (!target) return;
+    try {
+      await rejectAdminAd({ adId: target.adId, rejectionReason: template }).unwrap();
+      setDecidedCampaigns((prev) => ({ ...prev, [target.notificationId]: 'rejected' }));
+      await markAsRead({ notificationIds: [target.notificationId] });
+    } catch (err: any) {
+      Alert.alert('Error', err?.data?.message || `Failed to reject "${target.headline}"`);
+    } finally {
+      setCampaignRejectTarget(null);
+    }
+  }, [campaignRejectTarget, rejectAdminAd, markAsRead]);
+
+  const campaignRejectOptions: ActionSheetOption[] = useMemo(() =>
+    CAMPAIGN_REJECT_REASON_TEMPLATES.map((r) => ({
+      label: r.label,
+      icon: 'close-circle-outline' as const,
+      destructive: true,
+      onPress: () => {
+        setCampaignRejectSheetVisible(false);
+        // ActionSheet animates out, then runs onPress ~250ms later — but the
+        // template is captured in this closure so it's fine.
+        submitCampaignReject(r.template);
+      },
+    })),
+  [submitCampaignReject]);
 
   // Access-request action sheets: first picks Approve/Reject, second picks a duration on approve.
   const [accessTarget, setAccessTarget] = useState<{ requestId: string; notificationId: string; handle: string } | null>(null);
@@ -295,6 +380,54 @@ export default function NotificationsScreen() {
               </Pressable>
             </View>
           )}
+
+          {item.resource_type === 'newCampaignSubmission' && (() => {
+            const decided = decidedCampaigns[item.id];
+            const mediaUrl = item.body_metadata?.mediaUrl;
+            return (
+              <>
+                {!!mediaUrl && (
+                  <Image
+                    source={{ uri: mediaUrl }}
+                    style={s.campaignThumb}
+                    contentFit="cover"
+                  />
+                )}
+                {decided === 'approved' && (
+                  <View style={[s.statusPill, { backgroundColor: isDark ? 'rgba(16,185,129,0.15)' : '#ecfdf5' }]}>
+                    <Ionicons name="checkmark-circle" size={14} color="#10b981" />
+                    <Text style={[s.statusPillText, { color: '#059669' }]}>Approved</Text>
+                  </View>
+                )}
+                {decided === 'rejected' && (
+                  <View style={[s.statusPill, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }]}>
+                    <Ionicons name="close-circle" size={14} color="#ef4444" />
+                    <Text style={[s.statusPillText, { color: '#dc2626' }]}>Rejected</Text>
+                  </View>
+                )}
+                {!decided && (
+                  <View style={[s.actionRow, { gap: 8 }]}>
+                    <Pressable
+                      onPress={() => approveCampaignSubmission(item)}
+                      disabled={approvingCampaign || rejectingCampaign}
+                      style={[s.approveBtn, { opacity: (approvingCampaign || rejectingCampaign) ? 0.6 : 1 }]}
+                    >
+                      <Ionicons name="checkmark-circle" size={14} color="#fff" />
+                      <Text style={s.approveBtnText}>Approve</Text>
+                    </Pressable>
+                    <Pressable
+                      onPress={() => openCampaignRejectSheet(item)}
+                      disabled={approvingCampaign || rejectingCampaign}
+                      style={[s.rejectBtn, { opacity: (approvingCampaign || rejectingCampaign) ? 0.6 : 1, borderColor: isDark ? 'rgba(239,68,68,0.35)' : '#fecaca' }]}
+                    >
+                      <Ionicons name="close-circle" size={14} color="#ef4444" />
+                      <Text style={s.rejectBtnText}>Reject</Text>
+                    </Pressable>
+                  </View>
+                )}
+              </>
+            );
+          })()}
         </View>
         {isUnread && <View style={s.unreadDot} />}
       </Pressable>
@@ -376,6 +509,18 @@ export default function NotificationsScreen() {
         onClose={() => { setDurationSheetVisible(false); setAccessTarget(null); }}
         onConfirm={handleApproveWithDuration}
       />
+
+      <ActionSheet
+        visible={campaignRejectSheetVisible}
+        onClose={() => {
+          setCampaignRejectSheetVisible(false);
+          setTimeout(() => setCampaignRejectTarget(null), 400);
+        }}
+        title={campaignRejectTarget?.headline
+          ? `Reject "${campaignRejectTarget.headline}"`
+          : 'Reject campaign'}
+        options={campaignRejectOptions}
+      />
     </>
   );
 }
@@ -424,4 +569,31 @@ const s = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 6,
   },
   primaryActionText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  campaignThumb: {
+    width: '100%',
+    aspectRatio: 16 / 9,
+    borderRadius: 10,
+    marginTop: 8,
+    backgroundColor: '#1f2937',
+  },
+  approveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#10b981',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  approveBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  rejectBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  rejectBtnText: { color: '#ef4444', fontSize: 12, fontWeight: '700' },
 });

@@ -110,6 +110,7 @@ export {
   useRecordAdImpressionMutation,
   useCreateMyAdMediaPresignedUrlsMutation,
   useCreateMyAdMutation,
+  useGetAdvertiserAdsQuery,
   useReportAdMutation,
   useGetLatestSessionsQuery,
   useGetSessionGroupsQuery,
@@ -179,4 +180,6 @@ export {
   useGetAdminUsersQuery,
   useUpdateAdPartnerMutation,
   useUpsertAdsMutation,
+  useApproveAdminAdMutation,
+  useRejectAdminAdMutation,
 } from './apis/endpoints/admin';

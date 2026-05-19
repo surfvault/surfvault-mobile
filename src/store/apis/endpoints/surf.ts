@@ -300,14 +300,28 @@ const surfApi = rootApi.injectEndpoints({
         body: payload,
       }),
     }),
+    // Public ad gallery for an advertiser profile. Backend gates the
+    // response by JWT: self-view returns all statuses (with `status` field
+    // on each ad); public viewers get only approved + currently-active.
+    getAdvertiserAds: builder.query<any, { handle: string }>({
+      providesTags: [ApiTag.AdPartners],
+      query: ({ handle }) => ({
+        url: `/advertisers/${handle}/ads`,
+        method: 'GET',
+      }),
+    }),
     // Self-service ad creation. Status forced to 'pending' server-side so
-    // every submission goes through admin moderation.
+    // every submission goes through admin moderation. Invalidates
+    // AdPartners so the advertiser's profile gallery refetches and
+    // immediately shows the new submission with its "Pending review" pill.
     createMyAd: builder.mutation<
       { results: { id: string; status: string } },
       {
         placement_key: 'sidebar' | 'content';
         media_type: 'image' | 'video';
-        media_url: string;
+        media_urls?: string[];
+        media_url?: string;
+        thumbnail_index?: number;
         hero_media_url?: string | null;
         click_url?: string | null;
         headline: string;
@@ -321,6 +335,7 @@ const surfApi = rootApi.injectEndpoints({
         surf_break_ids?: string[];
       }
     >({
+      invalidatesTags: [ApiTag.AdPartners],
       query: (payload) => ({
         url: '/ads',
         method: 'POST',
@@ -495,6 +510,7 @@ export const {
   useRecordAdImpressionMutation,
   useCreateMyAdMediaPresignedUrlsMutation,
   useCreateMyAdMutation,
+  useGetAdvertiserAdsQuery,
   useReportAdMutation,
   useGetSurfBreakWithLatestSessionsQuery,
   useGetSurfBreakSessionsQuery,

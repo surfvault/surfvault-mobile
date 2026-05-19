@@ -43,7 +43,8 @@ import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import HomeSkeleton from '../../src/components/HomeSkeleton';
 import {
-  groupAdsByPartner,
+  // groupAdsByPartner intentionally not imported — Phase B retired
+  // partner-level ad grouping in favor of per-ad media[] carousels.
   interleavePromoGroups,
   zipPromoGroups,
   type FeedRow,
@@ -396,7 +397,11 @@ export default function HomeScreen() {
       ...s,
       _kind: 'shaper' as const,
     }));
-    const adGroups = groupAdsByPartner(ads);
+    // Phase B: each ad is its own promo slot. The carousel inside
+    // SponsoredCard now renders the ad's media[] slides; partner grouping
+    // was retired. Wrap each ad as a single-element "group" so the
+    // interleave helper's group-iteration semantics still apply.
+    const adGroups = ads.map((a: any) => [a]);
     const shaperGroups = shapers.map((s: any) => [s]);
     // TEMP: shaper-first so the first promo slot in Discover is a shaper.
     // Revert to `zipPromoGroups(adGroups, shaperGroups)` to restore ad-first.
@@ -808,16 +813,15 @@ export default function HomeScreen() {
             const viewable = !hasViewabilityReport || viewableIds.has(row.key);
             if (row.type === 'ad') {
               // Mixed promo stream — first entry's _kind picks the renderer.
-              // Shapers render as a single ShaperFeedCard (one card per
-              // shaper, with their featured boards swipeable inside);
-              // ads render as a SponsoredCard partner-group carousel.
+              // Each ad now occupies its own slot (Phase B per-ad carousels)
+              // — the `row.data` group is always a 1-element array for ads.
               const first = row.data[0];
               if (first?._kind === 'shaper') {
                 return <ShaperFeedCard shaper={first} />;
               }
               return (
                 <SponsoredCard
-                  ads={row.data}
+                  ad={first}
                   placement="content"
                   isViewable={viewable}
                 />

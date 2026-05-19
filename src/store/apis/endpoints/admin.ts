@@ -81,6 +81,24 @@ const adminApi = rootApi.injectEndpoints({
         body: payload,
       }),
     }),
+    // Campaign approvals (admin moderation queue) — same endpoints the web
+    // admin Campaigns tab uses. Mobile only surfaces these via the inline
+    // Approve/Reject actions on newCampaignSubmission notifications.
+    approveAdminAd: builder.mutation({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId }: { adId: string }) => ({
+        url: `/admin/ads/${adId}/approve`,
+        method: 'POST',
+      }),
+    }),
+    rejectAdminAd: builder.mutation({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId, rejectionReason }: { adId: string; rejectionReason: string }) => ({
+        url: `/admin/ads/${adId}/reject`,
+        method: 'POST',
+        body: { rejection_reason: rejectionReason },
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -94,6 +112,8 @@ export const {
   useCreateAdMediaPresignedUrlsMutation,
   useUpsertAdsMutation,
   useUpdateAdPartnerMutation,
+  useApproveAdminAdMutation,
+  useRejectAdminAdMutation,
 } = adminApi;
 
 export { adminApi };

@@ -38,13 +38,21 @@ interface Ad {
   /** Server-computed flag: partner is within their target_radius_km of the
    * reference point (surf break on break pages; user coords otherwise). */
   is_local?: boolean;
+  /** Phase B: per-ad carousel slides. Backend returns sort_order ASC. */
+  media?: Array<{
+    id: string | null;
+    type: 'photo' | 'video';
+    s3_key: string;
+    landscape_s3_key?: string | null;
+    sort_order?: number;
+  }>;
+  thumbnail_ad_media_id?: string | null;
 }
 
 interface SponsoredCardProps {
-  /** Single ad (back-compat — used by user profile + empty-state local-love lists). */
+  /** Single ad. Its `media[]` drives the carousel. Partner grouping was
+   * dropped in Phase B — each ad is its own promo slot. */
   ad?: Ad;
-  /** Partner-grouped ads. When length > 1, renders a paging FlatList carousel. */
-  ads?: Ad[];
   placement?: 'content' | 'sidebar';
   surfBreakId?: string;
   /** True when the card is currently visible in the parent feed. */
@@ -60,7 +68,6 @@ interface SponsoredCardProps {
  */
 export default function SponsoredCard({
   ad,
-  ads,
   placement = 'content',
   surfBreakId,
   isViewable = true,
@@ -71,50 +78,54 @@ export default function SponsoredCard({
   const [sheetVisible, setSheetVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
 
-  const slides = useMemo<Ad[]>(() => {
-    if (ads && ads.length) return ads.filter(Boolean);
-    if (ad) return [ad];
+  // Carousel slides come from ad.media[] (Phase B). Thumbnail slide is
+  // floated to the front so the first visible slide matches the sidebar /
+  // profile-card representation. Legacy fallback: synthesize a 1-element
+  // array from media_url for ads predating the backfill.
+  type Slide = { id: string | null; s3_key: string; landscape_s3_key?: string | null };
+  const slides = useMemo<Slide[]>(() => {
+    if (!ad) return [];
+    const media = Array.isArray(ad.media) ? [...ad.media] : [];
+    media.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    if (ad.thumbnail_ad_media_id) {
+      const idx = media.findIndex((m) => m.id === ad.thumbnail_ad_media_id);
+      if (idx > 0) {
+        const [picked] = media.splice(idx, 1);
+        media.unshift(picked);
+      }
+    }
+    if (media.length) {
+      return media.map((m) => ({ id: m.id, s3_key: m.s3_key, landscape_s3_key: m.landscape_s3_key ?? null }));
+    }
+    if (ad.media_url) {
+      return [{ id: null, s3_key: ad.media_url, landscape_s3_key: ad.hero_media_url ?? null }];
+    }
     return [];
-  }, [ad, ads]);
+  }, [ad]);
 
   const [activeIdx, setActiveIdx] = useState(0);
-  const firedRef = useRef<Set<string>>(new Set());
+  const impressionFiredRef = useRef(false);
   const [width, setWidth] = useState(Dimensions.get('window').width);
   const isCarousel = slides.length > 1;
 
-  // Reset impression tracking when the slide set changes (different partner).
+  // Reset impression tracking when the ad identity changes.
   useEffect(() => {
-    firedRef.current = new Set();
+    impressionFiredRef.current = false;
     setActiveIdx(0);
-  }, [slides]);
+  }, [ad?.id]);
 
-  // Fire impression for single-ad usage when the card enters the viewport.
+  // Fire ONE impression per ad when the card enters the viewport. Daily
+  // cap is keyed (user, ad, day), so multi-slide views don't multi-count.
   useEffect(() => {
-    if (isCarousel) return;
-    const target = slides[0];
-    if (!isViewable || !target?.id || firedRef.current.has(target.id)) return;
-    firedRef.current.add(target.id);
+    if (!isViewable || !ad?.id || impressionFiredRef.current) return;
+    impressionFiredRef.current = true;
     recordImpression({
-      adId: target.id,
+      adId: ad.id,
       surfBreakId,
       placement,
       device: currentDevice(),
     }).catch(() => { /* fire-and-forget */ });
-  }, [isViewable, isCarousel, slides, surfBreakId, placement, recordImpression]);
-
-  // Fire impression for the active carousel slide once the card is visible.
-  useEffect(() => {
-    if (!isCarousel || !isViewable) return;
-    const target = slides[activeIdx];
-    if (!target?.id || firedRef.current.has(target.id)) return;
-    firedRef.current.add(target.id);
-    recordImpression({
-      adId: target.id,
-      surfBreakId,
-      placement,
-      device: currentDevice(),
-    }).catch(() => { /* fire-and-forget */ });
-  }, [isCarousel, isViewable, activeIdx, slides, surfBreakId, placement, recordImpression]);
+  }, [isViewable, ad?.id, surfBreakId, placement, recordImpression]);
 
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
@@ -123,19 +134,19 @@ export default function SponsoredCard({
     if (typeof first.index === 'number') setActiveIdx(first.index);
   }).current;
 
-  const openClick = useCallback((slide: Ad) => {
-    const url = buildAdClickUrl(slide.id, { placement, surfBreakId, device: currentDevice() });
+  const openClick = useCallback(() => {
+    if (!ad) return;
+    const url = buildAdClickUrl(ad.id, { placement, surfBreakId, device: currentDevice() });
     Linking.openURL(url).catch(() => { /* noop */ });
-  }, [placement, surfBreakId]);
+  }, [ad, placement, surfBreakId]);
 
-  if (!slides.length) return null;
+  if (!ad || !slides.length) return null;
 
-  const partner = slides[0];
-  const active = slides[activeIdx] || partner;
-  // Prefer the partner's logo (set on AdPartnerProfile). Falls back to the
-  // first ad's media so old ads without a logo still render an avatar.
-  const avatarSource = partner.partner_logo_url || partner.media_url;
-  const singleHero = active.hero_media_url || active.media_url;
+  // Avatar: partner logo from ad_partners.logo_url, falling back to the
+  // first slide so ads without a logo still render something.
+  const avatarSource = ad.partner_logo_url || slides[0]?.s3_key;
+  // Hero for the single-slide path. Prefer landscape variant when present.
+  const singleHero = slides[0]?.landscape_s3_key || slides[0]?.s3_key;
 
   return (
     <View style={styles.card} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -154,20 +165,20 @@ export default function SponsoredCard({
           <View style={styles.headerInfo}>
             <View style={styles.headerNameRow}>
               <Text style={[styles.companyName, { color: isDark ? '#ffffff' : '#111827' }]} numberOfLines={1}>
-                {partner.company_name || 'Local business'}
+                {ad.company_name || 'Local business'}
               </Text>
               <View style={styles.sponsoredPill}>
                 <Text style={styles.sponsoredText}>Sponsored</Text>
               </View>
-              {active.is_local ? (
+              {ad.is_local ? (
                 <View style={styles.localPill}>
                   <Ionicons name="location-sharp" size={9} color="#047857" />
                   <Text style={styles.localText}>Local</Text>
                 </View>
               ) : null}
             </View>
-            {active.headline ? (
-              <Text style={styles.subtitle} numberOfLines={1}>{active.headline}</Text>
+            {ad.headline ? (
+              <Text style={styles.subtitle} numberOfLines={1}>{ad.headline}</Text>
             ) : null}
           </View>
         </View>
@@ -176,7 +187,9 @@ export default function SponsoredCard({
         </Pressable>
       </View>
 
-      {/* Hero — carousel when multi-slide, single Pressable otherwise */}
+      {/* Hero — carousel when multi-slide, single Pressable otherwise. The
+          entire carousel routes to ad.click_url (slide tap is the same as
+          card tap); no per-slide click_url. */}
       {isCarousel ? (
         <View>
           <FlatList
@@ -184,11 +197,11 @@ export default function SponsoredCard({
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             data={slides}
-            keyExtractor={(s) => s.id}
+            keyExtractor={(s, i) => s.id ?? `slide-${i}`}
             renderItem={({ item }) => {
-              const img = item.hero_media_url || item.media_url;
+              const img = item.landscape_s3_key || item.s3_key;
               return (
-                <Pressable onPress={() => openClick(item)} style={{ width }}>
+                <Pressable onPress={openClick} style={{ width }}>
                   <View style={[styles.thumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
                     <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
                   </View>
@@ -215,7 +228,7 @@ export default function SponsoredCard({
               const isActive = i === activeIdx;
               return (
                 <View
-                  key={s.id}
+                  key={s.id ?? `dot-${i}`}
                   style={{
                     width: size,
                     height: size,
@@ -230,7 +243,7 @@ export default function SponsoredCard({
           </View>
         </View>
       ) : (
-        <Pressable onPress={() => openClick(active)}>
+        <Pressable onPress={openClick}>
           <View style={[styles.thumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
             <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
           </View>
@@ -246,10 +259,10 @@ export default function SponsoredCard({
       )}
 
       {/* Body only — tap anywhere on the card (header/hero/body) opens the ad */}
-      {active.body ? (
-        <Pressable onPress={() => openClick(active)} style={styles.footer}>
+      {ad.body ? (
+        <Pressable onPress={openClick} style={styles.footer}>
           <Text style={[styles.body, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={2}>
-            {active.body}
+            {ad.body}
           </Text>
         </Pressable>
       ) : null}
@@ -262,7 +275,7 @@ export default function SponsoredCard({
               label: 'Share',
               icon: 'share-outline',
               onPress: () => {
-                const url = buildAdClickUrl(active.id, { placement, surfBreakId, device: currentDevice() });
+                const url = buildAdClickUrl(ad.id, { placement, surfBreakId, device: currentDevice() });
                 Share.share(Platform.OS === 'ios' ? { url } : { message: url });
               },
             }],
@@ -281,16 +294,16 @@ export default function SponsoredCard({
           },
         ]}
         header={{
-          title: partner.company_name || 'Sponsored',
-          subtitle: active.headline || undefined,
-          imageUri: partner.partner_logo_url || partner.media_url || undefined,
+          title: ad.company_name || 'Sponsored',
+          subtitle: ad.headline || undefined,
+          imageUri: ad.partner_logo_url || avatarSource || undefined,
         }}
         onClose={() => setSheetVisible(false)}
       />
 
       <ReportAdSheet
         visible={reportVisible}
-        adId={active.id}
+        adId={ad.id}
         onClose={() => setReportVisible(false)}
       />
     </View>

@@ -43,6 +43,7 @@ import { AccessBanner, PrivateGalleryCard, BlockedGalleryCard } from '../../src/
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
+import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
 
 export default function UserProfileScreen() {
@@ -391,6 +392,23 @@ export default function UserProfileScreen() {
                 </View>
               </>
             }
+            showsVerticalScrollIndicator={false}
+          />
+        ) : profile?.user_type === 'advertiser' ? (
+          // Advertisers don't have surf sessions — render their campaign
+          // gallery. Backend gates the response: public viewers see only
+          // approved+active; advertiser-self (matched via JWT) sees all
+          // statuses with status pills.
+          <FlatList
+            data={[1] as const}
+            keyExtractor={() => 'advertiser-content'}
+            renderItem={() => (
+              <AdvertiserAdsGrid
+                handle={handle ?? ''}
+                isSelf={!!currentUser?.handle && handle === currentUser.handle}
+              />
+            )}
+            ListHeaderComponent={<UserProfileHeader />}
             showsVerticalScrollIndicator={false}
           />
         ) : (
