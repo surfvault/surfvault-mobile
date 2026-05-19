@@ -121,6 +121,19 @@ export default function ProfileHeader({
                   borderColor: '#9ca3af',
                 }]} />
               )}
+              {/* Advertisers get a "Sponsored" text pill instead of a type
+                  badge glyph — unambiguous brand-account signal. Matches the
+                  in-feed sponsored card pill (SponsoredCard.tsx) styling. */}
+              {isAdvertiser && (
+                <View style={[s.sponsoredPill, {
+                  backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+                  borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
+                }]}>
+                  <Text style={[s.sponsoredPillText, { color: isDark ? '#d1d5db' : '#4b5563' }]}>
+                    Sponsored
+                  </Text>
+                </View>
+              )}
             </View>
             {(profile?.instagram || profile?.youtube || profile?.website) && (
               <View style={s.socialIcons}>
@@ -382,6 +395,18 @@ const s = StyleSheet.create({
   nameAndDot: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   nameText: { fontSize: 15, fontWeight: '700', flexShrink: 1 },
   activeDot: { width: 8, height: 8, borderRadius: 4 },
+  sponsoredPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sponsoredPillText: {
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   socialIcons: { flexDirection: 'row', alignItems: 'center', gap: 14 },
 
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingRight: 16 },

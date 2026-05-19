@@ -4,6 +4,11 @@ import Svg, { Circle, G, Path } from "react-native-svg";
 
 export type UserTypeBadgeType = "surfer" | "photographer" | "shaper";
 
+// Note: advertisers are NOT a badge variant — they're surfaced via a
+// dedicated "Sponsored" pill next to the handle. The badge is reserved for
+// user types that earn a small visual identity glyph; the brand-status
+// signal is text-based for clarity.
+
 interface UserTypeBadgeProps {
   userType: UserTypeBadgeType;
   isVerified?: boolean;

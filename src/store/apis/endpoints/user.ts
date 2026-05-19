@@ -337,6 +337,27 @@ const userApi = rootApi.injectEndpoints({
         body: { reason, details, alsoBlock },
       }),
     }),
+    // Self-service ad-partner upsert for advertisers. Hits the `updateUser`
+    // action dispatch (PATCH /user/{action}) — UPSERTs the satellite
+    // ad_partners row keyed by advertiser_user_id (caller derived from JWT).
+    updateMyAdPartner: builder.mutation<
+      any,
+      {
+        company_name?: string;
+        contact_name?: string | null;
+        phone_number?: string | null;
+        coordinates?: { lat?: number; lon?: number } | null;
+        target_radius_km?: number;
+        logo_url?: string | null;
+      }
+    >({
+      invalidatesTags: [ApiTag.User],
+      query: (payload) => ({
+        url: '/user/ad-partner',
+        method: 'PATCH',
+        body: payload,
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -376,6 +397,7 @@ export const {
   useUnblockUserMutation,
   useGetUserBlocksQuery,
   useReportUserMutation,
+  useUpdateMyAdPartnerMutation,
 } = userApi;
 
 export { userApi };

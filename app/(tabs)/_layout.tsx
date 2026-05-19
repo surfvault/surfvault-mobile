@@ -119,8 +119,15 @@ function TabsInner() {
         name="upload"
         options={{
           // Center tab is the "make new content" affordance. Surfers/photographers
-          // upload Sessions; Shapers upload Boards. Same `+` glyph, different label.
-          title: (user as any)?.user_type === 'shaper' ? 'Board' : 'Session',
+          // upload Sessions; Shapers upload Boards; Advertisers create Campaigns.
+          // Same `+` glyph, label swaps by user type so multi-account users see
+          // the right verb when they switch profiles.
+          title:
+            (user as any)?.user_type === 'shaper'
+              ? 'Board'
+              : (user as any)?.user_type === 'advertiser'
+              ? 'Campaign'
+              : 'Session',
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? 'add-circle' : 'add-circle-outline'} size={size + 2} color={color} />
           ),

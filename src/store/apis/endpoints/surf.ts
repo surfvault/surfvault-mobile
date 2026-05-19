@@ -288,6 +288,45 @@ const surfApi = rootApi.injectEndpoints({
         },
       }),
     }),
+    // Self-service presigned-URL minting for advertiser creative uploads.
+    // Mirrors web/endpoints/surf.js. Backend scopes to caller via JWT.
+    createMyAdMediaPresignedUrls: builder.mutation<
+      { results: { idMappedPresignedUrls: { file_uuid: string; url: string; media_url: string }[] } },
+      { files: { file_uuid: string; file_type: string }[] }
+    >({
+      query: (payload) => ({
+        url: '/ads/media-presigned-urls',
+        method: 'POST',
+        body: payload,
+      }),
+    }),
+    // Self-service ad creation. Status forced to 'pending' server-side so
+    // every submission goes through admin moderation.
+    createMyAd: builder.mutation<
+      { results: { id: string; status: string } },
+      {
+        placement_key: 'sidebar' | 'content';
+        media_type: 'image' | 'video';
+        media_url: string;
+        hero_media_url?: string | null;
+        click_url?: string | null;
+        headline: string;
+        body?: string | null;
+        cta_label?: string | null;
+        cta_type?: 'url' | 'tel';
+        starts_at?: string | null;
+        ends_at?: string | null;
+        daily_impression_cap_per_user?: number;
+        show_on_discover?: boolean;
+        surf_break_ids?: string[];
+      }
+    >({
+      query: (payload) => ({
+        url: '/ads',
+        method: 'POST',
+        body: payload,
+      }),
+    }),
     reportAd: builder.mutation({
       query: ({ adId, reason, details }: { adId: string; reason: string; details?: string }) => ({
         url: `/ads/${adId}/report`,
@@ -454,6 +493,8 @@ export const {
   useGetSessionPhotosQuery,
   useGetAdsQuery,
   useRecordAdImpressionMutation,
+  useCreateMyAdMediaPresignedUrlsMutation,
+  useCreateMyAdMutation,
   useReportAdMutation,
   useGetSurfBreakWithLatestSessionsQuery,
   useGetSurfBreakSessionsQuery,

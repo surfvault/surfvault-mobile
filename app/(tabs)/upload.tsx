@@ -35,6 +35,7 @@ import {
   useCreateMyBoardMutation,
   useCreateMyBoardPhotosMutation,
 } from '../../src/store';
+import CampaignUpload from '../../src/components/CampaignUpload';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const PREVIEW_SIZE = (SCREEN_WIDTH - 48 - 8) / 4; // 4 columns with gaps
@@ -61,6 +62,21 @@ const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
 export default function CreateSessionScreen() {
+  const { user } = useUser();
+
+  // Advertisers don't upload sessions or boards — they submit ad campaigns
+  // for review. The full advertiser flow is a self-contained component so
+  // the existing surfer/photographer/shaper logic below stays untouched.
+  // Early return BEFORE any other hooks fire so the advertiser render path
+  // has its own clean hook tree.
+  if ((user as any)?.user_type === 'advertiser') {
+    return <CampaignUpload />;
+  }
+
+  return <SessionOrBoardCreate />;
+}
+
+function SessionOrBoardCreate() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
