@@ -73,7 +73,11 @@ export function interleavePromoGroups<T extends { id?: string; session_id?: stri
         if (shouldInsertAd && adCursor < groups.length) {
             const group = groups[adCursor];
             if (group.length) {
-                const keyBase = group[0].ad_partner_id ?? group[0].id;
+                // Key by the row id (unique per ad/shaper). Partner grouping is
+            // retired, so two ads from the same advertiser are separate slots —
+            // keying by ad_partner_id would collide and trigger React's
+            // duplicate-key warning.
+            const keyBase = group[0].id ?? group[0].ad_partner_id;
                 out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
                 adCursor += 1;
             }
@@ -85,7 +89,11 @@ export function interleavePromoGroups<T extends { id?: string; session_id?: stri
     while (adCursor < groups.length) {
         const group = groups[adCursor];
         if (group.length) {
-            const keyBase = group[0].ad_partner_id ?? group[0].id;
+            // Key by the row id (unique per ad/shaper). Partner grouping is
+            // retired, so two ads from the same advertiser are separate slots —
+            // keying by ad_partner_id would collide and trigger React's
+            // duplicate-key warning.
+            const keyBase = group[0].id ?? group[0].ad_partner_id;
             out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
         }
         adCursor += 1;

@@ -624,29 +624,9 @@ export default function HomeScreen() {
                           <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
                             {item.name ?? item.handle}
                           </Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
-                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', flexShrink: 1 }]} numberOfLines={1}>
-                              @{item.handle}
-                            </Text>
-                            {userType === 'photographer' && (
-                              <>
-                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
-                              </>
-                            )}
-                            {userType === 'shaper' && (
-                              <>
-                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                <MaterialCommunityIcons name="hammer" size={13} color="#f59e0b" />
-                              </>
-                            )}
-                            {userType && userType !== 'photographer' && userType !== 'shaper' && (
-                              <>
-                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
-                              </>
-                            )}
-                          </View>
+                          <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', marginTop: 1 }]} numberOfLines={1}>
+                            @{item.handle}
+                          </Text>
                         </View>
                       </Pressable>
                     );
@@ -687,7 +667,6 @@ export default function HomeScreen() {
                     if (!item) return null;
 
                     if (recent.itemType === 'user' && item.handle) {
-                      const userType = item.user_type;
                       return (
                         <Pressable key={item.id ?? idx} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
                           <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={36} />
@@ -695,23 +674,9 @@ export default function HomeScreen() {
                             <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
                               {item.name ?? item.handle}
                             </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
-                              <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', flexShrink: 1 }]} numberOfLines={1}>
-                                @{item.handle}
-                              </Text>
-                              {userType === 'photographer' && (
-                                <>
-                                  <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                  <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
-                                </>
-                              )}
-                              {userType && userType !== 'photographer' && (
-                                <>
-                                  <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                  <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
-                                </>
-                              )}
-                            </View>
+                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', marginTop: 1 }]} numberOfLines={1}>
+                              @{item.handle}
+                            </Text>
                           </View>
                         </Pressable>
                       );

@@ -47,6 +47,7 @@ type AdRow = {
   id: string;
   status?: 'pending' | 'approved' | 'rejected' | 'paused' | 'draft';
   is_active?: boolean;
+  ends_at?: string | null;
   headline?: string;
   cta_label?: string | null;
   click_url?: string | null;
@@ -207,7 +208,11 @@ export default function AdvertiserAdsGrid({
   const adMeta = (ad: AdRow) => {
     const thumb = pickThumbnailKey(ad);
     const status = (ad.status ?? 'approved') as NonNullable<AdRow['status']>;
-    const isLive = status === 'approved' && ad.is_active !== false;
+    // An approved ad past its end date isn't serving — surface it as "Expired"
+    // instead of "Active" so the advertiser knows it needs a new window.
+    const isExpired = status === 'approved' && !!ad.ends_at && new Date(ad.ends_at).getTime() < Date.now();
+    const pillStatus: NonNullable<AdRow['status']> | 'expired' = isExpired ? 'expired' : status;
+    const isLive = status === 'approved' && ad.is_active !== false && !isExpired;
     const onPress = () => {
       // Self view → open the action sheet for management. Public viewers
       // tap-through to click_url on approved tiles only.
@@ -215,59 +220,65 @@ export default function AdvertiserAdsGrid({
       if (!isLive) return;
       if (ad.click_url) Linking.openURL(ad.click_url).catch(() => { /* noop */ });
     };
-    return { thumb, status, isLive, onPress };
+    return { thumb, status, pillStatus, isLive, onPress };
   };
 
   return (
     <>
       {mode === 'list' ? (
-        <View style={s.listWrap}>
+        // Full-width card layout matching the app's other list views
+        // (SessionCard / shaper BoardListCard): header on top, edge-to-edge
+        // thumbnail below.
+        <View>
           {ads.map((ad) => {
-            const { thumb, status, isLive, onPress } = adMeta(ad);
+            const { thumb, pillStatus, isLive, onPress } = adMeta(ad);
             return (
-              <Pressable
-                key={ad.id}
-                onPress={onPress}
-                disabled={!isSelf && !isLive}
-                style={[
-                  s.listRow,
-                  { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' },
-                  !isLive && { opacity: 0.85 },
-                ]}
-              >
-                {thumb ? (
-                  <Image source={{ uri: thumb }} style={s.listThumb} contentFit="cover" transition={150} />
-                ) : (
-                  <View style={[s.listThumb, s.tilePlaceholder]}>
-                    <Ionicons name="megaphone-outline" size={24} color={isDark ? '#4b5563' : '#9ca3af'} />
-                  </View>
-                )}
-                <View style={s.listBody}>
-                  <Text style={[s.listHeadline, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                    {ad.headline || 'Untitled campaign'}
-                  </Text>
-                  {ad.cta_label ? (
-                    <Text style={[s.listSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-                      {ad.cta_label}
+              <View key={ad.id} style={s.listCard}>
+                <View style={s.listCardHeader}>
+                  <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+                    <Text style={[s.listCardTitle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                      {ad.headline || 'Untitled campaign'}
                     </Text>
-                  ) : null}
+                    {ad.cta_label ? (
+                      <Text style={[s.listCardSubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+                        {ad.cta_label}
+                      </Text>
+                    ) : null}
+                  </View>
                   {isSelf && (
-                    <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
-                      <StatusPill status={status} />
-                    </View>
+                    <Pressable onPress={() => setSheetTarget(ad)} hitSlop={8}>
+                      <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+                    </Pressable>
                   )}
                 </View>
-                {isSelf && (
-                  <Ionicons name="ellipsis-horizontal" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
-                )}
-              </Pressable>
+                <Pressable
+                  onPress={onPress}
+                  disabled={!isSelf && !isLive}
+                  style={[s.listCardThumb, !isLive && { opacity: 0.85 }]}
+                >
+                  {thumb ? (
+                    <Image source={{ uri: thumb }} style={s.listCardImage} contentFit="cover" transition={150} />
+                  ) : (
+                    <View style={[s.listCardImage, s.tilePlaceholder, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                      <Ionicons name="megaphone-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
+                    </View>
+                  )}
+                  {/* Status pill only on self-view (public viewers only see
+                      approved ads; the profile is already marked SPONSORED). */}
+                  {isSelf && (
+                    <View style={s.tileTopLeft}>
+                      <StatusPill status={pillStatus} />
+                    </View>
+                  )}
+                </Pressable>
+              </View>
             );
           })}
         </View>
       ) : (
       <View style={s.grid}>
       {ads.map((ad) => {
-        const { thumb, status, isLive, onPress } = adMeta(ad);
+        const { thumb, pillStatus, isLive, onPress } = adMeta(ad);
         return (
           <Pressable
             key={ad.id}
@@ -292,7 +303,7 @@ export default function AdvertiserAdsGrid({
                 per-tile "Sponsored" chip is redundant. */}
             {isSelf && (
               <View style={s.tileTopLeft}>
-                <StatusPill status={status} />
+                <StatusPill status={pillStatus} />
               </View>
             )}
 
@@ -320,22 +331,15 @@ export default function AdvertiserAdsGrid({
 }
 
 /**
- * Approved live ads keep the existing "Sponsored" chip (gray neutral) so
- * the viewer sees consistent advertising chrome. Non-approved ads (only
- * visible on self-view) get a colored pill so the advertiser can see
- * status at a glance.
+ * Status chrome for the advertiser self-view (these pills only render for the
+ * owner). Approved+live shows a green "Active" pill — on your own profile
+ * "Sponsored" is redundant since every ad here is sponsored.
  */
-function StatusPill({ status }: { status: NonNullable<AdRow['status']> }) {
-  if (status === 'approved') {
-    return (
-      <View style={[s.pill, s.pillSponsored]}>
-        <Ionicons name="megaphone" size={9} color="#fff" />
-        <Text style={[s.pillText, { color: '#fff' }]}>Sponsored</Text>
-      </View>
-    );
-  }
+function StatusPill({ status }: { status: NonNullable<AdRow['status']> | 'expired' }) {
   const map = {
-    pending:  { label: 'Pending', bg: 'rgba(245,158,11,0.92)' },   // amber
+    approved: { label: 'Active',   bg: 'rgba(16,185,129,0.92)' },  // emerald
+    expired:  { label: 'Expired',  bg: 'rgba(71,85,105,0.9)' },    // slate
+    pending:  { label: 'Pending',  bg: 'rgba(245,158,11,0.92)' },  // amber
     rejected: { label: 'Rejected', bg: 'rgba(220,38,38,0.92)' },   // red
     paused:   { label: 'Paused',   bg: 'rgba(71,85,105,0.9)' },    // slate
     draft:    { label: 'Draft',    bg: 'rgba(71,85,105,0.9)' },    // slate
@@ -354,26 +358,24 @@ const s = StyleSheet.create({
     flexWrap: 'wrap',
     gap: GUTTER,
   },
-  listWrap: {
-    paddingHorizontal: 16,
-    gap: 10,
+  listCard: {
+    marginBottom: 16,
   },
-  listRow: {
+  listCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    borderRadius: 12,
-    padding: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  listThumb: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
-    overflow: 'hidden',
+  listCardTitle: { fontSize: 14, fontWeight: '600' },
+  listCardSubtitle: { fontSize: 13, marginTop: 1 },
+  listCardThumb: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    position: 'relative',
   },
-  listBody: { flex: 1, minWidth: 0 },
-  listHeadline: { fontSize: 15, fontWeight: '600' },
-  listSub: { fontSize: 13, marginTop: 2 },
+  listCardImage: { width: '100%', height: '100%' },
   tile: {
     width: TILE_SIZE,
     height: TILE_SIZE,

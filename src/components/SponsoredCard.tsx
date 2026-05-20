@@ -5,6 +5,7 @@ import {
   Pressable,
   StyleSheet,
   Linking,
+  Alert,
   Platform,
   Share,
   useColorScheme,
@@ -28,6 +29,10 @@ interface Ad {
   /** Partner logo (square avatar) — joined from ad_partners.logo_url by GET /ads.
    * Used as the post-card avatar; falls back to media_url then a placeholder. */
   partner_logo_url?: string | null;
+  /** Advertiser user's profile picture + handle (joined by GET /ads). The
+   * advertiser's avatar is the brand identity, so it's the preferred avatar. */
+  advertiser_picture?: string | null;
+  advertiser_handle?: string | null;
   headline?: string;
   body?: string;
   media_url?: string;
@@ -136,15 +141,35 @@ export default function SponsoredCard({
 
   const openClick = useCallback(() => {
     if (!ad) return;
-    const url = buildAdClickUrl(ad.id, { placement, surfBreakId, device: currentDevice() });
-    Linking.openURL(url).catch(() => { /* noop */ });
+    const trackUrl = buildAdClickUrl(ad.id, { placement, surfBreakId, device: currentDevice() });
+    // Phone CTA: show the number with Cancel / Call instead of silently
+    // dialing. Still log the click (fire-and-forget) when they confirm.
+    if (ad.cta_type === 'tel' && ad.click_url) {
+      const number = ad.click_url.replace(/^tel:/i, '').trim();
+      Alert.alert(
+        ad.company_name || 'Call',
+        number,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Call',
+            onPress: () => {
+              fetch(trackUrl).catch(() => { /* tracking is best-effort */ });
+              Linking.openURL(`tel:${number}`).catch(() => { /* noop */ });
+            },
+          },
+        ],
+      );
+      return;
+    }
+    Linking.openURL(trackUrl).catch(() => { /* noop */ });
   }, [ad, placement, surfBreakId]);
 
   if (!ad || !slides.length) return null;
 
-  // Avatar: partner logo from ad_partners.logo_url, falling back to the
-  // first slide so ads without a logo still render something.
-  const avatarSource = ad.partner_logo_url || slides[0]?.s3_key;
+  // Avatar: the advertiser's profile picture (their brand identity), falling
+  // back to a partner logo, then the first slide so ads always render one.
+  const avatarSource = ad.advertiser_picture || ad.partner_logo_url || slides[0]?.s3_key;
   // Hero for the single-slide path. Prefer landscape variant when present.
   const singleHero = slides[0]?.landscape_s3_key || slides[0]?.s3_key;
 

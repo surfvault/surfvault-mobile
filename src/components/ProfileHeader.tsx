@@ -286,9 +286,10 @@ export default function ProfileHeader({
         )}
         {!isSelf && (
         <View style={s.actionRow}>
-          {/* Follow — hidden on private profiles (matches web) and when the
-              caller passes no handler (e.g. blocked profile). */}
-          {profile?.access !== 'private' && onFollow && (
+          {/* Follow — hidden on private profiles (matches web), when the caller
+              passes no handler (e.g. blocked profile), and on advertiser
+              accounts (following them surfaces no content; Message stays). */}
+          {profile?.access !== 'private' && onFollow && !isAdvertiser && (
           <Pressable
             onPress={onFollow}
             disabled={isFollowLoading}

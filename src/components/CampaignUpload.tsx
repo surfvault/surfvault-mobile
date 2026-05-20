@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 // expo-image-manipulator is loaded dynamically (same defensive pattern the
 // avatar uploader uses) so a missing native module on older dev clients
@@ -36,6 +37,9 @@ import { generateUUID } from '../helpers/uuid';
 type Placement = 'content' | 'sidebar';
 type CtaType = 'url' | 'tel';
 type SurfBreak = { id: string; name: string };
+
+const fmtWindowDate = (d: Date) =>
+  d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 
 // A creative slide can be a freshly-picked local image OR one already on
 // S3 (when editing an existing campaign). Remote slides are kept verbatim
@@ -82,6 +86,12 @@ export default function CampaignUpload({
   const [surfBreakSearch, setSurfBreakSearch] = useState('');
   const [targetedBreaks, setTargetedBreaks] = useState<SurfBreak[]>([]);
 
+  // Campaign window (optional). null = open-ended. `datePickerFor` controls
+  // which date the spinner edits.
+  const [startsAt, setStartsAt] = useState<Date | null>(null);
+  const [endsAt, setEndsAt] = useState<Date | null>(null);
+  const [datePickerFor, setDatePickerFor] = useState<'start' | 'end' | null>(null);
+
   // Creatives — up to MAX_MEDIA slides. Order in this array becomes the
   // carousel sort order. `thumbnailIndex` marks the slide used wherever we
   // need one representative image (sidebar, profile gallery, in-feed
@@ -113,6 +123,8 @@ export default function CampaignUpload({
     setPlacement(editingAd.placement_key === 'sidebar' ? 'sidebar' : 'content');
     setDailyCap(String(editingAd.daily_impression_cap_per_user ?? 3));
     setShowOnDiscover(editingAd.show_on_discover !== false);
+    setStartsAt(editingAd.starts_at ? new Date(editingAd.starts_at) : null);
+    setEndsAt(editingAd.ends_at ? new Date(editingAd.ends_at) : null);
     // Targeted breaks: editingAd.surf_break_targets is [{id,name}] when the
     // backend includes it; fall back to empty (advertiser re-selects).
     if (Array.isArray(editingAd.surf_break_targets)) {
@@ -267,6 +279,8 @@ export default function CampaignUpload({
         body: body.trim() || null,
         cta_label: ctaLabel.trim() || null,
         cta_type: ctaType,
+        starts_at: startsAt ? startsAt.toISOString() : null,
+        ends_at: endsAt ? endsAt.toISOString() : null,
         daily_impression_cap_per_user: Number(dailyCap) || 3,
         show_on_discover: showOnDiscover,
         surf_break_ids: targetedBreaks.map((b) => b.id),
@@ -296,6 +310,8 @@ export default function CampaignUpload({
       setShowOnDiscover(true);
       setTargetedBreaks([]);
       setSurfBreakSearch('');
+      setStartsAt(null);
+      setEndsAt(null);
       setCreatives([]);
       setThumbnailIndex(0);
 
@@ -312,7 +328,7 @@ export default function CampaignUpload({
     }
   }, [
     canSubmit, creatives, thumbnailIndex, placement, clickUrl, headline, body, ctaLabel, ctaType,
-    dailyCap, showOnDiscover, targetedBreaks, isEdit, editingAd, createMyAdMediaPresignedUrls,
+    dailyCap, showOnDiscover, targetedBreaks, startsAt, endsAt, isEdit, editingAd, createMyAdMediaPresignedUrls,
     createMyAd, updateMyAd, router,
   ]);
 
@@ -525,6 +541,42 @@ export default function CampaignUpload({
             )}
           </View>
 
+          {/* Campaign window (optional) — start/end dates. Matches web. */}
+          <View style={s.field}>
+            <Text style={[s.label, { color: text }]}>
+              {readOnly ? 'Campaign window' : 'Campaign window (optional)'}
+            </Text>
+            {readOnly ? (
+              <Text style={{ color: muted, fontSize: 13 }}>
+                {startsAt || endsAt
+                  ? `${startsAt ? fmtWindowDate(startsAt) : 'Any'} → ${endsAt ? fmtWindowDate(endsAt) : 'No end'}`
+                  : 'No window — runs until paused.'}
+              </Text>
+            ) : (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([['start', startsAt, setStartsAt], ['end', endsAt, setEndsAt]] as const).map(
+                  ([which, val, setter]) => (
+                    <Pressable
+                      key={which}
+                      onPress={() => setDatePickerFor(which)}
+                      style={[s.input, { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: inputBg }]}
+                    >
+                      <Ionicons name="calendar-outline" size={15} color={muted} />
+                      <Text style={{ flex: 1, color: val ? text : muted, fontSize: 14 }} numberOfLines={1}>
+                        {val ? fmtWindowDate(val) : which === 'start' ? 'Start date' : 'End date'}
+                      </Text>
+                      {val && (
+                        <Pressable onPress={() => setter(null)} hitSlop={8}>
+                          <Ionicons name="close-circle" size={16} color={muted} />
+                        </Pressable>
+                      )}
+                    </Pressable>
+                  ),
+                )}
+              </View>
+            )}
+          </View>
+
           {/* Daily cap — bounded chip selection mirrors the Placement / CTA
               chip rows. Caps user-side at 10; admin can set higher for
               premium partnerships. Backend clamp is still 1-100. */}
@@ -669,6 +721,32 @@ export default function CampaignUpload({
           <View style={{ height: 40 }} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Campaign-window date spinner — bottom sheet, one date at a time. */}
+      {datePickerFor && (
+        <View style={s.dateOverlay}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setDatePickerFor(null)} />
+          <View style={[s.dateSheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
+            <View style={s.dateSheetHeader}>
+              <Pressable onPress={() => setDatePickerFor(null)} hitSlop={8}>
+                <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
+              </Pressable>
+            </View>
+            <DateTimePicker
+              value={(datePickerFor === 'start' ? startsAt : endsAt) ?? new Date()}
+              mode="date"
+              display="spinner"
+              onChange={(_e, d) => {
+                if (!d) return;
+                if (datePickerFor === 'start') setStartsAt(d);
+                else setEndsAt(d);
+              }}
+              themeVariant={isDark ? 'dark' : 'light'}
+              style={{ height: 200 }}
+            />
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -862,5 +940,21 @@ const s = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     marginBottom: 16,
+  },
+  dateOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  dateSheet: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingBottom: 24,
+  },
+  dateSheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
 });

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import UserAvatar from '../../src/components/UserAvatar';
@@ -129,7 +129,6 @@ export default function FollowStatsScreen() {
   }, [trackedPush]);
 
   const renderItem = useCallback(({ item }: { item: any }) => {
-    const userType = item.user_type;
     return (
       <Pressable
         onPress={() => handleSelect(item.handle)}
@@ -160,26 +159,12 @@ export default function FollowStatsScreen() {
           >
             {item.name || item.handle}
           </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
-            <Text
-              style={{ fontSize: 13, color: isDark ? '#9ca3af' : '#6b7280', flexShrink: 1 }}
-              numberOfLines={1}
-            >
-              {item.handle}
-            </Text>
-            {userType === 'photographer' && (
-              <>
-                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
-              </>
-            )}
-            {userType && userType !== 'photographer' && (
-              <>
-                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
-              </>
-            )}
-          </View>
+          <Text
+            style={{ fontSize: 13, color: isDark ? '#9ca3af' : '#6b7280', marginTop: 2 }}
+            numberOfLines={1}
+          >
+            {item.handle}
+          </Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color={isDark ? '#4b5563' : '#cbd5e1'} />
       </Pressable>

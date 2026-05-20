@@ -406,10 +406,23 @@ export default function UserProfileScreen() {
             renderItem={() => (
               <AdvertiserAdsGrid
                 handle={handle ?? ''}
+                mode={activeTab}
                 isSelf={!!currentUser?.handle && handle === currentUser.handle}
               />
             )}
-            ListHeaderComponent={<UserProfileHeader />}
+            ListHeaderComponent={
+              <>
+                <UserProfileHeader />
+                <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+                  <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                  <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                </View>
+              </>
+            }
             showsVerticalScrollIndicator={false}
           />
         ) : (
