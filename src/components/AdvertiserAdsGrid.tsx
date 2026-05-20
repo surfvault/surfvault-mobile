@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,19 @@ import {
   useColorScheme,
   Linking,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
-import { useGetAdvertiserAdsQuery } from '../store';
+import { useTrackedPush } from '../context/NavigationContext';
+import ActionSheet, { type ActionSheetOption } from './ActionSheet';
+import {
+  useGetAdvertiserAdsQuery,
+  useGetMyCampaignsQuery,
+  useDeleteMyAdMutation,
+  usePauseMyAdMutation,
+  useResumeMyAdMutation,
+} from '../store';
 
 /**
  * Mobile parallel to web AdvertiserAdsGallery. Renders the advertiser's
@@ -72,8 +81,96 @@ export default function AdvertiserAdsGrid({
   isSelf?: boolean;
 }) {
   const isDark = useColorScheme() === 'dark';
-  const { data, isLoading, isError } = useGetAdvertiserAdsQuery({ handle });
+  const trackedPush = useTrackedPush();
+  // Dispatch: self hits the authed /campaigns (all statuses); others hit
+  // the public /advertisers/{handle}/ads (approved+active only).
+  const publicQuery = useGetAdvertiserAdsQuery({ handle }, { skip: !!isSelf });
+  const myQuery = useGetMyCampaignsQuery(undefined, { skip: !isSelf });
+  const data = isSelf ? myQuery.data : publicQuery.data;
+  const isLoading = isSelf ? myQuery.isLoading : publicQuery.isLoading;
+  const isError = isSelf ? myQuery.isError : publicQuery.isError;
   const ads: AdRow[] = useMemo(() => data?.results?.ads ?? [], [data]);
+
+  // Self-only management state. Tapping a tile on the advertiser's own
+  // profile opens an action sheet with status-gated options (pause,
+  // resume, delete). Edit is a placeholder until the full edit flow
+  // lands — for now it shows a "coming soon" alert.
+  const [sheetTarget, setSheetTarget] = useState<AdRow | null>(null);
+  const [pauseAd, { isLoading: pausing }] = usePauseMyAdMutation();
+  const [resumeAd, { isLoading: resuming }] = useResumeMyAdMutation();
+  const [deleteAd, { isLoading: deleting }] = useDeleteMyAdMutation();
+  const sheetBusy = pausing || resuming || deleting;
+
+  const closeSheet = () => setSheetTarget(null);
+
+  const onPause = async (ad: AdRow) => {
+    closeSheet();
+    try { await pauseAd({ adId: ad.id }).unwrap(); }
+    catch (err: any) { Alert.alert('Error', err?.data?.message || 'Failed to pause'); }
+  };
+  const onResume = async (ad: AdRow) => {
+    closeSheet();
+    try { await resumeAd({ adId: ad.id }).unwrap(); }
+    catch (err: any) { Alert.alert('Error', err?.data?.message || 'Failed to resume'); }
+  };
+  const onDelete = (ad: AdRow) => {
+    closeSheet();
+    Alert.alert(
+      'Delete campaign?',
+      `"${ad.headline ?? 'this campaign'}" will be permanently removed.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try { await deleteAd({ adId: ad.id }).unwrap(); }
+            catch (err: any) { Alert.alert('Error', err?.data?.message || 'Failed to delete'); }
+          },
+        },
+      ],
+    );
+  };
+
+  // Status determines which actions show. Edit is always available
+  // (TODO: route to edit page); pause/resume/delete are status-gated.
+  const sheetOptions = useMemo<ActionSheetOption[]>(() => {
+    if (!sheetTarget) return [];
+    const status = sheetTarget.status ?? 'approved';
+    const options: ActionSheetOption[] = [];
+    options.push({
+      label: 'Edit campaign',
+      icon: 'create-outline',
+      onPress: () => {
+        const id = sheetTarget.id;
+        closeSheet();
+        trackedPush(`/campaign/${id}/edit` as any);
+      },
+    });
+    if (status === 'approved') {
+      options.push({
+        label: 'Pause campaign',
+        icon: 'pause-circle-outline',
+        onPress: () => onPause(sheetTarget),
+      });
+    }
+    if (status === 'paused') {
+      options.push({
+        label: 'Resume campaign',
+        icon: 'play-circle-outline',
+        onPress: () => onResume(sheetTarget),
+      });
+    }
+    if (status === 'pending' || status === 'rejected' || status === 'draft') {
+      options.push({
+        label: 'Delete campaign',
+        icon: 'trash-outline',
+        destructive: true,
+        onPress: () => onDelete(sheetTarget),
+      });
+    }
+    return options;
+  }, [sheetTarget]);
 
   if (isLoading) {
     return (
@@ -104,12 +201,19 @@ export default function AdvertiserAdsGrid({
   }
 
   return (
-    <View style={s.grid}>
+    <>
+      <View style={s.grid}>
       {ads.map((ad) => {
         const thumb = pickThumbnailKey(ad);
         const status = (ad.status ?? 'approved') as NonNullable<AdRow['status']>;
         const isLive = status === 'approved' && ad.is_active !== false;
         const onPress = () => {
+          // Self view → open the action sheet for management. Public
+          // viewers tap-through to click_url on approved tiles only.
+          if (isSelf) {
+            setSheetTarget(ad);
+            return;
+          }
           if (!isLive) return;
           if (ad.click_url) Linking.openURL(ad.click_url).catch(() => { /* noop */ });
         };
@@ -117,7 +221,7 @@ export default function AdvertiserAdsGrid({
           <Pressable
             key={ad.id}
             onPress={onPress}
-            disabled={!isLive}
+            disabled={!isSelf && !isLive}
             style={[
               s.tile,
               { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' },
@@ -146,7 +250,15 @@ export default function AdvertiserAdsGrid({
           </Pressable>
         );
       })}
-    </View>
+      </View>
+
+      <ActionSheet
+        visible={!!sheetTarget && !sheetBusy}
+        onClose={closeSheet}
+        title={sheetTarget?.headline ?? 'Manage campaign'}
+        options={sheetOptions}
+      />
+    </>
   );
 }
 

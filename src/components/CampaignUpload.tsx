@@ -18,9 +18,17 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+// expo-image-manipulator is loaded dynamically (same defensive pattern the
+// avatar uploader uses) so a missing native module on older dev clients
+// doesn't crash the screen at import time. The require returns null and we
+// fall back to the raw asset uri.
+let ImageManipulator: any = null;
+try { ImageManipulator = require('expo-image-manipulator'); } catch {}
+import { useEffect } from 'react';
 import {
   useCreateMyAdMediaPresignedUrlsMutation,
   useCreateMyAdMutation,
+  useUpdateMyAdMutation,
   useGetSurfBreaksQuery,
 } from '../store';
 import { generateUUID } from '../helpers/uuid';
@@ -29,15 +37,38 @@ type Placement = 'content' | 'sidebar';
 type CtaType = 'url' | 'tel';
 type SurfBreak = { id: string; name: string };
 
+// A creative slide can be a freshly-picked local image OR one already on
+// S3 (when editing an existing campaign). Remote slides are kept verbatim
+// on save; local slides get uploaded first.
+type Creative = {
+  uuid: string;
+  uri: string;        // local file uri (new) OR remote https url (existing)
+  type: string;       // jpg | png | webp
+  remote?: boolean;   // true = already on S3, skip re-upload
+};
+
 /**
- * Advertiser variant of the Session tab. Mobile mirror of
- * surfvault-web/src/pages/upload/CampaignUpload.jsx — collects campaign
- * metadata, mints a presigned URL, uploads the creative, then POSTs /ads
- * (status forced to 'pending' by the backend so admin moderates).
+ * Advertiser variant of the Session tab + the campaign edit screen. Mobile
+ * mirror of surfvault-web/src/pages/upload/CampaignUpload.jsx.
+ *
+ * Two modes:
+ *   • Create (default): collects metadata, uploads creatives, POSTs /ads.
+ *   • Edit (when `editingAd` is passed): prefills from the existing ad,
+ *     shows "Save changes", PATCHes /ads/{id}. Changing any creative/copy
+ *     field re-queues the ad to 'pending' server-side.
+ *
+ * `readOnly` reuses the exact layout for the admin review screen (opened from
+ * a newCampaignSubmission notification): inputs are non-editable, the creative
+ * grid loses its add/remove/set-thumbnail controls, and the submit button is
+ * gone. Approve/Reject lives on the notification, not here.
  */
-export default function CampaignUpload() {
+export default function CampaignUpload({
+  editingAd,
+  readOnly = false,
+}: { editingAd?: any; readOnly?: boolean } = {}) {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
+  const isEdit = !!editingAd && !readOnly;
 
   // Form state
   const [headline, setHeadline] = useState('');
@@ -56,7 +87,7 @@ export default function CampaignUpload() {
   // need one representative image (sidebar, profile gallery, in-feed
   // carousel's first visible slide).
   const MAX_MEDIA = 10;
-  const [creatives, setCreatives] = useState<{ uri: string; uuid: string; type: string }[]>([]);
+  const [creatives, setCreatives] = useState<Creative[]>([]);
   const [thumbnailIndex, setThumbnailIndex] = useState(0);
 
   // Submit
@@ -64,6 +95,41 @@ export default function CampaignUpload() {
 
   const [createMyAdMediaPresignedUrls] = useCreateMyAdMediaPresignedUrlsMutation();
   const [createMyAd] = useCreateMyAdMutation();
+  const [updateMyAd] = useUpdateMyAdMutation();
+
+  // Prefill from the existing ad when editing. Runs once on mount (the
+  // edit screen passes a stable ad object). Existing media become remote
+  // creatives keyed by their s3_key.
+  useEffect(() => {
+    if (!editingAd) return;
+    setHeadline(editingAd.headline ?? '');
+    setBody(editingAd.body ?? '');
+    setClickUrl(editingAd.click_url ?? '');
+    setCtaLabel(editingAd.cta_label ?? '');
+    setCtaType(editingAd.cta_type === 'tel' ? 'tel' : 'url');
+    setPlacement(editingAd.placement_key === 'sidebar' ? 'sidebar' : 'content');
+    setDailyCap(String(editingAd.daily_impression_cap_per_user ?? 3));
+    setShowOnDiscover(editingAd.show_on_discover !== false);
+    // Targeted breaks: editingAd.surf_break_targets is [{id,name}] when the
+    // backend includes it; fall back to empty (advertiser re-selects).
+    if (Array.isArray(editingAd.surf_break_targets)) {
+      setTargetedBreaks(editingAd.surf_break_targets);
+    }
+    const media = Array.isArray(editingAd.media) ? [...editingAd.media] : [];
+    media.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const remoteCreatives: Creative[] = media.map((m: any) => ({
+      uuid: m.id ?? generateUUID(),
+      uri: m.s3_key,
+      type: 'jpg',
+      remote: true,
+    }));
+    setCreatives(remoteCreatives);
+    // Thumbnail index = position of thumbnail_ad_media_id in the sorted list.
+    if (editingAd.thumbnail_ad_media_id) {
+      const idx = media.findIndex((m: any) => m.id === editingAd.thumbnail_ad_media_id);
+      if (idx >= 0) setThumbnailIndex(idx);
+    }
+  }, [editingAd]);
 
   const { data: surfBreaksData } = useGetSurfBreaksQuery(
     { search: surfBreakSearch, limit: 10, continuationToken: 0 },
@@ -85,14 +151,38 @@ export default function CampaignUpload() {
       quality: 0.9,
     });
     if (result.canceled || !result.assets?.length) return;
-    const newOnes = result.assets.map((asset) => {
-      // ImagePicker doesn't always return the original file extension, so
-      // we infer from the mime type or fall back to jpg. Backend accepts
-      // these verbatim into the S3 key (e.g. `${uuid}.jpg`).
-      const mime = asset.mimeType || 'image/jpeg';
-      const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-      return { uri: asset.uri, uuid: generateUUID(), type: ext };
-    });
+
+    // Transcode every picked image to JPEG. iOS picker returns HEIC by
+    // default, and browser <img> tags can't render HEIC even though
+    // expo-image (mobile) can — campaigns are viewed on both surfaces, so
+    // mobile-only rendering is a bug. Same pattern the avatar uploader
+    // uses (app/edit-profile/index.tsx). 0.85 quality keeps file sizes
+    // sane while staying well above noticeable-loss territory.
+    const newOnes = await Promise.all(
+      result.assets.map(async (asset) => {
+        let outputUri = asset.uri;
+        if (ImageManipulator?.manipulateAsync) {
+          try {
+            const manipulated = await ImageManipulator.manipulateAsync(
+              asset.uri,
+              [],
+              {
+                compress: 0.85,
+                format: ImageManipulator.SaveFormat?.JPEG ?? 'jpeg',
+              },
+            );
+            outputUri = manipulated.uri;
+          } catch (err) {
+            // Best-effort: if manipulation fails (e.g. unsupported
+            // format), fall through to the raw uri. The browser may
+            // still fail to render the result, but at least submission
+            // doesn't break entirely.
+            console.warn('Image transcode failed, uploading original:', err);
+          }
+        }
+        return { uri: outputUri, uuid: generateUUID(), type: 'jpg', remote: false };
+      }),
+    );
     setCreatives((prev) => [...prev, ...newOnes].slice(0, MAX_MEDIA));
   }, [creatives.length]);
 
@@ -131,34 +221,42 @@ export default function CampaignUpload() {
     if (!canSubmit || creatives.length === 0) return;
     setSubmitting(true);
     try {
-      // 1) Mint presigned URLs for all creatives in one round-trip.
-      const presigned = await createMyAdMediaPresignedUrls({
-        files: creatives.map((c) => ({ file_uuid: c.uuid, file_type: c.type })),
-      }).unwrap();
-      const mappings = presigned?.results?.idMappedPresignedUrls ?? [];
-      const byUuid = new Map(mappings.map((m) => [m.file_uuid, m]));
+      // Only NEW (local) creatives need a presigned URL + upload. Remote
+      // creatives (already on S3 from a prior submission) keep their URL.
+      const newCreatives = creatives.filter((c) => !c.remote);
+      const urlByUuid = new Map<string, string>();
+      for (const c of creatives) {
+        if (c.remote) urlByUuid.set(c.uuid, c.uri); // existing S3 url
+      }
 
-      // 2) PUT each creative to S3 in parallel. fetch + blob works on
-      //    iOS + Android (same pattern used by avatar upload).
-      await Promise.all(creatives.map(async (c) => {
-        const m = byUuid.get(c.uuid);
-        if (!m?.url) throw new Error(`Failed to provision upload URL for slide ${c.uuid}`);
-        const blobResp = await fetch(c.uri);
-        const blob = await blobResp.blob();
-        const putResp = await fetch(m.url, {
-          method: 'PUT',
-          body: blob,
-          headers: { 'Content-Type': `image/${c.type === 'jpg' ? 'jpeg' : c.type}` },
-        });
-        if (!putResp.ok) throw new Error(`S3 upload failed: ${putResp.status}`);
-      }));
+      if (newCreatives.length) {
+        const presigned = await createMyAdMediaPresignedUrls({
+          files: newCreatives.map((c) => ({ file_uuid: c.uuid, file_type: c.type })),
+        }).unwrap();
+        const mappings = presigned?.results?.idMappedPresignedUrls ?? [];
+        const byUuid = new Map(mappings.map((m) => [m.file_uuid, m]));
 
-      // 3) Create the ad. media_urls preserves the picked order; thumbnail
-      //    is whichever slide they marked.
-      const mediaUrls = creatives.map((c) => byUuid.get(c.uuid)!.media_url);
-      await createMyAd({
+        await Promise.all(newCreatives.map(async (c) => {
+          const m = byUuid.get(c.uuid);
+          if (!m?.url) throw new Error(`Failed to provision upload URL for slide ${c.uuid}`);
+          const blobResp = await fetch(c.uri);
+          const blob = await blobResp.blob();
+          const putResp = await fetch(m.url, {
+            method: 'PUT',
+            body: blob,
+            headers: { 'Content-Type': `image/${c.type === 'jpg' ? 'jpeg' : c.type}` },
+          });
+          if (!putResp.ok) throw new Error(`S3 upload failed: ${putResp.status}`);
+          urlByUuid.set(c.uuid, m.media_url);
+        }));
+      }
+
+      // media_urls preserves display order across both remote + new slides.
+      const mediaUrls = creatives.map((c) => urlByUuid.get(c.uuid)!).filter(Boolean);
+
+      const payload = {
         placement_key: placement,
-        media_type: 'image',
+        media_type: 'image' as const,
         media_urls: mediaUrls,
         thumbnail_index: thumbnailIndex,
         click_url: clickUrl.trim() || null,
@@ -169,7 +267,19 @@ export default function CampaignUpload() {
         daily_impression_cap_per_user: Number(dailyCap) || 3,
         show_on_discover: showOnDiscover,
         surf_break_ids: targetedBreaks.map((b) => b.id),
-      } as any).unwrap();
+      };
+
+      if (isEdit) {
+        await updateMyAd({ adId: editingAd.id, payload }).unwrap();
+        Alert.alert(
+          'Changes saved',
+          'Edits to creative or copy send the campaign back for review.',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+        return;
+      }
+
+      await createMyAd(payload as any).unwrap();
 
       // Reset the form so the Campaign tab is clean if the advertiser
       // swipes back to it later (tab navigator keeps the screen mounted).
@@ -199,7 +309,8 @@ export default function CampaignUpload() {
     }
   }, [
     canSubmit, creatives, thumbnailIndex, placement, clickUrl, headline, body, ctaLabel, ctaType,
-    dailyCap, showOnDiscover, targetedBreaks, createMyAdMediaPresignedUrls, createMyAd, router,
+    dailyCap, showOnDiscover, targetedBreaks, isEdit, editingAd, createMyAdMediaPresignedUrls,
+    createMyAd, updateMyAd, router,
   ]);
 
   const bg = isDark ? '#000' : '#fff';
@@ -212,23 +323,44 @@ export default function CampaignUpload() {
     <SafeAreaView style={[s.container, { backgroundColor: bg }]} edges={['top']}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={s.headerRow}>
+          {(isEdit || readOnly) && (
+            <Pressable onPress={() => router.back()} hitSlop={8} style={{ marginRight: 12 }}>
+              <Ionicons name="chevron-back" size={26} color={text} />
+            </Pressable>
+          )}
           <View style={{ flex: 1 }}>
-            <Text style={[s.title, { color: text }]}>New Campaign</Text>
-            <Text style={[s.subtitle, { color: muted }]}>
-              Approved campaigns surface in the SurfVault feed.
+            <Text style={[s.title, { color: text }]}>
+              {readOnly ? 'Review Campaign' : isEdit ? 'Edit Campaign' : 'New Campaign'}
             </Text>
-          </View>
-          <Pressable
-            onPress={submit}
-            disabled={!canSubmit}
-            style={[s.submitBtn, { backgroundColor: canSubmit ? '#0ea5e9' : (isDark ? '#1f2937' : '#e5e7eb') }]}
-          >
-            {submitting ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={[s.submitBtnText, { color: canSubmit ? '#fff' : muted }]}>Submit</Text>
+            <Text style={[s.subtitle, { color: muted }]}>
+              {readOnly
+                ? 'Read-only. Approve or reject from the notification.'
+                : isEdit
+                ? 'Changing creative or copy sends it back for review.'
+                : 'Approved campaigns surface in the SurfVault feed.'}
+            </Text>
+            {readOnly && (editingAd?.advertiser_handle || editingAd?.partner_company_name) && (
+              <Text style={[s.subtitle, { color: muted, marginTop: 2 }]}>
+                {editingAd.partner_company_name || 'Advertiser'}
+                {editingAd.advertiser_handle ? ` · @${editingAd.advertiser_handle}` : ''}
+              </Text>
             )}
-          </Pressable>
+          </View>
+          {readOnly ? (
+            editingAd?.status ? <StatusPill status={editingAd.status} /> : null
+          ) : (
+            <Pressable
+              onPress={submit}
+              disabled={!canSubmit}
+              style={[s.submitBtn, { backgroundColor: canSubmit ? '#0ea5e9' : (isDark ? '#1f2937' : '#e5e7eb') }]}
+            >
+              {submitting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={[s.submitBtnText, { color: canSubmit ? '#fff' : muted }]}>{isEdit ? 'Save' : 'Submit'}</Text>
+              )}
+            </Pressable>
+          )}
         </View>
 
         <ScrollView
@@ -241,12 +373,22 @@ export default function CampaignUpload() {
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           showsVerticalScrollIndicator={false}
         >
+          {(isEdit || readOnly) && editingAd?.status === 'rejected' && editingAd?.rejection_reason ? (
+            <View style={[s.rejectBanner, { backgroundColor: isDark ? 'rgba(220,38,38,0.12)' : '#fef2f2', borderColor: isDark ? 'rgba(220,38,38,0.3)' : '#fecaca' }]}>
+              <Ionicons name="alert-circle-outline" size={16} color="#dc2626" />
+              <Text style={[s.rejectBannerText, { color: isDark ? '#fca5a5' : '#991b1b' }]}>
+                Rejected: {editingAd.rejection_reason}
+              </Text>
+            </View>
+          ) : null}
+
           {/* Headline */}
           <View style={s.field}>
             <Text style={[s.label, { color: text }]}>Headline *</Text>
             <TextInput
               value={headline}
               onChangeText={setHeadline}
+              editable={!readOnly}
               maxLength={80}
               placeholder="e.g. New 7'2&quot; midlength in stock"
               placeholderTextColor={muted}
@@ -260,6 +402,7 @@ export default function CampaignUpload() {
             <TextInput
               value={body}
               onChangeText={setBody}
+              editable={!readOnly}
               maxLength={240}
               multiline
               placeholder="One or two sentences. Shown under the headline."
@@ -272,8 +415,8 @@ export default function CampaignUpload() {
           <View style={s.field}>
             <Text style={[s.label, { color: text }]}>Placement</Text>
             <View style={s.chipRow}>
-              <Chip active={placement === 'content'} onPress={() => setPlacement('content')} text="In-feed" isDark={isDark} />
-              <Chip active={placement === 'sidebar'} onPress={() => setPlacement('sidebar')} text="Sidebar" isDark={isDark} />
+              <Chip active={placement === 'content'} disabled={readOnly} onPress={() => setPlacement('content')} text="In-feed" isDark={isDark} />
+              <Chip active={placement === 'sidebar'} disabled={readOnly} onPress={() => setPlacement('sidebar')} text="Sidebar" isDark={isDark} />
             </View>
             {placement === 'sidebar' && (
               <View
@@ -297,12 +440,13 @@ export default function CampaignUpload() {
           <View style={s.field}>
             <Text style={[s.label, { color: text }]}>Call to action *</Text>
             <View style={s.chipRow}>
-              <Chip active={ctaType === 'url'} onPress={() => setCtaType('url')} text="Link" isDark={isDark} />
-              <Chip active={ctaType === 'tel'} onPress={() => setCtaType('tel')} text="Phone" isDark={isDark} />
+              <Chip active={ctaType === 'url'} disabled={readOnly} onPress={() => setCtaType('url')} text="Link" isDark={isDark} />
+              <Chip active={ctaType === 'tel'} disabled={readOnly} onPress={() => setCtaType('tel')} text="Phone" isDark={isDark} />
             </View>
             <TextInput
               value={clickUrl}
               onChangeText={setClickUrl}
+              editable={!readOnly}
               keyboardType={ctaType === 'tel' ? 'phone-pad' : 'url'}
               autoCapitalize="none"
               placeholder={ctaType === 'tel' ? '+1 555 555 5555' : 'https://example.com'}
@@ -312,6 +456,7 @@ export default function CampaignUpload() {
             <TextInput
               value={ctaLabel}
               onChangeText={setCtaLabel}
+              editable={!readOnly}
               maxLength={32}
               placeholder="Button text — e.g. Shop now"
               placeholderTextColor={muted}
@@ -321,16 +466,20 @@ export default function CampaignUpload() {
 
           {/* Surf break targeting */}
           <View style={s.field}>
-            <Text style={[s.label, { color: text }]}>Target surf breaks (optional)</Text>
-            <TextInput
-              value={surfBreakSearch}
-              onChangeText={setSurfBreakSearch}
-              placeholder="Search a break to target…"
-              placeholderTextColor={muted}
-              autoCapitalize="none"
-              style={[s.input, { backgroundColor: inputBg, color: text }]}
-            />
-            {surfBreakSearch.length >= 2 && surfBreakResults.length > 0 && (
+            <Text style={[s.label, { color: text }]}>
+              {readOnly ? 'Targeted surf breaks' : 'Target surf breaks (optional)'}
+            </Text>
+            {!readOnly && (
+              <TextInput
+                value={surfBreakSearch}
+                onChangeText={setSurfBreakSearch}
+                placeholder="Search a break to target…"
+                placeholderTextColor={muted}
+                autoCapitalize="none"
+                style={[s.input, { backgroundColor: inputBg, color: text }]}
+              />
+            )}
+            {!readOnly && surfBreakSearch.length >= 2 && surfBreakResults.length > 0 && (
               <View style={[s.searchResults, { backgroundColor: inputBg, borderColor: border }]}>
                 {surfBreakResults.map((b: any) => (
                   <Pressable
@@ -343,24 +492,31 @@ export default function CampaignUpload() {
                 ))}
               </View>
             )}
-            {targetedBreaks.length > 0 && (
+            {targetedBreaks.length > 0 ? (
               <View style={s.targetChipRow}>
                 {targetedBreaks.map((b) => (
                   <Pressable
                     key={b.id}
-                    onPress={() => removeBreak(b.id)}
+                    onPress={readOnly ? undefined : () => removeBreak(b.id)}
+                    disabled={readOnly}
                     style={[s.targetChip, { backgroundColor: isDark ? 'rgba(14,165,233,0.15)' : '#e0f2fe' }]}
                   >
                     <Text style={{ color: isDark ? '#7dd3fc' : '#0369a1', fontSize: 12 }}>
-                      {b.name} ×
+                      {b.name}{readOnly ? '' : ' ×'}
                     </Text>
                   </Pressable>
                 ))}
               </View>
+            ) : readOnly ? (
+              <Text style={[s.hint, { color: muted, marginTop: 0 }]}>
+                No specific breaks — relies on Discover / service area.
+              </Text>
+            ) : null}
+            {!readOnly && (
+              <Text style={[s.hint, { color: muted }]}>
+                Leave blank to fall back to your service area (set in Edit Profile).
+              </Text>
             )}
-            <Text style={[s.hint, { color: muted }]}>
-              Leave blank to fall back to your service area (set in Edit Profile).
-            </Text>
           </View>
 
           {/* Daily cap — bounded chip selection mirrors the Placement / CTA
@@ -373,6 +529,7 @@ export default function CampaignUpload() {
                 <Chip
                   key={n}
                   active={dailyCap === n}
+                  disabled={readOnly}
                   onPress={() => setDailyCap(n)}
                   text={n === '1' ? '1 · once/day' : n === '3' ? '3 · default' : n === '10' ? '10 · max' : n}
                   isDark={isDark}
@@ -392,10 +549,11 @@ export default function CampaignUpload() {
             <Switch
               value={showOnDiscover}
               onValueChange={setShowOnDiscover}
+              disabled={readOnly}
               trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
             />
           </View>
-          {!hasReach && (
+          {!readOnly && !hasReach && (
             <View
               style={[
                 s.placementNote,
@@ -419,13 +577,13 @@ export default function CampaignUpload() {
           <View style={s.field}>
             <View style={s.creativeHeader}>
               <Text style={[s.label, { color: text, marginBottom: 0 }]}>
-                Creative * {creatives.length > 0 && (
+                {readOnly ? 'Creative' : 'Creative *'} {creatives.length > 0 && (
                   <Text style={{ color: muted, fontWeight: '400' }}>
-                    {`(${creatives.length} / ${MAX_MEDIA})`}
+                    {readOnly ? `(${creatives.length})` : `(${creatives.length} / ${MAX_MEDIA})`}
                   </Text>
                 )}
               </Text>
-              {creatives.length > 0 && creatives.length < MAX_MEDIA && (
+              {!readOnly && creatives.length > 0 && creatives.length < MAX_MEDIA && (
                 <Pressable onPress={pickCreatives} hitSlop={8}>
                   <Text style={{ color: '#0ea5e9', fontSize: 13, fontWeight: '600' }}>+ Add more</Text>
                 </Pressable>
@@ -434,7 +592,8 @@ export default function CampaignUpload() {
 
             {creatives.length === 0 ? (
               <Pressable
-                onPress={pickCreatives}
+                onPress={readOnly ? undefined : pickCreatives}
+                disabled={readOnly}
                 style={[
                   s.creativePicker,
                   { backgroundColor: inputBg, borderColor: border },
@@ -443,17 +602,21 @@ export default function CampaignUpload() {
                 <View style={s.creativePlaceholder}>
                   <Ionicons name="image-outline" size={32} color={muted} />
                   <Text style={[s.creativePlaceholderText, { color: muted }]}>
-                    Tap to select images
+                    {readOnly ? 'No creatives' : 'Tap to select images'}
                   </Text>
-                  <Text style={[s.creativeHint, { color: muted }]}>
-                    Up to {MAX_MEDIA} slides · JPG, PNG, or WEBP
-                  </Text>
+                  {!readOnly && (
+                    <Text style={[s.creativeHint, { color: muted }]}>
+                      Up to {MAX_MEDIA} slides · JPG, PNG, or WEBP
+                    </Text>
+                  )}
                 </View>
               </Pressable>
             ) : (
               <>
                 <Text style={[s.hint, { color: muted, marginBottom: 8 }]}>
-                  Tap a slide to set it as the thumbnail — that's the image shown in the sidebar, profile gallery card, and as the first slide in the in-feed carousel.
+                  {readOnly
+                    ? 'The slide marked Thumbnail is shown in the sidebar, profile gallery card, and as the first slide in the in-feed carousel.'
+                    : 'Tap a slide to set it as the thumbnail — that\'s the image shown in the sidebar, profile gallery card, and as the first slide in the in-feed carousel.'}
                 </Text>
                 <View style={s.slideGrid}>
                   {creatives.map((c, idx) => {
@@ -461,7 +624,8 @@ export default function CampaignUpload() {
                     return (
                       <Pressable
                         key={c.uuid}
-                        onPress={() => setAsThumbnail(idx)}
+                        onPress={readOnly ? undefined : () => setAsThumbnail(idx)}
+                        disabled={readOnly}
                         style={[
                           s.slideTile,
                           {
@@ -479,13 +643,15 @@ export default function CampaignUpload() {
                         <View style={s.slideIndexBadge}>
                           <Text style={s.slideIndexText}>{idx + 1}</Text>
                         </View>
-                        <Pressable
-                          onPress={() => removeCreativeAt(idx)}
-                          hitSlop={6}
-                          style={s.slideRemoveBtn}
-                        >
-                          <Ionicons name="close" size={14} color="#fff" />
-                        </Pressable>
+                        {!readOnly && (
+                          <Pressable
+                            onPress={() => removeCreativeAt(idx)}
+                            hitSlop={6}
+                            style={s.slideRemoveBtn}
+                          >
+                            <Ionicons name="close" size={14} color="#fff" />
+                          </Pressable>
+                        )}
                       </Pressable>
                     );
                   })}
@@ -506,15 +672,18 @@ function Chip({
   onPress,
   text,
   isDark,
+  disabled = false,
 }: {
   active: boolean;
   onPress: () => void;
   text: string;
   isDark: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       style={[
         s.chip,
         {
@@ -526,6 +695,24 @@ function Chip({
         {text}
       </Text>
     </Pressable>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, { bg: string; fg: string }> = {
+    pending: { bg: 'rgba(245,158,11,0.18)', fg: '#b45309' },
+    approved: { bg: 'rgba(16,185,129,0.18)', fg: '#047857' },
+    rejected: { bg: 'rgba(239,68,68,0.18)', fg: '#b91c1c' },
+    paused: { bg: 'rgba(148,163,184,0.22)', fg: '#475569' },
+    draft: { bg: 'rgba(148,163,184,0.22)', fg: '#475569' },
+  };
+  const c = map[status] || map.draft;
+  return (
+    <View style={{ backgroundColor: c.bg, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999 }}>
+      <Text style={{ color: c.fg, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+        {status}
+      </Text>
+    </View>
   );
 }
 
@@ -642,6 +829,16 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rejectBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 16,
+  },
+  rejectBannerText: { flex: 1, fontSize: 12, lineHeight: 16, fontWeight: '600' },
   searchResults: {
     marginTop: 6,
     borderRadius: 10,

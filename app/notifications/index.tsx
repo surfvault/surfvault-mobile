@@ -286,6 +286,13 @@ export default function NotificationsScreen() {
         if (handle) trackedPush(`/user/${handle}` as any);
         break;
       }
+      case 'newCampaignSubmission': {
+        // Admin taps the card to review the submitted campaign read-only;
+        // Approve/Reject stays on the notification card (back navigation).
+        const adId = n.body_metadata?.adId ?? n.resource_id;
+        if (adId) trackedPush(`/campaign/${adId}/review` as any);
+        break;
+      }
     }
   }, [router, markAsRead, openAccessRequestSheet]);
 
