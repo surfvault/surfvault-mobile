@@ -48,6 +48,7 @@ import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
+import { formatSessionDate } from '../../src/helpers/dateTime';
 
 const formatCount = (n: number): string => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
@@ -801,7 +802,7 @@ export default function ProfileScreen() {
                     )}
                     {item.session_date && (
                       <Text style={[s.gridDateText, { opacity: 0.75 }]}>
-                        {new Date(item.session_date.split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        {formatSessionDate(item.session_date)}
                       </Text>
                     )}
                   </View>
@@ -1066,7 +1067,7 @@ export default function ProfileScreen() {
           title: sessionSheetItem.session_name ?? 'Session',
           subtitle: [
             sessionSheetItem.surf_break_name,
-            sessionSheetItem.session_date ? new Date(sessionSheetItem.session_date.split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : undefined,
+            sessionSheetItem.session_date ? formatSessionDate(sessionSheetItem.session_date) : undefined,
           ].filter(Boolean).join(' · ') || undefined,
           imageUri: sessionSheetItem.thumbnail,
         } : undefined}
