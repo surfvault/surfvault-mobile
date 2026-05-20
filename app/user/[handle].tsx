@@ -45,6 +45,7 @@ import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
+import { formatSessionDate } from '../../src/helpers/dateTime';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -443,7 +444,7 @@ export default function UserProfileScreen() {
                         )}
                         {item.session_date && (
                           <Text style={[styles.gridDateText, { opacity: 0.75 }]}>
-                            {new Date(item.session_date.split('T')[0] + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {formatSessionDate(item.session_date)}
                           </Text>
                         )}
                       </View>
