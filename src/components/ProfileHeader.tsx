@@ -226,8 +226,10 @@ export default function ProfileHeader({
       )}
 
 
-      {/* Profile tab: break selector + active toggle */}
+      {/* Profile tab: break selector + active toggle. Advertisers have no
+          surf-break location, so the "Set location" bar is hidden for them. */}
       {showActiveToggle ? (
+        isAdvertiser ? null : (
         <View style={s.actionRow}>
           <Pressable
             onPress={showActiveToggle ? onSelectBreak : undefined}
@@ -257,6 +259,7 @@ export default function ProfileHeader({
             </Pressable>
           )}
         </View>
+        )
       ) : (
         <>
         {/* Other user: location bar with active status */}

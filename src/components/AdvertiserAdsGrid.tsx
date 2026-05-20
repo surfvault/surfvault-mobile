@@ -48,6 +48,7 @@ type AdRow = {
   status?: 'pending' | 'approved' | 'rejected' | 'paused' | 'draft';
   is_active?: boolean;
   headline?: string;
+  cta_label?: string | null;
   click_url?: string | null;
   media_url?: string | null;
   hero_media_url?: string | null;
@@ -76,9 +77,11 @@ function pickThumbnailKey(ad: AdRow): string | null {
 export default function AdvertiserAdsGrid({
   handle,
   isSelf,
+  mode = 'grid',
 }: {
   handle: string;
   isSelf?: boolean;
+  mode?: 'grid' | 'list';
 }) {
   const isDark = useColorScheme() === 'dark';
   const trackedPush = useTrackedPush();
@@ -200,23 +203,71 @@ export default function AdvertiserAdsGrid({
     );
   }
 
+  // Shared per-ad derivation so grid + list stay in sync.
+  const adMeta = (ad: AdRow) => {
+    const thumb = pickThumbnailKey(ad);
+    const status = (ad.status ?? 'approved') as NonNullable<AdRow['status']>;
+    const isLive = status === 'approved' && ad.is_active !== false;
+    const onPress = () => {
+      // Self view → open the action sheet for management. Public viewers
+      // tap-through to click_url on approved tiles only.
+      if (isSelf) { setSheetTarget(ad); return; }
+      if (!isLive) return;
+      if (ad.click_url) Linking.openURL(ad.click_url).catch(() => { /* noop */ });
+    };
+    return { thumb, status, isLive, onPress };
+  };
+
   return (
     <>
+      {mode === 'list' ? (
+        <View style={s.listWrap}>
+          {ads.map((ad) => {
+            const { thumb, status, isLive, onPress } = adMeta(ad);
+            return (
+              <Pressable
+                key={ad.id}
+                onPress={onPress}
+                disabled={!isSelf && !isLive}
+                style={[
+                  s.listRow,
+                  { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' },
+                  !isLive && { opacity: 0.85 },
+                ]}
+              >
+                {thumb ? (
+                  <Image source={{ uri: thumb }} style={s.listThumb} contentFit="cover" transition={150} />
+                ) : (
+                  <View style={[s.listThumb, s.tilePlaceholder]}>
+                    <Ionicons name="megaphone-outline" size={24} color={isDark ? '#4b5563' : '#9ca3af'} />
+                  </View>
+                )}
+                <View style={s.listBody}>
+                  <Text style={[s.listHeadline, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                    {ad.headline || 'Untitled campaign'}
+                  </Text>
+                  {ad.cta_label ? (
+                    <Text style={[s.listSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+                      {ad.cta_label}
+                    </Text>
+                  ) : null}
+                  {isSelf && (
+                    <View style={{ marginTop: 6, alignSelf: 'flex-start' }}>
+                      <StatusPill status={status} />
+                    </View>
+                  )}
+                </View>
+                {isSelf && (
+                  <Ionicons name="ellipsis-horizontal" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : (
       <View style={s.grid}>
       {ads.map((ad) => {
-        const thumb = pickThumbnailKey(ad);
-        const status = (ad.status ?? 'approved') as NonNullable<AdRow['status']>;
-        const isLive = status === 'approved' && ad.is_active !== false;
-        const onPress = () => {
-          // Self view → open the action sheet for management. Public
-          // viewers tap-through to click_url on approved tiles only.
-          if (isSelf) {
-            setSheetTarget(ad);
-            return;
-          }
-          if (!isLive) return;
-          if (ad.click_url) Linking.openURL(ad.click_url).catch(() => { /* noop */ });
-        };
+        const { thumb, status, isLive, onPress } = adMeta(ad);
         return (
           <Pressable
             key={ad.id}
@@ -236,9 +287,14 @@ export default function AdvertiserAdsGrid({
               </View>
             )}
 
-            <View style={s.tileTopLeft}>
-              <StatusPill status={status} />
-            </View>
+            {/* Status pill only on the self-view. Public visitors only see
+                approved ads and the profile is already marked SPONSORED, so a
+                per-tile "Sponsored" chip is redundant. */}
+            {isSelf && (
+              <View style={s.tileTopLeft}>
+                <StatusPill status={status} />
+              </View>
+            )}
 
             {ad.headline ? (
               <View style={s.tileBottom} pointerEvents="none">
@@ -251,6 +307,7 @@ export default function AdvertiserAdsGrid({
         );
       })}
       </View>
+      )}
 
       <ActionSheet
         visible={!!sheetTarget && !sheetBusy}
@@ -297,6 +354,26 @@ const s = StyleSheet.create({
     flexWrap: 'wrap',
     gap: GUTTER,
   },
+  listWrap: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  listRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 12,
+    padding: 10,
+  },
+  listThumb: {
+    width: 64,
+    height: 64,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  listBody: { flex: 1, minWidth: 0 },
+  listHeadline: { fontSize: 15, fontWeight: '600' },
+  listSub: { fontSize: 13, marginTop: 2 },
   tile: {
     width: TILE_SIZE,
     height: TILE_SIZE,

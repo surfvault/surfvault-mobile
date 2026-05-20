@@ -103,7 +103,10 @@ export default function CampaignUpload({
   useEffect(() => {
     if (!editingAd) return;
     setHeadline(editingAd.headline ?? '');
-    setBody(editingAd.body ?? '');
+    // Guard against a literal "null"/"undefined" string sneaking in from old
+    // data so the read-only review never renders the word "null".
+    const rawBody = editingAd.body ?? '';
+    setBody(['null', 'undefined'].includes(String(rawBody).trim().toLowerCase()) ? '' : rawBody);
     setClickUrl(editingAd.click_url ?? '');
     setCtaLabel(editingAd.cta_label ?? '');
     setCtaType(editingAd.cta_type === 'tel' ? 'tel' : 'url');
@@ -390,26 +393,29 @@ export default function CampaignUpload({
               onChangeText={setHeadline}
               editable={!readOnly}
               maxLength={80}
-              placeholder="e.g. New 7'2&quot; midlength in stock"
+              placeholder={readOnly ? '' : "e.g. New 7'2\" midlength in stock"}
               placeholderTextColor={muted}
               style={[s.input, { backgroundColor: inputBg, color: text }]}
             />
           </View>
 
-          {/* Body */}
-          <View style={s.field}>
-            <Text style={[s.label, { color: text }]}>Description</Text>
-            <TextInput
-              value={body}
-              onChangeText={setBody}
-              editable={!readOnly}
-              maxLength={240}
-              multiline
-              placeholder="One or two sentences. Shown under the headline."
-              placeholderTextColor={muted}
-              style={[s.input, s.multiline, { backgroundColor: inputBg, color: text }]}
-            />
-          </View>
+          {/* Body — hidden entirely in read-only when there's no description
+              (otherwise the reviewer sees an empty box). */}
+          {!(readOnly && !body.trim()) && (
+            <View style={s.field}>
+              <Text style={[s.label, { color: text }]}>Description</Text>
+              <TextInput
+                value={body}
+                onChangeText={setBody}
+                editable={!readOnly}
+                maxLength={240}
+                multiline
+                placeholder={readOnly ? '' : 'One or two sentences. Shown under the headline.'}
+                placeholderTextColor={muted}
+                style={[s.input, s.multiline, { backgroundColor: inputBg, color: text }]}
+              />
+            </View>
+          )}
 
           {/* Placement */}
           <View style={s.field}>
@@ -449,7 +455,7 @@ export default function CampaignUpload({
               editable={!readOnly}
               keyboardType={ctaType === 'tel' ? 'phone-pad' : 'url'}
               autoCapitalize="none"
-              placeholder={ctaType === 'tel' ? '+1 555 555 5555' : 'https://example.com'}
+              placeholder={readOnly ? '' : (ctaType === 'tel' ? '+1 555 555 5555' : 'https://example.com')}
               placeholderTextColor={muted}
               style={[s.input, { backgroundColor: inputBg, color: text, marginTop: 8 }]}
             />
@@ -458,7 +464,7 @@ export default function CampaignUpload({
               onChangeText={setCtaLabel}
               editable={!readOnly}
               maxLength={32}
-              placeholder="Button text — e.g. Shop now"
+              placeholder={readOnly ? '' : 'Button text — e.g. Shop now'}
               placeholderTextColor={muted}
               style={[s.input, { backgroundColor: inputBg, color: text, marginTop: 8 }]}
             />

@@ -313,12 +313,17 @@ export default function ProfileScreen() {
       // Shapers don't have sessions to refetch — bust the boards cache so
       // ShaperBoardsGrid's getShaperBoards query refires.
       dispatch(rootApi.util.invalidateTags([ApiTag.Boardroom]));
+    } else if (isAdvertiserSelf && (activeTab === 'grid' || activeTab === 'list')) {
+      // Advertisers don't have a sessions query (it's skipped), so calling
+      // refetchSessions() throws "query not started". Bust the ads cache so
+      // AdvertiserAdsGrid's getMyCampaigns query refires instead.
+      dispatch(rootApi.util.invalidateTags([ApiTag.AdPartners]));
     } else {
       setContinuationToken('');
       await refetchSessions();
     }
     setRefreshing(false);
-  }, [activeTab, isShaperSelf, refetchSessions, refetchTagged, dispatch]);
+  }, [activeTab, isShaperSelf, isAdvertiserSelf, refetchSessions, refetchTagged, dispatch]);
 
   // Reset sessions list when the current user changes (logout/login/switch user)
   useEffect(() => {
@@ -716,7 +721,7 @@ export default function ProfileScreen() {
         >
           {listHeader}
           {user?.handle ? (
-            <AdvertiserAdsGrid handle={user.handle} isSelf />
+            <AdvertiserAdsGrid handle={user.handle} isSelf mode={activeTab === 'list' ? 'list' : 'grid'} />
           ) : null}
         </ScrollView>
       ) : (
