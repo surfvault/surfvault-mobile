@@ -43,7 +43,8 @@ import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import HomeSkeleton from '../../src/components/HomeSkeleton';
 import {
-  groupAdsByPartner,
+  // groupAdsByPartner intentionally not imported — Phase B retired
+  // partner-level ad grouping in favor of per-ad media[] carousels.
   interleavePromoGroups,
   zipPromoGroups,
   type FeedRow,
@@ -396,9 +397,15 @@ export default function HomeScreen() {
       ...s,
       _kind: 'shaper' as const,
     }));
-    const adGroups = groupAdsByPartner(ads);
+    // Phase B: each ad is its own promo slot. The carousel inside
+    // SponsoredCard now renders the ad's media[] slides; partner grouping
+    // was retired. Wrap each ad as a single-element "group" so the
+    // interleave helper's group-iteration semantics still apply.
+    const adGroups = ads.map((a: any) => [a]);
     const shaperGroups = shapers.map((s: any) => [s]);
-    return zipPromoGroups(adGroups, shaperGroups);
+    // TEMP: shaper-first so the first promo slot in Discover is a shaper.
+    // Revert to `zipPromoGroups(adGroups, shaperGroups)` to restore ad-first.
+    return zipPromoGroups(shaperGroups, adGroups);
   }, [adsData, nearbyShapersData, followedShapersData, feedType]);
 
   // Interleave alternating ad/shaper groups into the session feed at the
@@ -617,29 +624,9 @@ export default function HomeScreen() {
                           <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
                             {item.name ?? item.handle}
                           </Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
-                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', flexShrink: 1 }]} numberOfLines={1}>
-                              @{item.handle}
-                            </Text>
-                            {userType === 'photographer' && (
-                              <>
-                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
-                              </>
-                            )}
-                            {userType === 'shaper' && (
-                              <>
-                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                <MaterialCommunityIcons name="hammer" size={13} color="#f59e0b" />
-                              </>
-                            )}
-                            {userType && userType !== 'photographer' && userType !== 'shaper' && (
-                              <>
-                                <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
-                              </>
-                            )}
-                          </View>
+                          <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', marginTop: 1 }]} numberOfLines={1}>
+                            @{item.handle}
+                          </Text>
                         </View>
                       </Pressable>
                     );
@@ -680,7 +667,6 @@ export default function HomeScreen() {
                     if (!item) return null;
 
                     if (recent.itemType === 'user' && item.handle) {
-                      const userType = item.user_type;
                       return (
                         <Pressable key={item.id ?? idx} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
                           <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={36} />
@@ -688,23 +674,9 @@ export default function HomeScreen() {
                             <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
                               {item.name ?? item.handle}
                             </Text>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 1 }}>
-                              <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', flexShrink: 1 }]} numberOfLines={1}>
-                                @{item.handle}
-                              </Text>
-                              {userType === 'photographer' && (
-                                <>
-                                  <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                  <Ionicons name="camera-outline" size={13} color={isDark ? '#9ca3af' : '#6b7280'} />
-                                </>
-                              )}
-                              {userType && userType !== 'photographer' && (
-                                <>
-                                  <Text style={{ fontSize: 13, color: isDark ? '#6b7280' : '#9ca3af', marginHorizontal: 4 }}>·</Text>
-                                  <MaterialCommunityIcons name="surfing" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
-                                </>
-                              )}
-                            </View>
+                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', marginTop: 1 }]} numberOfLines={1}>
+                              @{item.handle}
+                            </Text>
                           </View>
                         </Pressable>
                       );
@@ -806,16 +778,15 @@ export default function HomeScreen() {
             const viewable = !hasViewabilityReport || viewableIds.has(row.key);
             if (row.type === 'ad') {
               // Mixed promo stream — first entry's _kind picks the renderer.
-              // Shapers render as a single ShaperFeedCard (one card per
-              // shaper, with their featured boards swipeable inside);
-              // ads render as a SponsoredCard partner-group carousel.
+              // Each ad now occupies its own slot (Phase B per-ad carousels)
+              // — the `row.data` group is always a 1-element array for ads.
               const first = row.data[0];
               if (first?._kind === 'shaper') {
                 return <ShaperFeedCard shaper={first} />;
               }
               return (
                 <SponsoredCard
-                  ads={row.data}
+                  ad={first}
                   placement="content"
                   isViewable={viewable}
                 />

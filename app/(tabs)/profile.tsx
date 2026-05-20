@@ -45,6 +45,7 @@ import ProfileHeader from '../../src/components/ProfileHeader';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
 import SessionCard from '../../src/components/SessionCard';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
+import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
@@ -115,6 +116,7 @@ export default function ProfileScreen() {
   // Tagged + Favorites stay available so shapers can still favorite breaks
   // they shoot near and see sessions they were tagged in.
   const isShaperSelf = user?.user_type === 'shaper';
+  const isAdvertiserSelf = user?.user_type === 'advertiser';
 
   // Session long-press action sheet
   const [sessionSheetVisible, setSessionSheetVisible] = useState(false);
@@ -288,7 +290,7 @@ export default function ProfileScreen() {
 
   const { data: sessionsData, isFetching, refetch: refetchSessions } = useGetUserSessionsQuery(
     { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken },
-    { skip: !user?.handle || isShaperSelf }
+    { skip: !user?.handle || isShaperSelf || isAdvertiserSelf }
   );
 
   // Tagged-in sessions (separate paginated list)
@@ -312,12 +314,17 @@ export default function ProfileScreen() {
       // Shapers don't have sessions to refetch — bust the boards cache so
       // ShaperBoardsGrid's getShaperBoards query refires.
       dispatch(rootApi.util.invalidateTags([ApiTag.Boardroom]));
+    } else if (isAdvertiserSelf && (activeTab === 'grid' || activeTab === 'list')) {
+      // Advertisers don't have a sessions query (it's skipped), so calling
+      // refetchSessions() throws "query not started". Bust the ads cache so
+      // AdvertiserAdsGrid's getMyCampaigns query refires instead.
+      dispatch(rootApi.util.invalidateTags([ApiTag.AdPartners]));
     } else {
       setContinuationToken('');
       await refetchSessions();
     }
     setRefreshing(false);
-  }, [activeTab, isShaperSelf, refetchSessions, refetchTagged, dispatch]);
+  }, [activeTab, isShaperSelf, isAdvertiserSelf, refetchSessions, refetchTagged, dispatch]);
 
   // Reset sessions list when the current user changes (logout/login/switch user)
   useEffect(() => {
@@ -597,7 +604,7 @@ export default function ProfileScreen() {
         profile={profileWithCounts}
         isDark={isDark}
         isSelf
-        showStorage
+        showStorage={user?.user_type !== 'advertiser'}
         showActiveToggle
         onEditProfile={() => trackedPush('/edit-profile')}
         onToggleActive={handleToggleActive}
@@ -698,6 +705,24 @@ export default function ProfileScreen() {
           {listHeader}
           {user?.handle ? (
             <ShaperBoardsGrid handle={user.handle} mode={activeTab} isSelf />
+          ) : null}
+        </ScrollView>
+      ) : isAdvertiserSelf && (activeTab === 'grid' || activeTab === 'list') ? (
+        // Advertiser grid shows their campaign tiles. Self-view returns
+        // every status (pending/approved/rejected/paused) with status
+        // pills, so the advertiser sees submissions immediately after
+        // creating them.
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {listHeader}
+          {user?.handle ? (
+            <AdvertiserAdsGrid handle={user.handle} isSelf mode={activeTab === 'list' ? 'list' : 'grid'} />
           ) : null}
         </ScrollView>
       ) : (
@@ -856,6 +881,8 @@ export default function ProfileScreen() {
                 name={
                   activeTab === 'favorites' ? 'heart-outline'
                   : activeTab === 'tagged'  ? 'pricetag-outline'
+                  : user?.user_type === 'advertiser' ? 'megaphone-outline'
+                  : user?.user_type === 'shaper' ? 'grid-outline'
                   : 'camera-outline'
                 }
                 size={40}
@@ -864,6 +891,8 @@ export default function ProfileScreen() {
               <Text style={{ color: '#9ca3af', marginTop: 8, fontSize: 14 }}>
                 {activeTab === 'favorites' ? 'No favorites yet'
                 : activeTab === 'tagged'  ? "You haven't been tagged in any sessions yet"
+                : user?.user_type === 'advertiser' ? 'No advertisements'
+                : user?.user_type === 'shaper' ? 'No boards yet'
                 : 'No sessions yet'}
               </Text>
             </View>

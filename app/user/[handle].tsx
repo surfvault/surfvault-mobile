@@ -43,6 +43,7 @@ import { AccessBanner, PrivateGalleryCard, BlockedGalleryCard } from '../../src/
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
+import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import UserTypeBadge from '../../src/components/UserTypeBadge';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 
@@ -374,6 +375,36 @@ export default function UserProfileScreen() {
             keyExtractor={() => 'shaper-content'}
             renderItem={() => (
               <ShaperBoardsGrid
+                handle={handle ?? ''}
+                mode={activeTab}
+                isSelf={!!currentUser?.handle && handle === currentUser.handle}
+              />
+            )}
+            ListHeaderComponent={
+              <>
+                <UserProfileHeader />
+                <View style={[styles.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+                  <Pressable onPress={() => setActiveTab('grid')} style={[styles.tabBtn, activeTab === 'grid' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'grid' ? 'grid' : 'grid-outline'} size={22} color={activeTab === 'grid' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                  <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
+                    <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                  </Pressable>
+                </View>
+              </>
+            }
+            showsVerticalScrollIndicator={false}
+          />
+        ) : profile?.user_type === 'advertiser' ? (
+          // Advertisers don't have surf sessions — render their campaign
+          // gallery. Backend gates the response: public viewers see only
+          // approved+active; advertiser-self (matched via JWT) sees all
+          // statuses with status pills.
+          <FlatList
+            data={[1] as const}
+            keyExtractor={() => 'advertiser-content'}
+            renderItem={() => (
+              <AdvertiserAdsGrid
                 handle={handle ?? ''}
                 mode={activeTab}
                 isSelf={!!currentUser?.handle && handle === currentUser.handle}

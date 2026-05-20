@@ -10,10 +10,11 @@ export type FeedRow<T, A> =
 export const AD_EVERY_N_ITEMS = 4;
 
 /**
- * Group a flat list of ads by `ad_partner_id` so each partner occupies a
- * single feed slot (rendered as a swipeable carousel on the client). Preserves
- * first-appearance order of each partner so the server's weighted shuffle /
- * geo-boost ordering stays meaningful.
+ * @deprecated Phase B (2026-05-19) — each ad now carries its own media[]
+ * carousel inside SponsoredCard, so partner-level grouping is no longer
+ * useful. Kept temporarily as a no-op (wraps each ad in a 1-element array)
+ * so any in-progress code paths still compile. Remove once all callers
+ * migrate to passing individual ads directly.
  */
 export function groupAdsByPartner<A extends { id: string; ad_partner_id?: string }>(ads: A[]): A[][] {
     const groups = new Map<string, A[]>();
@@ -72,7 +73,11 @@ export function interleavePromoGroups<T extends { id?: string; session_id?: stri
         if (shouldInsertAd && adCursor < groups.length) {
             const group = groups[adCursor];
             if (group.length) {
-                const keyBase = group[0].ad_partner_id ?? group[0].id;
+                // Key by the row id (unique per ad/shaper). Partner grouping is
+            // retired, so two ads from the same advertiser are separate slots —
+            // keying by ad_partner_id would collide and trigger React's
+            // duplicate-key warning.
+            const keyBase = group[0].id ?? group[0].ad_partner_id;
                 out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
                 adCursor += 1;
             }
@@ -84,7 +89,11 @@ export function interleavePromoGroups<T extends { id?: string; session_id?: stri
     while (adCursor < groups.length) {
         const group = groups[adCursor];
         if (group.length) {
-            const keyBase = group[0].ad_partner_id ?? group[0].id;
+            // Key by the row id (unique per ad/shaper). Partner grouping is
+            // retired, so two ads from the same advertiser are separate slots —
+            // keying by ad_partner_id would collide and trigger React's
+            // duplicate-key warning.
+            const keyBase = group[0].id ?? group[0].ad_partner_id;
             out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
         }
         adCursor += 1;

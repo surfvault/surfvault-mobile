@@ -81,6 +81,35 @@ const adminApi = rootApi.injectEndpoints({
         body: payload,
       }),
     }),
+    // Single-ad detail for the read-only review screen (opened from a
+    // newCampaignSubmission notification). Returns the full ad with media[]
+    // + targeting — same shape as the advertiser /campaigns rows so
+    // CampaignUpload can render it in readOnly mode.
+    getAdminAd: builder.query({
+      providesTags: [ApiTag.AdPartners],
+      query: ({ adId }: { adId: string }) => ({
+        url: `/admin/ads/${adId}`,
+        method: 'GET',
+      }),
+    }),
+    // Campaign approvals (admin moderation queue) — same endpoints the web
+    // admin Campaigns tab uses. Mobile only surfaces these via the inline
+    // Approve/Reject actions on newCampaignSubmission notifications.
+    approveAdminAd: builder.mutation({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId }: { adId: string }) => ({
+        url: `/admin/ads/${adId}/approve`,
+        method: 'POST',
+      }),
+    }),
+    rejectAdminAd: builder.mutation({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId, rejectionReason }: { adId: string; rejectionReason: string }) => ({
+        url: `/admin/ads/${adId}/reject`,
+        method: 'POST',
+        body: { rejection_reason: rejectionReason },
+      }),
+    }),
   }),
   overrideExisting: false,
 });
@@ -94,6 +123,9 @@ export const {
   useCreateAdMediaPresignedUrlsMutation,
   useUpsertAdsMutation,
   useUpdateAdPartnerMutation,
+  useGetAdminAdQuery,
+  useApproveAdminAdMutation,
+  useRejectAdminAdMutation,
 } = adminApi;
 
 export { adminApi };

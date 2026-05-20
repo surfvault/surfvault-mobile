@@ -288,6 +288,102 @@ const surfApi = rootApi.injectEndpoints({
         },
       }),
     }),
+    // Self-service presigned-URL minting for advertiser creative uploads.
+    // Mirrors web/endpoints/surf.js. Backend scopes to caller via JWT.
+    createMyAdMediaPresignedUrls: builder.mutation<
+      { results: { idMappedPresignedUrls: { file_uuid: string; url: string; media_url: string }[] } },
+      { files: { file_uuid: string; file_type: string }[] }
+    >({
+      query: (payload) => ({
+        url: '/ads/media-presigned-urls',
+        method: 'POST',
+        body: payload,
+      }),
+    }),
+    // Public ad gallery for an advertiser profile. Returns only approved
+    // + currently-active ads. Self uses `getMyCampaigns` below.
+    getAdvertiserAds: builder.query<any, { handle: string }>({
+      providesTags: [ApiTag.AdPartners],
+      query: ({ handle }) => ({
+        url: `/advertisers/${handle}/ads`,
+        method: 'GET',
+      }),
+    }),
+    // Authed list of the caller's OWN campaigns — all statuses. Used on
+    // the advertiser's self-view of their profile gallery so they see
+    // submissions immediately with status badges. Resource-scoped name
+    // (no me/my/mine), ownership enforced server-side via JWT.
+    getMyCampaigns: builder.query<any, void>({
+      providesTags: [ApiTag.AdPartners],
+      query: () => ({
+        url: '/campaigns',
+        method: 'GET',
+      }),
+    }),
+    // Self-service ad edit. Server applies the re-queue rule: any
+    // creative/copy change flips status back to 'pending'.
+    updateMyAd: builder.mutation<any, { adId: string; payload: any }>({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId, payload }) => ({
+        url: `/ads/${adId}`,
+        method: 'PATCH',
+        body: payload,
+      }),
+    }),
+    // Hard delete, restricted server-side to draft/pending/rejected.
+    deleteMyAd: builder.mutation<any, { adId: string }>({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId }) => ({
+        url: `/ads/${adId}`,
+        method: 'DELETE',
+      }),
+    }),
+    pauseMyAd: builder.mutation<any, { adId: string }>({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId }) => ({
+        url: `/ads/${adId}/pause`,
+        method: 'POST',
+      }),
+    }),
+    resumeMyAd: builder.mutation<any, { adId: string }>({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: ({ adId }) => ({
+        url: `/ads/${adId}/resume`,
+        method: 'POST',
+      }),
+    }),
+    // Self-service ad creation. Status forced to 'pending' server-side so
+    // every submission goes through admin moderation. Invalidates
+    // AdPartners so the advertiser's profile gallery refetches and
+    // immediately shows the new submission with its "Pending review" pill.
+    createMyAd: builder.mutation<
+      { results: { id: string; status: string } },
+      {
+        placement_key: 'sidebar' | 'content';
+        media_type: 'image' | 'video';
+        media_urls?: string[];
+        media_url?: string;
+        thumbnail_index?: number;
+        hero_media_url?: string | null;
+        click_url?: string | null;
+        headline: string;
+        body?: string | null;
+        cta_label?: string | null;
+        cta_type?: 'url' | 'tel';
+        starts_at?: string | null;
+        ends_at?: string | null;
+        daily_impression_cap_per_user?: number;
+        show_on_discover?: boolean;
+        surf_break_ids?: string[];
+      }
+    >({
+      invalidatesTags: [ApiTag.AdPartners],
+      query: (payload) => ({
+        url: '/ads',
+        method: 'POST',
+        body: payload,
+      }),
+    }),
     reportAd: builder.mutation({
       query: ({ adId, reason, details }: { adId: string; reason: string; details?: string }) => ({
         url: `/ads/${adId}/report`,
@@ -454,6 +550,14 @@ export const {
   useGetSessionPhotosQuery,
   useGetAdsQuery,
   useRecordAdImpressionMutation,
+  useCreateMyAdMediaPresignedUrlsMutation,
+  useCreateMyAdMutation,
+  useUpdateMyAdMutation,
+  useDeleteMyAdMutation,
+  usePauseMyAdMutation,
+  useResumeMyAdMutation,
+  useGetAdvertiserAdsQuery,
+  useGetMyCampaignsQuery,
   useReportAdMutation,
   useGetSurfBreakWithLatestSessionsQuery,
   useGetSurfBreakSessionsQuery,

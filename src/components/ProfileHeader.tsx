@@ -63,6 +63,7 @@ export default function ProfileHeader({
   const hasActiveNote = !!profile?.status_note && isNoteActive(profile?.status_note_set_at);
   const userType = profile?.user_type ?? profile?.type;
   const isShaper = userType === 'shaper';
+  const isAdvertiser = userType === 'advertiser';
   // For shapers we replace the spots stat with their board count. RTK Query
   // dedupes against the same handle, so this re-uses the gallery's fetch
   // (no extra network call when the boards grid is also mounted).
@@ -113,11 +114,26 @@ export default function ProfileHeader({
               <Text style={[s.nameText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
                 {profile?.name ?? profile?.handle ?? ''}
               </Text>
-              <View style={[s.activeDot, {
-                backgroundColor: profile?.active ? '#10b981' : 'transparent',
-                borderWidth: profile?.active ? 0 : 1,
-                borderColor: '#9ca3af',
-              }]} />
+              {userType === 'photographer' && (
+                <View style={[s.activeDot, {
+                  backgroundColor: profile?.active ? '#10b981' : 'transparent',
+                  borderWidth: profile?.active ? 0 : 1,
+                  borderColor: '#9ca3af',
+                }]} />
+              )}
+              {/* Advertisers get a "Sponsored" text pill instead of a type
+                  badge glyph — unambiguous brand-account signal. Matches the
+                  in-feed sponsored card pill (SponsoredCard.tsx) styling. */}
+              {isAdvertiser && (
+                <View style={[s.sponsoredPill, {
+                  backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+                  borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
+                }]}>
+                  <Text style={[s.sponsoredPillText, { color: isDark ? '#d1d5db' : '#4b5563' }]}>
+                    Sponsored
+                  </Text>
+                </View>
+              )}
             </View>
             {(profile?.instagram || profile?.youtube || profile?.website) && (
               <View style={s.socialIcons}>
@@ -154,9 +170,11 @@ export default function ProfileHeader({
                   <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
                     {isShaper
                       ? boardsCount
-                      : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
+                      : isAdvertiser
+                        ? (profile?.adsCount ?? profile?.ads_count ?? 0)
+                        : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
                   </Text>
-                  <Text style={s.statLabel}>{isShaper ? 'boards' : 'spots'}</Text>
+                  <Text style={s.statLabel}>{isShaper ? 'boards' : isAdvertiser ? 'ads' : 'spots'}</Text>
                 </View>
                 <Pressable
                   onPress={statsTappable ? () => onViewStats?.('followers') : undefined}
@@ -208,8 +226,10 @@ export default function ProfileHeader({
       )}
 
 
-      {/* Profile tab: break selector + active toggle */}
+      {/* Profile tab: break selector + active toggle. Advertisers have no
+          surf-break location, so the "Set location" bar is hidden for them. */}
       {showActiveToggle ? (
+        isAdvertiser ? null : (
         <View style={s.actionRow}>
           <Pressable
             onPress={showActiveToggle ? onSelectBreak : undefined}
@@ -239,6 +259,7 @@ export default function ProfileHeader({
             </Pressable>
           )}
         </View>
+        )
       ) : (
         <>
         {/* Other user: location bar with active status */}
@@ -265,9 +286,10 @@ export default function ProfileHeader({
         )}
         {!isSelf && (
         <View style={s.actionRow}>
-          {/* Follow — hidden on private profiles (matches web) and when the
-              caller passes no handler (e.g. blocked profile). */}
-          {profile?.access !== 'private' && onFollow && (
+          {/* Follow — hidden on private profiles (matches web), when the caller
+              passes no handler (e.g. blocked profile), and on advertiser
+              accounts (following them surfaces no content; Message stays). */}
+          {profile?.access !== 'private' && onFollow && !isAdvertiser && (
           <Pressable
             onPress={onFollow}
             disabled={isFollowLoading}
@@ -377,6 +399,18 @@ const s = StyleSheet.create({
   nameAndDot: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   nameText: { fontSize: 15, fontWeight: '700', flexShrink: 1 },
   activeDot: { width: 8, height: 8, borderRadius: 4 },
+  sponsoredPill: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  sponsoredPillText: {
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   socialIcons: { flexDirection: 'row', alignItems: 'center', gap: 14 },
 
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingRight: 16 },

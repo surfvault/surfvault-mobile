@@ -32,7 +32,8 @@ import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
 import LocalPhotographersRail from '../../src/components/LocalPhotographersRail';
 import {
-  groupAdsByPartner,
+  // groupAdsByPartner intentionally not imported — Phase B retired
+  // partner-level ad grouping; each ad is its own promo slot.
   interleavePromoGroups,
   zipPromoGroups,
   type FeedRow,
@@ -129,7 +130,10 @@ export default function SurfBreakDetailScreen() {
   const feedAds = useMemo(() => {
     const ads = breakAds.map((a: any) => ({ ...a, _kind: 'ad' as const }));
     const shapers = breakShapers.map((s: any) => ({ ...s, _kind: 'shaper' as const }));
-    const adGroups = groupAdsByPartner(ads);
+    // Phase B: per-ad carousels — each ad is its own promo slot (single-
+    // element group), no partner-level grouping. Cadence is still shared
+    // between ads + shapers via zipPromoGroups.
+    const adGroups = ads.map((a: any) => [a]);
     const shaperGroups = shapers.map((s: any) => [s]);
     return zipPromoGroups(adGroups, shaperGroups);
   }, [breakAds, breakShapers]);
@@ -250,7 +254,7 @@ export default function SurfBreakDetailScreen() {
                 }
                 return (
                   <SponsoredCard
-                    ads={row.data}
+                    ad={first}
                     placement="content"
                     surfBreakId={breakData?.id}
                   />

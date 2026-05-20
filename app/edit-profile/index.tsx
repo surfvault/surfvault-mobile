@@ -12,11 +12,13 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Modal,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import MapView, { Marker, PROVIDER_DEFAULT, type Region, type LatLng } from 'react-native-maps';
 import * as ImagePicker from 'expo-image-picker';
 let ImageManipulator: any = null;
 try { ImageManipulator = require('expo-image-manipulator'); } catch {}
@@ -28,6 +30,7 @@ import {
   useUpdateUserHandleMutation,
   useDoesHandleExistQuery,
   useGetPopularTagsQuery,
+  useUpdateMyAdPartnerMutation,
 } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
 
@@ -36,10 +39,12 @@ export default function EditProfileScreen() {
   const smartBack = useSmartBack();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
   const { user } = useUser();
 
   const [updateMeta, { isLoading: saving }] = useUpdateUserMetaDataMutation();
   const [updateHandle] = useUpdateUserHandleMutation();
+  const [updateMyAdPartner, { isLoading: savingAdPartner }] = useUpdateMyAdPartnerMutation();
 
   // Form state
   const [name, setName] = useState('');
@@ -53,6 +58,22 @@ export default function EditProfileScreen() {
   const [tagInput, setTagInput] = useState('');
   const [profilePicUri, setProfilePicUri] = useState<string | null>(null);
   const [profilePicFile, setProfilePicFile] = useState<any>(null);
+
+  // Advertiser-only — backs the satellite ad_partners row. getSelf inlines
+  // it as `user.adPartner`. Logo upload is deferred (needs presigned-URL
+  // plumbing on a self-service path); the user's avatar above doubles as
+  // the brand logo for now.
+  const [companyName, setCompanyName] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [lat, setLat] = useState('');
+  const [lon, setLon] = useState('');
+  const [radiusKm, setRadiusKm] = useState('');
+
+  // Map picker for the business pin. `pendingPin` holds the in-modal selection
+  // until the advertiser confirms; only then does it commit to lat/lon.
+  const [mapPickerVisible, setMapPickerVisible] = useState(false);
+  const [pendingPin, setPendingPin] = useState<LatLng | null>(null);
 
   // Handle validation
   const [handleChanged, setHandleChanged] = useState(false);
@@ -77,6 +98,8 @@ export default function EditProfileScreen() {
   // Shapers are always public; the access toggle is hidden for them and
   // enforced server-side in services/user/handler.ts.
   const isShaper = userType === 'shaper';
+  const isAdvertiser = userType === 'advertiser';
+  const canEditAccess = userType === 'photographer' || userType === 'surfer';
 
   // Initialize form from user data
   useEffect(() => {
@@ -90,6 +113,14 @@ export default function EditProfileScreen() {
       setIsPrivate(user.access === 'private');
       setTags((user.tags as string[]) ?? []);
       setProfilePicUri(user.picture ?? null);
+
+      const ap = (user as any)?.adPartner;
+      setCompanyName(ap?.companyName ?? '');
+      setContactName(ap?.contactName ?? '');
+      setPhoneNumber(ap?.phoneNumber ?? '');
+      setLat(ap?.coordinates?.lat != null ? String(ap.coordinates.lat) : '');
+      setLon(ap?.coordinates?.lon != null ? String(ap.coordinates.lon) : '');
+      setRadiusKm(ap?.targetRadiusKm != null ? String(ap.targetRadiusKm) : '');
     }
   }, [user]);
 
@@ -184,8 +215,57 @@ export default function EditProfileScreen() {
       }
     }
 
+    // Advertiser-only ad-partner upsert. Diff against the snapshot on
+    // user.adPartner; only send what changed. Coordinates flatten lat/lon
+    // back into the jsonb shape the backend expects.
+    if (isAdvertiser) {
+      const ap = (user as any)?.adPartner ?? {};
+      const trimOrNull = (v: string) => {
+        const s = (v ?? '').trim();
+        return s.length ? s : null;
+      };
+      const adPartnerPayload: Record<string, any> = {};
+
+      if (companyName.trim() && companyName.trim() !== (ap.companyName ?? '')) {
+        adPartnerPayload.company_name = companyName.trim();
+      }
+      if (contactName !== (ap.contactName ?? '')) {
+        adPartnerPayload.contact_name = trimOrNull(contactName);
+      }
+      if (phoneNumber !== (ap.phoneNumber ?? '')) {
+        adPartnerPayload.phone_number = trimOrNull(phoneNumber);
+      }
+      const curLat = ap.coordinates?.lat != null ? String(ap.coordinates.lat) : '';
+      const curLon = ap.coordinates?.lon != null ? String(ap.coordinates.lon) : '';
+      if (lat !== curLat || lon !== curLon) {
+        const latNum = parseFloat(lat);
+        const lonNum = parseFloat(lon);
+        if (Number.isFinite(latNum) && Number.isFinite(lonNum)) {
+          adPartnerPayload.coordinates = { lat: latNum, lon: lonNum };
+        } else if (lat === '' && lon === '') {
+          adPartnerPayload.coordinates = {};
+        }
+      }
+      const curRadius = ap.targetRadiusKm != null ? String(ap.targetRadiusKm) : '';
+      if (radiusKm !== curRadius) {
+        const r = parseInt(radiusKm, 10);
+        if (Number.isFinite(r) && r > 0) {
+          adPartnerPayload.target_radius_km = r;
+        }
+      }
+
+      if (Object.keys(adPartnerPayload).length > 0) {
+        try {
+          await updateMyAdPartner(adPartnerPayload).unwrap();
+        } catch {
+          Alert.alert('Error', 'Failed to save business details.');
+          return;
+        }
+      }
+    }
+
     smartBack();
-  }, [user, name, bio, instagram, youtube, website, isPrivate, tags, handle, handleChanged, isHandleValid, handleExists, profilePicFile, updateMeta, updateHandle, smartBack]);
+  }, [user, name, bio, instagram, youtube, website, isPrivate, tags, handle, handleChanged, isHandleValid, handleExists, profilePicFile, isAdvertiser, companyName, contactName, phoneNumber, lat, lon, radiusKm, updateMeta, updateHandle, updateMyAdPartner, smartBack]);
 
   const inputStyle = (isDark: boolean) => [
     s.input,
@@ -203,8 +283,8 @@ export default function EditProfileScreen() {
           </Pressable>
         }
         right={
-          <Pressable onPress={handleSave} disabled={saving} hitSlop={8}>
-            {saving ? (
+          <Pressable onPress={handleSave} disabled={saving || savingAdPartner} hitSlop={8}>
+            {saving || savingAdPartner ? (
               <ActivityIndicator size="small" color="#0ea5e9" />
             ) : (
               <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Save</Text>
@@ -214,7 +294,12 @@ export default function EditProfileScreen() {
       />
       <SafeAreaView style={[s.container, { backgroundColor: isDark ? '#000000' : '#fff' }]} edges={[]}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={s.scroll}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            contentContainerStyle={s.scroll}
+          >
 
             {/* Profile Picture */}
             <View style={s.picSection}>
@@ -290,6 +375,99 @@ export default function EditProfileScreen() {
                 {bio.length}/300
               </Text>
             </View>
+
+            {/* Business (advertiser only) — populates the satellite
+                ad_partners row via PATCH /user/ad-partner. Logo upload is
+                deferred; the avatar above doubles as the brand logo. */}
+            {isAdvertiser && (
+              <>
+                <View style={s.field}>
+                  <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>Company name</Text>
+                  <TextInput
+                    value={companyName}
+                    onChangeText={setCompanyName}
+                    placeholder="Your brand name"
+                    placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                    style={inputStyle(isDark)}
+                  />
+                </View>
+
+                <View style={s.field}>
+                  <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>Contact name</Text>
+                  <TextInput
+                    value={contactName}
+                    onChangeText={setContactName}
+                    placeholder="Who we reach out to"
+                    placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                    style={inputStyle(isDark)}
+                  />
+                </View>
+
+                <View style={s.field}>
+                  <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>Phone number</Text>
+                  <TextInput
+                    value={phoneNumber}
+                    onChangeText={setPhoneNumber}
+                    placeholder="+1 555 555 5555"
+                    placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                    keyboardType="phone-pad"
+                    style={inputStyle(isDark)}
+                  />
+                </View>
+
+                <View style={s.field}>
+                  <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>Map location</Text>
+                  <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af', marginBottom: 8 }}>
+                    Drop a pin where your business is. It shows on the SurfVault map so nearby surfers can find you (e.g. a venue, shop, or event). Leave it unset to stay off the map.
+                  </Text>
+                  {(() => {
+                    const latNum = parseFloat(lat);
+                    const lonNum = parseFloat(lon);
+                    const hasPin = Number.isFinite(latNum) && Number.isFinite(lonNum);
+                    const openPicker = () => {
+                      setPendingPin(hasPin ? { latitude: latNum, longitude: lonNum } : null);
+                      setMapPickerVisible(true);
+                    };
+                    return (
+                      <>
+                        {/* Inline preview — pointerEvents none so it doesn't
+                            steal scroll/taps; the wrapping Pressable opens the
+                            full-screen picker to set/move the pin. */}
+                        <Pressable onPress={openPicker} style={s.mapPreviewWrap}>
+                          <MapView
+                            pointerEvents="none"
+                            provider={PROVIDER_DEFAULT}
+                            style={StyleSheet.absoluteFill}
+                            region={{
+                              latitude: hasPin ? latNum : 20,
+                              longitude: hasPin ? lonNum : 0,
+                              latitudeDelta: hasPin ? 0.02 : 100,
+                              longitudeDelta: hasPin ? 0.02 : 100,
+                            } as Region}
+                          >
+                            {hasPin && <Marker coordinate={{ latitude: latNum, longitude: lonNum }} />}
+                          </MapView>
+                          <View style={s.mapPreviewBadge}>
+                            <Ionicons name="location" size={13} color="#fff" />
+                            <Text style={s.mapPreviewBadgeText}>{hasPin ? 'Edit location' : 'Set location'}</Text>
+                          </View>
+                        </Pressable>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+                          <Text style={{ fontSize: 12, color: isDark ? '#9ca3af' : '#6b7280', flex: 1 }} numberOfLines={1}>
+                            {hasPin ? `Pinned at ${latNum.toFixed(5)}, ${lonNum.toFixed(5)}` : 'No location set'}
+                          </Text>
+                          {hasPin && (
+                            <Pressable onPress={() => { setLat(''); setLon(''); }} hitSlop={8}>
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: '#0ea5e9' }}>Clear</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      </>
+                    );
+                  })()}
+                </View>
+              </>
+            )}
 
             {/* Tags (photographer only) */}
             {isPhotographer && (
@@ -384,8 +562,8 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Privacy — hidden for shapers (always public). */}
-            {!isShaper && (
+            {/* Privacy — only surfers/photographers can toggle. Shapers always public; other types (e.g. advertisers) hidden. */}
+            {canEditAccess && (
               <View style={s.field}>
                 <View style={s.switchRow}>
                   <View style={{ flex: 1 }}>
@@ -415,6 +593,67 @@ export default function EditProfileScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      {/* Business-location map picker — tap the map to drop/move the pin,
+          then confirm to commit lat/lon. */}
+      <Modal
+        visible={mapPickerVisible}
+        animationType="slide"
+        onRequestClose={() => setMapPickerVisible(false)}
+      >
+        {/* Plain View (not SafeAreaView) — react-native-safe-area-context
+            doesn't resolve insets inside a RN Modal, so we pad the header with
+            the insets captured from the parent provider instead. */}
+        <View style={{ flex: 1, backgroundColor: isDark ? '#000' : '#fff' }}>
+          <View style={[s.mapPickerHeader, { paddingTop: insets.top + 12, borderBottomColor: isDark ? '#1f2937' : '#e5e7eb', borderBottomWidth: StyleSheet.hairlineWidth }]}>
+            <Pressable onPress={() => setMapPickerVisible(false)} hitSlop={12}>
+              <Text style={{ fontSize: 16, fontWeight: '600', color: isDark ? '#fff' : '#111827' }}>Cancel</Text>
+            </Pressable>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: isDark ? '#fff' : '#111827' }}>
+              Business location
+            </Text>
+            <Pressable
+              onPress={() => {
+                if (pendingPin) {
+                  setLat(pendingPin.latitude.toFixed(6));
+                  setLon(pendingPin.longitude.toFixed(6));
+                }
+                setMapPickerVisible(false);
+              }}
+              disabled={!pendingPin}
+              hitSlop={8}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '700', color: pendingPin ? '#0ea5e9' : (isDark ? '#374151' : '#d1d5db') }}>
+                Done
+              </Text>
+            </Pressable>
+          </View>
+          <MapView
+            // Remount on each open so initialRegion re-centers on the current
+            // pin (RN Modal keeps children mounted, so without this the region
+            // would only apply the first time the picker opens).
+            key={mapPickerVisible ? 'map-open' : 'map-closed'}
+            provider={PROVIDER_DEFAULT}
+            style={{ flex: 1 }}
+            initialRegion={{
+              latitude: pendingPin?.latitude ?? 20,
+              longitude: pendingPin?.longitude ?? 0,
+              latitudeDelta: pendingPin ? 0.05 : 80,
+              longitudeDelta: pendingPin ? 0.05 : 80,
+            } as Region}
+            onPress={(e) => setPendingPin(e.nativeEvent.coordinate)}
+          >
+            {pendingPin && <Marker coordinate={pendingPin} />}
+          </MapView>
+          <View style={[s.mapPickerFooter, { backgroundColor: isDark ? '#000' : '#fff', paddingBottom: insets.bottom + 14 }]}>
+            <Text style={{ fontSize: 13, color: isDark ? '#9ca3af' : '#6b7280', textAlign: 'center' }}>
+              {pendingPin
+                ? `Pinned at ${pendingPin.latitude.toFixed(5)}, ${pendingPin.longitude.toFixed(5)}`
+                : 'Tap the map to drop your business pin (zoom in for accuracy).'}
+            </Text>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -467,5 +706,31 @@ const s = StyleSheet.create({
     flexDirection: 'row', alignItems: 'flex-start',
     borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8,
     marginTop: 8,
+  },
+  mapPreviewWrap: {
+    height: 160,
+    borderRadius: 12,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  mapPreviewBadge: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(14,165,233,0.92)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  mapPreviewBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  mapPickerHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+  },
+  mapPickerFooter: {
+    paddingHorizontal: 16, paddingVertical: 14,
   },
 });

@@ -108,6 +108,14 @@ export {
   useDoesSurfBreakExistQuery,
   useGetAdsQuery,
   useRecordAdImpressionMutation,
+  useCreateMyAdMediaPresignedUrlsMutation,
+  useCreateMyAdMutation,
+  useUpdateMyAdMutation,
+  useDeleteMyAdMutation,
+  usePauseMyAdMutation,
+  useResumeMyAdMutation,
+  useGetAdvertiserAdsQuery,
+  useGetMyCampaignsQuery,
   useReportAdMutation,
   useGetLatestSessionsQuery,
   useGetSessionGroupsQuery,
@@ -161,6 +169,7 @@ export {
   useUnblockUserMutation,
   useGetUserBlocksQuery,
   useReportUserMutation,
+  useUpdateMyAdPartnerMutation,
 } from './apis/endpoints/user';
 
 export {
@@ -176,4 +185,7 @@ export {
   useGetAdminUsersQuery,
   useUpdateAdPartnerMutation,
   useUpsertAdsMutation,
+  useGetAdminAdQuery,
+  useApproveAdminAdMutation,
+  useRejectAdminAdMutation,
 } from './apis/endpoints/admin';
