@@ -19,12 +19,18 @@ import {
   PanResponder,
   RefreshControl,
   Switch,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
+import * as SecureStore from 'expo-secure-store';
+import Constants from 'expo-constants';
+import { getOrCreateDeviceId, getDevicePlatform } from '../../src/helpers/deviceId';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
@@ -48,6 +54,8 @@ import {
   useCreateSurfSessionViewReportMutation,
   useGetAccessRequestQuery,
   useRequestAccessToUserMutation,
+  useFollowUserMutation,
+  useRegisterDeviceMutation,
 } from '../../src/store';
 import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ImageViewing from 'react-native-image-viewing';
@@ -61,12 +69,18 @@ import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermiss
 import { useUpload } from '../../src/context/UploadContext';
 import { generateUUID } from '../../src/helpers/uuid';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
+import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photoTimestamps';
 import { getViewerHash } from '../../src/helpers/viewerHash';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SessionSkeleton from '../../src/components/SessionSkeleton';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 
 const FETCH_AMOUNT = 30;
+
+// Per-target cooldown so the post-request follow/notify prompt doesn't nag on
+// repeat requests to the same photographer.
+const POST_REQUEST_PROMPT_COOLDOWN_DAYS = 7;
+const postRequestPromptKey = (targetUserId: string) => `post_request_prompt_dismissed_at:${targetUserId}`;
 
 // Module-level gate: one view-report per session id per app launch
 const viewedSessionIds = new Set<string>();
@@ -171,6 +185,8 @@ export default function SessionDetailScreen() {
 
   // Mutations
   const [requestAccessToPhotos] = useRequestAccessToSurfMediaMutation();
+  const [followUser] = useFollowUserMutation();
+  const [registerDevice] = useRegisterDeviceMutation();
   const [downloadSurfMedia] = useDownloadSurfMediaMutation();
   const [deleteSurfMedia] = useDeleteSurfMediaMutation();
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
@@ -195,13 +211,6 @@ export default function SessionDetailScreen() {
     limit: FETCH_AMOUNT,
   });
   const [refreshing, setRefreshing] = useState(false);
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    seenMediaRef.current = new Set();
-    prevInitialFingerprintRef.current = null;
-    try { await refetch(); } catch {}
-    setRefreshing(false);
-  }, [refetch]);
 
   const session = sessionData?.results?.session;
   const initialMedia = sessionData?.results?.media ?? [];
@@ -311,7 +320,7 @@ export default function SessionDetailScreen() {
     (activeGroupId !== null) || (!!continuationToken)
   );
 
-  const { data: morePhotos, isFetching: loadingMore } = useGetSessionPhotosQuery(
+  const { data: morePhotos, isFetching: loadingMore, refetch: refetchPhotos } = useGetSessionPhotosQuery(
     {
       sessionId: session?.id ?? '',
       limit: FETCH_AMOUNT,
@@ -357,6 +366,67 @@ export default function SessionDetailScreen() {
       nextTokenRef.current = '';
     }
   }, [loadingMore]);
+
+  // Pull-to-refresh returns the user to the top, so fully reset pagination
+  // regardless of how far they had scrolled or whether a group filter is active.
+  // State is rebuilt directly from the refetch result rather than relying on the
+  // initial-load effect: RTK structural sharing can keep sessionData's reference
+  // stable when the data is unchanged (the common refresh case), so that effect
+  // would NOT re-run — which previously left the cursor stuck and scroll dead.
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      if (activeGroupId === null) {
+        // All view: page 1 + the next cursor live on getSession.
+        const res: any = await refetch().unwrap();
+        const media: any[] = res?.results?.media ?? [];
+        const nextToken: string = res?.results?.continuationToken ?? '';
+        seenMediaRef.current = new Set();
+        const deduped = media.filter((m: any) => {
+          const key = m.id ?? m.thumbnail;
+          if (!key || seenMediaRef.current.has(key)) return false;
+          seenMediaRef.current.add(key);
+          return true;
+        });
+        prevInitialFingerprintRef.current = media.map((m: any) => m?.id).join(',');
+        shouldReplaceRef.current = false;
+        nextTokenRef.current = nextToken; // page 2 loads on the first scroll
+        setSessionMedia(deduped);
+        setContinuationToken(''); // keep the paginated query idle until scroll
+      } else {
+        // Group view: every page comes from the paginated query. Refresh header
+        // metadata first (initial-load effect ignores it while a group is active).
+        await refetch().unwrap().catch(() => {});
+        if (continuationToken !== '') {
+          // Not at page 1. Pointing args back to '' targets group page 1; the
+          // paginated effect rebuilds the list because switching args always
+          // resolves to that cache entry's (different) result reference.
+          seenMediaRef.current = new Set();
+          nextTokenRef.current = '';
+          shouldReplaceRef.current = true;
+          setContinuationToken('');
+        } else {
+          // Already at page 1: args won't change, so rebuild directly from the
+          // refetch result — structural sharing can keep morePhotos' reference
+          // stable, which would otherwise leave the paginated effect dormant.
+          const res: any = await refetchPhotos().unwrap();
+          const media: any[] = res?.results?.media ?? [];
+          const nextToken: string = res?.results?.continuationToken ?? '';
+          seenMediaRef.current = new Set();
+          const deduped = media.filter((m: any) => {
+            const key = m.id ?? m.thumbnail;
+            if (!key || seenMediaRef.current.has(key)) return false;
+            seenMediaRef.current.add(key);
+            return true;
+          });
+          shouldReplaceRef.current = false;
+          nextTokenRef.current = nextToken;
+          setSessionMedia(deduped);
+        }
+      }
+    } catch {}
+    setRefreshing(false);
+  }, [refetch, refetchPhotos, activeGroupId, continuationToken]);
 
   // Mirrors web ViewableSurfPhotos: trigger pagination as user swipes near
   // the end of the lightbox, and track the current photo so the gallery can
@@ -468,6 +538,138 @@ export default function SessionDetailScreen() {
     setSelectedPhotoIds([]);
   }, [requireAuth]);
 
+  // After granting notification permission, immediately sync the push token so
+  // the server can deliver right away (don't wait for the next foreground).
+  const registerPushTokenNow = useCallback(async () => {
+    if (!user?.id || !Device.isDevice) return;
+    try {
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+      if (!projectId) return;
+      const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+      if (!token) return;
+      const deviceId = await getOrCreateDeviceId();
+      const platform = getDevicePlatform();
+      await registerDevice({ deviceId, expoPushToken: token, platform }).unwrap();
+    } catch {
+      // best-effort; _layout re-registers on foreground
+    }
+  }, [user?.id, registerDevice]);
+
+  // Ensure OS notification permission. Shows the system prompt when undetermined,
+  // routes to Settings when previously denied.
+  const enableNotifications = useCallback(async () => {
+    if (!Device.isDevice) return;
+    let status: Notifications.PermissionStatus;
+    try {
+      ({ status } = await Notifications.getPermissionsAsync());
+    } catch {
+      return;
+    }
+    if (status === 'granted') {
+      await registerPushTokenNow();
+      return;
+    }
+    if (status === 'undetermined') {
+      try {
+        const res = await Notifications.requestPermissionsAsync({
+          ios: { allowAlert: true, allowBadge: true, allowSound: true },
+        });
+        if (res.status === 'granted') await registerPushTokenNow();
+      } catch {
+        // no-op
+      }
+      return;
+    }
+    // denied — can only be changed in Settings
+    Alert.alert(
+      'Notifications are off',
+      'Turn on notifications in Settings to get alerts when your request is approved and when photographers you follow post new sessions.',
+      [
+        { text: 'Not Now', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => Linking.openSettings() },
+      ],
+    );
+  }, [registerPushTokenNow]);
+
+  // After a successful photo request, nudge the requester to follow the
+  // photographer (so they hear about future sessions) and/or turn on
+  // notifications (so they hear when this request is approved). Chained:
+  // a non-follower who taps Follow is then asked for notification permission.
+  //
+  // This is a pure post-success nicety. The whole body is wrapped so it can
+  // NEVER throw or reject — the photo request has already completed and been
+  // confirmed before this runs, so the worst case here is "no prompt shown".
+  const promptAfterRequest = useCallback(async () => {
+    try {
+      const targetUserId: string | undefined = session?.user_id;
+      if (!targetUserId) return;
+
+      const alreadyFollowing = !!session?.is_following;
+
+      let notifGranted = true;
+      if (Device.isDevice) {
+        try {
+          const { status } = await Notifications.getPermissionsAsync();
+          notifGranted = status === 'granted';
+        } catch {
+          notifGranted = true;
+        }
+      }
+
+      // Nothing actionable to offer
+      if (alreadyFollowing && notifGranted) return;
+
+      // Respect per-target dismissal cooldown
+      try {
+        const dismissedAt = await SecureStore.getItemAsync(postRequestPromptKey(targetUserId));
+        if (dismissedAt) {
+          const msSince = Date.now() - parseInt(dismissedAt, 10);
+          if (msSince < POST_REQUEST_PROMPT_COOLDOWN_DAYS * 24 * 60 * 60 * 1000) return;
+        }
+      } catch {
+        // ignore; prompting is best-effort
+      }
+
+      const recordDismissal = () => {
+        SecureStore.setItemAsync(postRequestPromptKey(targetUserId), String(Date.now())).catch(() => {});
+      };
+
+      if (!alreadyFollowing) {
+        Alert.alert(
+          `Follow @${sessionHandle}?`,
+          'Get notified when they approve your request and when they post new sessions.',
+          [
+            { text: 'Not Now', style: 'cancel', onPress: recordDismissal },
+            {
+              text: 'Follow',
+              onPress: async () => {
+                try {
+                  await followUser({ userId: targetUserId, action: 'follow' }).unwrap();
+                  if (!notifGranted) await enableNotifications();
+                } catch {
+                  // follow / notify are best-effort
+                }
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      // Already following but notifications are off
+      Alert.alert(
+        'Turn on notifications?',
+        `Get notified when @${sessionHandle} approves your request and posts new sessions.`,
+        [
+          { text: 'Not Now', style: 'cancel', onPress: recordDismissal },
+          { text: 'Enable', onPress: () => { enableNotifications().catch(() => {}); } },
+        ],
+      );
+    } catch {
+      // Never let a post-success nudge surface as an error.
+    }
+  }, [session?.user_id, session?.is_following, sessionHandle, followUser, enableNotifications]);
+
   // Confirm action
   const handleConfirmAction = useCallback(async () => {
     if (!selectedPhotoIds.length || !session?.id || isProcessingAction) return;
@@ -487,22 +689,35 @@ export default function SessionDetailScreen() {
               setIsProcessingAction(true);
               const deletedIds = [...selectedPhotoIds];
               const deletedSet = new Set(deletedIds);
+
+              // Snapshot the paginated state so we can roll back cleanly if the
+              // server rejects. sessionMediaRef mirrors the current list.
+              const prevMedia = sessionMediaRef.current;
+              const prevSeen = new Set(seenMediaRef.current);
+              const prevFingerprint = prevInitialFingerprintRef.current;
+
+              // Proactive: remove the photos from the UI immediately, before the
+              // network call. Preserves scroll position and pages 2+. Pre-set
+              // the initial-load fingerprint to match what getSession returns
+              // after the SurfBreak tag invalidation refetch so the initial-load
+              // effect skips its replace step (no scroll reset).
+              deletedIds.forEach((id) => seenMediaRef.current.delete(id));
+              setSessionMedia((prev) => {
+                const next = prev.filter((m) => !deletedSet.has(m.id));
+                prevInitialFingerprintRef.current = next.slice(0, FETCH_AMOUNT).map((m: any) => m?.id).join(',');
+                return next;
+              });
+              cancelAction();
+
               try {
                 await deleteSurfMedia({ sessionId: session.id, photos: deletedIds as any }).unwrap();
-                // Optimistic local update — preserves scroll position and pages 2+.
-                // Pre-set the initial-load fingerprint to match what getSession will return
-                // after the SurfBreak tag invalidation refetch so the initial-load effect
-                // skips its replace step.
-                deletedIds.forEach((id) => seenMediaRef.current.delete(id));
-                setSessionMedia((prev) => {
-                  const next = prev.filter((m) => !deletedSet.has(m.id));
-                  prevInitialFingerprintRef.current = next.slice(0, FETCH_AMOUNT).map((m: any) => m?.id).join(',');
-                  return next;
-                });
-                Alert.alert('Deleted', `Deleted ${count} photo${count > 1 ? 's' : ''}.`);
-                cancelAction();
               } catch {
-                Alert.alert('Error', 'Failed to delete photos.');
+                // Revert to the pre-delete snapshot so the UI never lies about
+                // what's actually persisted.
+                seenMediaRef.current = prevSeen;
+                prevInitialFingerprintRef.current = prevFingerprint;
+                setSessionMedia(prevMedia);
+                Alert.alert('Error', 'Failed to delete photos. They have been restored.');
               } finally {
                 setIsProcessingAction(false);
               }
@@ -523,7 +738,14 @@ export default function SessionDetailScreen() {
             sessionId: session.id,
             surfBreakId: session.surf_break_id,
           }).unwrap();
-          Alert.alert('Request Sent', `Photo request sent to @${sessionHandle}. (${selectedPhotoIds.length} photo${selectedPhotoIds.length > 1 ? 's' : ''})`);
+          // Request is committed at this point. The follow/notify nudge is
+          // fully decoupled — it only runs when the user taps OK, and it can
+          // never throw, so a bug in it cannot affect the request.
+          Alert.alert(
+            'Request Sent',
+            `Photo request sent to @${sessionHandle}. (${selectedPhotoIds.length} photo${selectedPhotoIds.length > 1 ? 's' : ''})`,
+            [{ text: 'OK', onPress: () => { void promptAfterRequest().catch(() => {}); } }],
+          );
           break;
         case 'download': {
           const total = selectedPhotoIds.length;
@@ -544,7 +766,7 @@ export default function SessionDetailScreen() {
     } finally {
       setIsProcessingAction(false);
     }
-  }, [sessionAction, selectedPhotoIds, session, sessionHandle, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction, isProcessingAction]);
+  }, [sessionAction, selectedPhotoIds, session, sessionHandle, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction, isProcessingAction, promptAfterRequest]);
 
   // Group photo assignment
   const handleGroupPhotoAction = useCallback(async (groupId: string) => {
@@ -608,6 +830,7 @@ export default function SessionDetailScreen() {
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
       quality: 0.95,
+      exif: true,
     });
 
     if (result.canceled || result.assets.length === 0) return;
@@ -622,13 +845,20 @@ export default function SessionDetailScreen() {
 
     setIsStartingUpload(true);
     try {
-      const filesMapped = result.assets.map((asset) => ({
+      const picked = result.assets.map((asset) => ({
         uuid: generateUUID(),
         uri: asset.uri,
         name: asset.fileName ?? `photo_${Date.now()}.jpg`,
         size: asset.fileSize ?? 0,
         type: asset.mimeType ?? 'image/jpeg',
-        lastModified: Date.now(),
+        takenAt: parseExifTakenAt(asset),
+      }));
+      // Bake capture-ordered timestamps so the gallery (sorted by
+      // photo_taken_at, file_name, id) shows photos in shot order.
+      const orderedTimestamps = bakeOrderedTimestamps(picked);
+      const filesMapped = picked.map((f, idx) => ({
+        ...f,
+        lastModified: orderedTimestamps[idx],
       }));
 
       const totalSizeInGB = storageCheck.totalSizeGB;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, useColorScheme, FlatList } from 'react-native';
-import type { ViewToken, LayoutChangeEvent } from 'react-native';
+import type { ViewToken, LayoutChangeEvent, GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -71,6 +71,11 @@ interface SessionCardProps {
 }
 
 const MAX_VISIBLE_TAGS = 3;
+
+// Max distance (px) a touch may travel between press-in and release while still
+// counting as a tap. Beyond this it's a scroll/swipe the FlatList should own —
+// guards against the feed registering a scroll as a card tap.
+const TAP_SLOP = 12;
 
 
 // Pure string-based date formatter. Never constructs `new Date(dateStr)` because
@@ -214,6 +219,26 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
     if (handle) trackedPush(`/user/${handle}`);
   };
 
+  // Tap-slop guard: record where the finger went down, then only fire the
+  // navigation if it came up close to the same spot. A scroll/swipe moves
+  // farther than TAP_SLOP and is ignored, so dragging the feed never
+  // accidentally opens a card.
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const onTapStart = (e: GestureResponderEvent) => {
+    touchStartRef.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+  };
+  const guardTap = (action: () => void) => (e: GestureResponderEvent) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (start) {
+      const dx = Math.abs(e.nativeEvent.pageX - start.x);
+      const dy = Math.abs(e.nativeEvent.pageY - start.y);
+      if (dx > TAP_SLOP || dy > TAP_SLOP) return;
+    }
+    action();
+  };
+  const openSheet = () => setSheetVisible(true);
+
   // RTK Query invalidation on `Session | SurfBreak | User` reflows this
   // exact card on the next render. `null` clears back to the surface default.
   const handleAspectRatioSelect = (next: AspectRatioKey | null) => {
@@ -336,7 +361,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
       {/* Header: avatar + name/session/subtitle + ellipsis */}
       <View style={styles.header}>
         {!hidePhotographer ? (
-          <Pressable onPress={handleProfilePress} style={styles.headerLeft}>
+          <Pressable onPressIn={onTapStart} onPress={guardTap(handleProfilePress)} style={styles.headerLeft}>
             <UserAvatar
               uri={session.user_picture}
               name={session.user_name ?? handle}
@@ -406,7 +431,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
               const slideStyle = { width: slideWidth, aspectRatio: thumbAspect };
               if (item.kind === 'cta') {
                 return (
-                  <Pressable onPress={handlePress} style={[slideStyle, styles.ctaSlide, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                  <Pressable onPressIn={onTapStart} onPress={guardTap(handlePress)} onLongPress={openSheet} style={[slideStyle, styles.ctaSlide, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
                     <Ionicons name="images-outline" size={28} color={isDark ? '#9ca3af' : '#6b7280'} />
                     <Text style={[styles.ctaTitle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
                       See all {session.photo_count ?? ''} photos
@@ -419,7 +444,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
                 );
               }
               return (
-                <Pressable onPress={handlePress} style={slideStyle}>
+                <Pressable onPressIn={onTapStart} onPress={guardTap(handlePress)} onLongPress={openSheet} style={slideStyle}>
                   <Image
                     source={{ uri: item.url }}
                     style={slideStyle}
@@ -431,7 +456,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             }}
           />
         ) : !useCarousel && session.thumbnail ? (
-          <Pressable onPress={handlePress} style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}>
+          <Pressable onPressIn={onTapStart} onPress={guardTap(handlePress)} onLongPress={openSheet} style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}>
             <Image
               source={{ uri: session.thumbnail }}
               style={[styles.thumbnail, { aspectRatio: thumbAspect }]}

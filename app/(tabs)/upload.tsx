@@ -45,6 +45,9 @@ interface SelectedFile {
   name: string;
   size: number;
   type: string;
+  // Real capture time from EXIF (epoch ms), or null when the photo has none.
+  // Drives upload ordering — see bakeOrderedTimestamps.
+  takenAt?: number | null;
 }
 
 // Build the YYYY-MM-DD string from LOCAL date components, not UTC.
@@ -58,6 +61,7 @@ const formatDateParam = (date: Date): string =>
 
 import { generateUUID } from '../../src/helpers/uuid';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
+import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photoTimestamps';
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -103,6 +107,11 @@ function SessionOrBoardCreate() {
   const [notifyFollowers, setNotifyFollowers] = useState(true);
   const [files, setFiles] = useState<SelectedFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // Covers the gap between tapping "Add" in the native picker and thumbnails
+  // appearing. expo-image-picker copies every selected asset into app cache
+  // before resolving — seconds for a large session selection — and the picker
+  // modal is already dismissed during that copy, leaving the screen silent.
+  const [isImporting, setIsImporting] = useState(false);
 
   // Board form state — only used when isShaper. Featured toggle lives on the
   // profile, not here. See app/(tabs)/profile.tsx + ShaperBoardsGrid.
@@ -155,26 +164,45 @@ function SessionOrBoardCreate() {
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      quality: 0.95,
-    });
-
-    if (!result.canceled && result.assets.length > 0) {
-      const newFiles: SelectedFile[] = result.assets.map((asset) => ({
-        uri: asset.uri,
-        name: asset.fileName ?? `photo_${Date.now()}.jpg`,
-        size: asset.fileSize ?? 0,
-        type: asset.mimeType ?? 'image/jpeg',
-      }));
-
-      // Dedupe by name + size
-      setFiles((prev) => {
-        const existing = new Set(prev.map((f) => `${f.name}_${f.size}`));
-        const unique = newFiles.filter((f) => !existing.has(`${f.name}_${f.size}`));
-        return [...prev, ...unique];
+    // expo-image-picker exposes no "picker dismissed" event, and for sessions
+    // the asset copy happens INSIDE this await (URIs already point to cached
+    // files by the time it resolves). So the loader must be armed during the
+    // await — the only lever is how long to wait first. We delay past the
+    // native sheet's present animation (which can run ~1s on large photo
+    // libraries) so the overlay never flashes on the form: by the time it
+    // fires, the sheet is covering the screen, and it only becomes visible
+    // once the picker dismisses and expo is copying the selection. Picking a
+    // large batch takes well over this delay, so the loader is ready the
+    // instant the sheet closes; quick/small selections finish first and never
+    // show it. Bump this if the flash returns on a slower device.
+    const loaderTimer = setTimeout(() => setIsImporting(true), 1100);
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        quality: 0.95,
+        exif: true,
       });
+
+      if (!result.canceled && result.assets.length > 0) {
+        const newFiles: SelectedFile[] = result.assets.map((asset) => ({
+          uri: asset.uri,
+          name: asset.fileName ?? `photo_${Date.now()}.jpg`,
+          size: asset.fileSize ?? 0,
+          type: asset.mimeType ?? 'image/jpeg',
+          takenAt: parseExifTakenAt(asset),
+        }));
+
+        // Dedupe by name + size
+        setFiles((prev) => {
+          const existing = new Set(prev.map((f) => `${f.name}_${f.size}`));
+          const unique = newFiles.filter((f) => !existing.has(`${f.name}_${f.size}`));
+          return [...prev, ...unique];
+        });
+      }
+    } finally {
+      clearTimeout(loaderTimer);
+      setIsImporting(false);
     }
   }, []);
 
@@ -217,6 +245,10 @@ function SessionOrBoardCreate() {
             files: files.map((f) => ({
               file_uuid: generateUUID(),
               file_type: f.type || 'image/jpeg',
+              // Backend increments users.current_storage atomically with the
+              // photo INSERT off this value — omitting it means board photos
+              // created here never count toward the shaper's storage.
+              file_size_bytes: Number(f.size) || 0,
             })),
           },
         }).unwrap();
@@ -268,13 +300,17 @@ function SessionOrBoardCreate() {
     setIsSubmitting(true);
 
     try {
-      // Create session — returns presigned URLs + upload file IDs in one call
-      const filesMapped = files.map((f) => ({
+      // Create session — returns presigned URLs + upload file IDs in one call.
+      // Bake capture-ordered timestamps so the gallery (sorted by
+      // photo_taken_at, file_name, id) shows photos in the order they were shot
+      // rather than alphabetically/randomly.
+      const orderedTimestamps = bakeOrderedTimestamps(files);
+      const filesMapped = files.map((f, idx) => ({
         uuid: generateUUID(),
         name: f.name,
         size: f.size,
         type: f.type,
-        lastModified: Date.now(),
+        lastModified: orderedTimestamps[idx],
         source: 'device',
       }));
 
@@ -689,6 +725,17 @@ function SessionOrBoardCreate() {
           </View>
         </View>
       )}
+
+      {/* Importing overlay — shown while the native picker copies selected
+          assets into cache, before the preview grid populates. */}
+      {isImporting && (
+        <View style={[styles.importingOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.85)' }]}>
+          <View style={[styles.importingCard, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
+            <ActivityIndicator size="large" color="#0ea5e9" />
+            <Text style={[styles.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing photos…</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -775,4 +822,7 @@ const styles = StyleSheet.create({
   dateOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', zIndex: 100 },
   dateSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
   dateSheetHeader: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: 20, paddingVertical: 14 },
+  importingOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', zIndex: 200 },
+  importingCard: { paddingHorizontal: 32, paddingVertical: 28, borderRadius: 16, alignItems: 'center', gap: 14, minWidth: 180 },
+  importingText: { fontSize: 15, fontWeight: '600' },
 });

@@ -28,6 +28,7 @@ import {
   useGetAdsQuery,
   useGetLatestShapersQuery,
   useGetShapersFromFollowingQuery,
+  useUpdateUserRecentSearchesMutation,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
@@ -76,6 +77,7 @@ export default function HomeScreen() {
   const { user } = useUser();
   const { isAuthenticated } = useAuth();
   const { setTabBarVisible } = useTabBar();
+  const [updateUserRecentSearches] = useUpdateUserRecentSearchesMutation();
 
   // Cache the top inset so it never drops to 0 mid-session (safe-area-context
   // can briefly report 0 during stack push/pop transitions, which makes the
@@ -255,11 +257,42 @@ export default function HomeScreen() {
   const isRefreshingRef = useRef(false);
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    isRefreshingRef.current = true;
-    setContinuationToken('');
-    await refetchSessions();
+    const keyOf = (item: any): string | null => {
+      if (item?.group_key && item?.session_date) return `${item.session_date}|${item.group_key}`;
+      return item?.session_id ?? item?.id ?? null;
+    };
+    try {
+      if (continuationToken !== '') {
+        // Deep cursor → '': a real arg change reliably re-fires the query, so the
+        // effect's refresh branch rebuilds the list from page 1.
+        isRefreshingRef.current = true;
+        setContinuationToken('');
+        await refetchSessions();
+      } else {
+        // Already at page 1: the arg doesn't change, so RTK structural sharing can
+        // keep sessionsCurrentData's reference stable and the effect won't re-run —
+        // which would leave isRefreshingRef stuck true and make the NEXT scroll
+        // wipe the feed to a single page. Rebuild directly from the forced refetch.
+        const res: any = await refetchSessions().unwrap();
+        const results = res?.results;
+        const incoming = Array.isArray(results?.groups)
+          ? results.groups
+          : Array.isArray(results?.sessions) ? results.sessions : [];
+        seenIdsRef.current = new Set();
+        const unique = incoming.filter((s: any) => {
+          const id = keyOf(s);
+          if (!id || seenIdsRef.current.has(id)) return false;
+          seenIdsRef.current.add(id);
+          return true;
+        });
+        hasMoreRef.current = Boolean(results?.continuationToken);
+        isFetchingMoreRef.current = false;
+        isRefreshingRef.current = false;
+        setSessions(unique);
+      }
+    } catch {}
     setRefreshing(false);
-  }, [refetchSessions]);
+  }, [continuationToken, refetchSessions]);
 
   const handleLoadMore = useCallback(() => {
     if (!hasMoreRef.current || isFetchingMoreRef.current) return;
@@ -482,7 +515,19 @@ export default function HomeScreen() {
     router.push(path as any);
   }, [router, setTabBarVisible]);
 
+  // Record a tapped search result into the user's recent-search history.
+  // Invalidates the User tag so getSelf refetches with the item bumped to top.
+  const recordSearch = useCallback(
+    (type: 'surf_break' | 'user', id?: string) => {
+      if (user?.id && id) {
+        updateUserRecentSearches({ payload: { recentSearch: { type, data: { id } } } });
+      }
+    },
+    [user?.id, updateUserRecentSearches]
+  );
+
   const navigateToBreak = useCallback((item: any) => {
+    recordSearch('surf_break', item.id);
     const identifier = item.surf_break_identifier;
     if (identifier) {
       // identifier could be "COUNTRY/REGION/BREAK" or just "BREAK"
@@ -496,11 +541,12 @@ export default function HomeScreen() {
         navigateAndClose(`/break/${country}/${region}/${identifier}`);
       }
     }
-  }, [navigateAndClose]);
+  }, [navigateAndClose, recordSearch]);
 
-  const navigateToUser = useCallback((handle: string) => {
-    navigateAndClose(`/user/${handle}`);
-  }, [navigateAndClose]);
+  const navigateToUser = useCallback((item: any) => {
+    recordSearch('user', item.id);
+    navigateAndClose(`/user/${item.handle}`);
+  }, [navigateAndClose, recordSearch]);
 
   const isSearching = searchTerm.length >= 2 || hasTagFilter;
 
@@ -618,7 +664,7 @@ export default function HomeScreen() {
                   if (item.handle) {
                     const userType = item.user_type;
                     return (
-                      <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
+                      <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item)} style={styles.resultRow}>
                         <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} userType={userType} />
                         <View style={styles.resultInfo}>
                           <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
@@ -668,7 +714,7 @@ export default function HomeScreen() {
 
                     if (recent.itemType === 'user' && item.handle) {
                       return (
-                        <Pressable key={item.id ?? idx} onPress={() => navigateToUser(item.handle)} style={styles.resultRow}>
+                        <Pressable key={item.id ?? idx} onPress={() => navigateToUser(item)} style={styles.resultRow}>
                           <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={36} />
                           <View style={styles.resultInfo}>
                             <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>

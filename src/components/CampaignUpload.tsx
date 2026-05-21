@@ -102,6 +102,10 @@ export default function CampaignUpload({
 
   // Submit
   const [submitting, setSubmitting] = useState(false);
+  // Covers picking → JPEG transcode. The picker copies assets to cache and
+  // then every slide is re-encoded via ImageManipulator before the grid
+  // populates; without this the screen sits silent through both steps.
+  const [isImporting, setIsImporting] = useState(false);
 
   const [createMyAdMediaPresignedUrls] = useCreateMyAdMediaPresignedUrlsMutation();
   const [createMyAd] = useCreateMyAdMutation();
@@ -158,47 +162,56 @@ export default function CampaignUpload({
       Alert.alert('Slide limit reached', `A campaign can have at most ${MAX_MEDIA} slides.`);
       return;
     }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: remaining,
-      allowsEditing: false,
-      quality: 0.9,
-    });
-    if (result.canceled || !result.assets?.length) return;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: remaining,
+        allowsEditing: false,
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets?.length) return;
 
-    // Transcode every picked image to JPEG. iOS picker returns HEIC by
-    // default, and browser <img> tags can't render HEIC even though
-    // expo-image (mobile) can — campaigns are viewed on both surfaces, so
-    // mobile-only rendering is a bug. Same pattern the avatar uploader
-    // uses (app/edit-profile/index.tsx). 0.85 quality keeps file sizes
-    // sane while staying well above noticeable-loss territory.
-    const newOnes = await Promise.all(
-      result.assets.map(async (asset) => {
-        let outputUri = asset.uri;
-        if (ImageManipulator?.manipulateAsync) {
-          try {
-            const manipulated = await ImageManipulator.manipulateAsync(
-              asset.uri,
-              [],
-              {
-                compress: 0.85,
-                format: ImageManipulator.SaveFormat?.JPEG ?? 'jpeg',
-              },
-            );
-            outputUri = manipulated.uri;
-          } catch (err) {
-            // Best-effort: if manipulation fails (e.g. unsupported
-            // format), fall through to the raw uri. The browser may
-            // still fail to render the result, but at least submission
-            // doesn't break entirely.
-            console.warn('Image transcode failed, uploading original:', err);
+      // Loader covers the JPEG transcode below (the slow part). Set only after
+      // the picker dismisses so it never flashes on the form during the
+      // picker's present animation.
+      setIsImporting(true);
+
+      // Transcode every picked image to JPEG. iOS picker returns HEIC by
+      // default, and browser <img> tags can't render HEIC even though
+      // expo-image (mobile) can — campaigns are viewed on both surfaces, so
+      // mobile-only rendering is a bug. Same pattern the avatar uploader
+      // uses (app/edit-profile/index.tsx). 0.85 quality keeps file sizes
+      // sane while staying well above noticeable-loss territory.
+      const newOnes = await Promise.all(
+        result.assets.map(async (asset) => {
+          let outputUri = asset.uri;
+          if (ImageManipulator?.manipulateAsync) {
+            try {
+              const manipulated = await ImageManipulator.manipulateAsync(
+                asset.uri,
+                [],
+                {
+                  compress: 0.85,
+                  format: ImageManipulator.SaveFormat?.JPEG ?? 'jpeg',
+                },
+              );
+              outputUri = manipulated.uri;
+            } catch (err) {
+              // Best-effort: if manipulation fails (e.g. unsupported
+              // format), fall through to the raw uri. The browser may
+              // still fail to render the result, but at least submission
+              // doesn't break entirely.
+              console.warn('Image transcode failed, uploading original:', err);
+            }
           }
-        }
-        return { uri: outputUri, uuid: generateUUID(), type: 'jpg', remote: false };
-      }),
-    );
-    setCreatives((prev) => [...prev, ...newOnes].slice(0, MAX_MEDIA));
+          return { uri: outputUri, uuid: generateUUID(), type: 'jpg', remote: false };
+        }),
+      );
+      setCreatives((prev) => [...prev, ...newOnes].slice(0, MAX_MEDIA));
+    } finally {
+      setIsImporting(false);
+    }
   }, [creatives.length]);
 
   const removeCreativeAt = (idx: number) => {
@@ -747,6 +760,17 @@ export default function CampaignUpload({
           </View>
         </View>
       )}
+
+      {/* Importing overlay — shown while the picker copies + transcodes the
+          selected images, before the slide grid populates. */}
+      {isImporting && (
+        <View style={[s.importingOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.85)' }]}>
+          <View style={[s.importingCard, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
+            <ActivityIndicator size="large" color="#0ea5e9" />
+            <Text style={[s.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing photos…</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -957,4 +981,19 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  importingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 200,
+  },
+  importingCard: {
+    paddingHorizontal: 32,
+    paddingVertical: 28,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: 14,
+    minWidth: 180,
+  },
+  importingText: { fontSize: 15, fontWeight: '600' },
 });

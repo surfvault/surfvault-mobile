@@ -9,6 +9,7 @@ import {
   useColorScheme,
   Share,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -67,6 +68,9 @@ export default function SurfBreakDetailScreen() {
   const [continuationToken, setContinuationToken] = useState('');
   const [sessions, setSessions] = useState<any[]>([]);
   const seenIdsRef = useRef(new Set<string>());
+  const nextTokenRef = useRef('');
+  const prevFingerprintRef = useRef<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   // Seed selectedDate from `?date=YYYY-MM-DD` (used by Discover/Favorites
   // multi-card taps so the break page lands pre-filtered to that day).
   // Parse as local-noon so toLocaleDateString never shifts it back a day in
@@ -82,7 +86,7 @@ export default function SurfBreakDetailScreen() {
 
   const dateStr = selectedDate ? formatDateParam(selectedDate) : '';
 
-  const { data: initialData, isLoading } = useGetSurfBreakWithLatestSessionsQuery(
+  const { data: initialData, isLoading, refetch: refetchBreak } = useGetSurfBreakWithLatestSessionsQuery(
     {
       userId: user?.id, country, region, surfBreak,
       date: dateStr || undefined,
@@ -144,20 +148,25 @@ export default function SurfBreakDetailScreen() {
     [sessions, feedAds]
   );
 
+  // First page comes from the break query. Guard against metadata-only refetches
+  // (e.g. favorite toggle) re-running this and wiping loaded pages: only rebuild
+  // when the first-page content actually changes. The next cursor is stashed in
+  // nextTokenRef and promoted on scroll — page 2+ load lazily, not all at once.
   useEffect(() => {
+    if (!initialData) return;
+    const fingerprint = initialSessions.map((s: any) => s?.session_id ?? s?.id).join(',');
+    if (fingerprint === prevFingerprintRef.current && seenIdsRef.current.size > 0) return;
+    prevFingerprintRef.current = fingerprint;
     seenIdsRef.current = new Set();
-    if (initialSessions.length > 0) {
-      const unique = initialSessions.filter((s: any) => {
-        const key = s.session_id ?? s.id;
-        if (seenIdsRef.current.has(key)) return false;
-        seenIdsRef.current.add(key);
-        return true;
-      });
-      setSessions(unique);
-    } else {
-      setSessions([]);
-    }
-    setContinuationToken(initialToken);
+    const unique = initialSessions.filter((s: any) => {
+      const key = s.session_id ?? s.id;
+      if (!key || seenIdsRef.current.has(key)) return false;
+      seenIdsRef.current.add(key);
+      return true;
+    });
+    setSessions(unique);
+    nextTokenRef.current = initialToken;
+    setContinuationToken('');
   }, [initialData]);
 
   const { data: moreData, isFetching: loadingMore } = useGetSurfBreakSessionsQuery(
@@ -166,17 +175,48 @@ export default function SurfBreakDetailScreen() {
   );
 
   useEffect(() => {
-    if (moreData?.results?.sessions?.length) {
-      const newSessions = moreData.results.sessions.filter((s: any) => {
+    if (!moreData?.results?.sessions?.length) return;
+    const newSessions = moreData.results.sessions.filter((s: any) => {
+      const key = s.session_id ?? s.id;
+      if (!key || seenIdsRef.current.has(key)) return false;
+      seenIdsRef.current.add(key);
+      return true;
+    });
+    if (newSessions.length > 0) setSessions((prev) => [...prev, ...newSessions]);
+    // Stash the next cursor; promote on scroll (do NOT auto-advance).
+    nextTokenRef.current = moreData.results.continuationToken ?? '';
+  }, [moreData]);
+
+  const handleLoadMore = useCallback(() => {
+    if (nextTokenRef.current && !loadingMore) {
+      setContinuationToken(nextTokenRef.current);
+      nextTokenRef.current = '';
+    }
+  }, [loadingMore]);
+
+  // Pull-to-refresh: rebuild directly from the awaited refetch result rather
+  // than depending on the initial-load effect (RTK structural sharing can keep
+  // initialData's reference stable when unchanged, so the effect may not re-run).
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res: any = await refetchBreak().unwrap();
+      const list: any[] = res?.results?.sessions ?? [];
+      const token: string = res?.results?.continuationToken ?? '';
+      seenIdsRef.current = new Set();
+      const unique = list.filter((s: any) => {
         const key = s.session_id ?? s.id;
-        if (seenIdsRef.current.has(key)) return false;
+        if (!key || seenIdsRef.current.has(key)) return false;
         seenIdsRef.current.add(key);
         return true;
       });
-      if (newSessions.length > 0) setSessions((prev) => [...prev, ...newSessions]);
-      setContinuationToken(moreData.results.continuationToken ?? '');
-    }
-  }, [moreData]);
+      prevFingerprintRef.current = list.map((s: any) => s?.session_id ?? s?.id).join(',');
+      nextTokenRef.current = token;
+      setSessions(unique);
+      setContinuationToken('');
+    } catch {}
+    setRefreshing(false);
+  }, [refetchBreak]);
 
   const [favoriteSurfBreak] = useUpdateUserFavoritesMutation();
   const handleFavorite = useCallback(async () => {
@@ -190,27 +230,34 @@ export default function SurfBreakDetailScreen() {
     await Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
   }, [country, region, surfBreak]);
 
+  const resetPagination = useCallback(() => {
+    setSessions([]);
+    seenIdsRef.current = new Set();
+    nextTokenRef.current = '';
+    prevFingerprintRef.current = null;
+    setContinuationToken('');
+  }, []);
+
   const handleDateChange = useCallback((_event: any, date?: Date) => {
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
-      if (date) { setSelectedDate(date); setSessions([]); seenIdsRef.current = new Set(); setContinuationToken(''); }
+      if (date) { setSelectedDate(date); resetPagination(); }
     } else {
       // iOS spinner — just update picker state, apply on Done
       if (date) setPickerDate(date);
     }
-  }, []);
+  }, [resetPagination]);
 
   const handleDateDone = useCallback(() => {
     setShowDatePicker(false);
     setSelectedDate(pickerDate);
-    setSessions([]);
-    seenIdsRef.current = new Set();
-    setContinuationToken('');
-  }, [pickerDate]);
+    resetPagination();
+  }, [pickerDate, resetPagination]);
 
   const clearDate = useCallback(() => {
-    setSelectedDate(null); setSessions([]); seenIdsRef.current = new Set(); setContinuationToken('');
-  }, []);
+    setSelectedDate(null);
+    resetPagination();
+  }, [resetPagination]);
 
   const breakName = breakData?.name?.replaceAll('_', ' ') ?? surfBreak?.replaceAll('_', ' ') ?? '';
   const regionDisplay = breakData?.region?.replaceAll('_', ' ') ?? (region !== '0' ? region?.replaceAll('_', ' ') : '') ?? '';
@@ -312,7 +359,9 @@ export default function SurfBreakDetailScreen() {
               </View>
             }
             ListFooterComponent={loadingMore ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null}
+            onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5} showsVerticalScrollIndicator={false}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={isDark ? '#fff' : '#000'} />}
           />
         )}
         {showDatePicker && (

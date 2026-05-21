@@ -179,6 +179,40 @@ const boardroomApi = rootApi.injectEndpoints({
     >({
       invalidatesTags: [ApiTag.Boardroom],
       query: ({ boardId }) => ({ url: `/boards/${boardId}`, method: 'DELETE' }),
+      // Optimistic: drop the board from every cached shaper-gallery list
+      // before the server replies so the profile grid updates instantly.
+      // Reverts on failure (the calling component surfaces the alert). On
+      // success, the Boardroom invalidation refetches and reconciles — the
+      // board is already gone server-side, so the refetch matches the patch.
+      async onQueryStarted({ boardId }, { dispatch, queryFulfilled, getState }) {
+        const patches: { undo: () => void }[] = [];
+        const state: any = getState();
+        const queries = state?.rootApiSlice?.queries ?? {};
+        for (const key of Object.keys(queries)) {
+          if (!key.startsWith('getShaperBoards(')) continue;
+          const originalArgs = queries[key]?.originalArgs;
+          if (originalArgs === undefined) continue;
+          patches.push(
+            dispatch(
+              (boardroomApi.util as any).updateQueryData(
+                'getShaperBoards',
+                originalArgs,
+                (draft: any) => {
+                  const arr = draft?.results?.boards;
+                  if (!Array.isArray(arr)) return;
+                  const idx = arr.findIndex((b: any) => b.id === boardId);
+                  if (idx !== -1) arr.splice(idx, 1);
+                }
+              )
+            )
+          );
+        }
+        try {
+          await queryFulfilled;
+        } catch {
+          patches.forEach((p) => p.undo());
+        }
+      },
     }),
     // Intentionally NO invalidatesTags — same race-with-S3-PUT reason as
     // admin's createBoardPhotos. Caller refetches manually after PUTs land.
@@ -192,11 +226,15 @@ const boardroomApi = rootApi.injectEndpoints({
     >({
       query: ({ boardId, payload }) => ({ url: `/boards/${boardId}/photos`, method: 'POST', body: payload }),
     }),
+    // Intentionally NO invalidatesTags. The board detail page deletes photos
+    // optimistically (patches the getBoard cache up front) and may delete
+    // several in a serial loop — a per-call Boardroom invalidation would
+    // refetch mid-loop and momentarily re-add not-yet-deleted photos, undoing
+    // the optimistic removal. The caller reconciles once after the loop.
     deleteMyBoardPhoto: builder.mutation<
       { results: { success: boolean; photoId: string } },
       { photoId: string }
     >({
-      invalidatesTags: [ApiTag.Boardroom],
       query: ({ photoId }) => ({ url: `/board-photos/${photoId}`, method: 'DELETE' }),
     }),
     /** Owner sets the cover photo for a board. */

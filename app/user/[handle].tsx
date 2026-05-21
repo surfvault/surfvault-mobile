@@ -92,9 +92,19 @@ export default function UserProfileScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            // Proactive: remove from the visible grid immediately, restore on
+            // failure. Capturing inside the updater reads the live list.
+            let prevSessions: any[] | null = null;
+            setSessions((prev) => {
+              prevSessions = prev;
+              return prev.filter((s) => (s.session_id ?? s.id) !== sid);
+            });
+            const hadSeen = seenIdsRef.current.delete(sid);
             try {
               await deleteSession({ sessionId: sid, force: false }).unwrap();
             } catch (err: any) {
+              if (prevSessions) setSessions(prevSessions);
+              if (hadSeen) seenIdsRef.current.add(sid);
               Alert.alert('Delete failed', err?.data?.message || err?.message || 'Try again');
             }
           },
@@ -441,6 +451,7 @@ export default function UserProfileScreen() {
                       const sid = item.session_id ?? item.id;
                       if (sid) trackedPush(`/session/${sid}` as any);
                     }}
+                    onLongPress={isSelf ? () => handleDeleteOwnSession(item.session_id ?? item.id, item.session_name) : undefined}
                     style={{ width: SIZE, height: SIZE * 1.3, margin: GAP / 2 }}
                   >
                     {item.thumbnail ? (

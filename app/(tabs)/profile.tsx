@@ -145,12 +145,28 @@ export default function ProfileScreen() {
   };
 
   const runDelete = async (sid: string, name: string, force: boolean) => {
+    // Proactive: drop the session from the visible grid immediately and
+    // remember the prior state so we can restore it if the server says no.
+    // Capturing inside the updater reads the live list (no stale closure).
+    let prevSessions: any[] | null = null;
+    setSessions((prev) => {
+      prevSessions = prev;
+      return prev.filter((s) => (s.session_id ?? s.id) !== sid);
+    });
+    const hadSeen = seenIdsRef.current.delete(sid);
+    const rollback = () => {
+      if (prevSessions) setSessions(prevSessions);
+      if (hadSeen) seenIdsRef.current.add(sid);
+    };
+
     try {
       await deleteSession({ sessionId: sid, force }).unwrap();
-      Alert.alert('Deleted', 'Session deleted successfully.');
     } catch (err: any) {
       const data = err?.data;
       if (err?.status === 409 && data?.code === 'UNFULFILLED_ACCESS_REQUESTS') {
+        // Not actually deleted — restore the session while we ask the user
+        // whether to force through the unfulfilled access requests.
+        rollback();
         const requests = data.results?.unfulfilledRequests ?? [];
         const names = requests
           .map((r: any) => {
@@ -173,7 +189,8 @@ export default function ProfileScreen() {
         );
         return;
       }
-      Alert.alert('Error', 'Failed to delete session.');
+      rollback();
+      Alert.alert('Error', 'Failed to delete session. It has been restored.');
     }
   };
 
@@ -563,11 +580,11 @@ export default function ProfileScreen() {
           },
         },
         ...(sessionSheetItem.surf_break_is_favorited != null ? [{
-          label: (sessionSheetItem.surf_break_is_favorited ? 'Unfavorite Break' : 'Favorite Break') as const,
-          icon: (sessionSheetItem.surf_break_is_favorited ? 'heart-dislike-outline' : 'heart-outline') as const,
+          label: sessionSheetItem.surf_break_is_favorited ? ('Unfavorite Break' as const) : ('Favorite Break' as const),
+          icon: sessionSheetItem.surf_break_is_favorited ? ('heart-dislike-outline' as const) : ('heart-outline' as const),
           onPress: () => {
             if (sessionSheetItem.surf_break_id) {
-              favoriteSurfBreak({ surfBreakId: sessionSheetItem.surf_break_id, action: sessionSheetItem.surf_break_is_favorited ? 'unfavorite' : 'favorite' });
+              updateFavorite({ surfBreakId: sessionSheetItem.surf_break_id, action: sessionSheetItem.surf_break_is_favorited ? 'unfavorite' : 'favorite' });
             }
           },
         }] : []),

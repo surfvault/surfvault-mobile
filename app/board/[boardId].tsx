@@ -19,12 +19,15 @@ import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import ImageViewing from 'react-native-image-viewing';
+import { useDispatch } from 'react-redux';
 import {
   useGetBoardQuery,
   useUpdateBoardThumbnailMutation,
   useCreateMyBoardPhotosMutation,
   useDeleteMyBoardPhotoMutation,
   useCreateBoardViewReportMutation,
+  rootApi,
+  ApiTag,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
@@ -97,6 +100,7 @@ export default function BoardDetailScreen() {
   const smartBack = useSmartBack();
   const trackedPush = useTrackedPush();
   const requireAuth = useRequireAuth();
+  const dispatch = useDispatch();
 
   const { data, isLoading, isError, refetch } = useGetBoardQuery(
     { boardId: boardId as string },
@@ -301,15 +305,36 @@ export default function BoardDetailScreen() {
           onPress: async () => {
             setIsProcessingAction(true);
             const ids = [...selectedPhotoIds];
+            const removeSet = new Set(ids);
+            // Optimistic: pull the selected photos out of the getBoard cache up
+            // front so the grid updates instantly — one patch covers the whole
+            // multi-select, reverted as a unit if any delete fails.
+            const patch = dispatch(
+              (rootApi.util as any).updateQueryData(
+                'getBoard',
+                { boardId: boardId as string },
+                (draft: any) => {
+                  const arr = draft?.results?.board?.photos;
+                  if (!Array.isArray(arr)) return;
+                  draft.results.board.photos = arr.filter((p: any) => !removeSet.has(p.id));
+                }
+              )
+            );
+            cancelAction();
             try {
               // Serial delete keeps error reporting simple — boards rarely
               // have so many photos that parallel matters.
               for (const id of ids) {
                 await deleteMyBoardPhoto({ photoId: id }).unwrap();
               }
-              refetch();
-              cancelAction();
+              // Reconcile every Boardroom surface (profile grid counts, feeds)
+              // now that the loop is done. deleteMyBoardPhoto no longer
+              // invalidates per-call, which would otherwise re-add not-yet-
+              // deleted photos mid-loop and undo the optimistic removal.
+              dispatch(rootApi.util.invalidateTags([ApiTag.Boardroom]));
             } catch (err: any) {
+              patch.undo();
+              refetch();
               Alert.alert(
                 'Delete failed',
                 err?.data?.message || err?.message || 'Some photos could not be removed.'
@@ -321,7 +346,7 @@ export default function BoardDetailScreen() {
         },
       ]
     );
-  }, [boardAction, selectedPhotoIds, board?.id, isProcessingAction, deleteMyBoardPhoto, refetch, cancelAction]);
+  }, [boardAction, selectedPhotoIds, board?.id, isProcessingAction, deleteMyBoardPhoto, refetch, cancelAction, dispatch, boardId]);
 
   // Whole-board deletion lives on the profile gallery's long-press menu
   // (`ShaperBoardsGrid.tsx`). Keeping that out of this page means a shaper

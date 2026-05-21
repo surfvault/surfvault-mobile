@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, FlatList, Platform, Share, useColorScheme, type LayoutChangeEvent, type ViewToken } from 'react-native';
+import { View, Text, Pressable, StyleSheet, FlatList, Platform, Share, useColorScheme, type LayoutChangeEvent, type ViewToken, type GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
@@ -109,6 +109,9 @@ const hiddenAreaLabel = (group: BreakDateGroup): string | null => {
 };
 
 const MAX_VISIBLE_TAGS = 3;
+// Max distance (px) a touch may travel between press-in and release while still
+// counting as a tap. Beyond this it's a scroll/swipe the FlatList should own.
+const TAP_SLOP = 12;
 const STACK_OVERLAP = 14;
 const STACK_AVATAR_SIZE = 36;
 const SOLO_AVATAR_SIZE = 52;
@@ -174,6 +177,24 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
     if (first?.index != null) setActiveSlide(first.index);
   }, []);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+
+  // Tap-slop guard — see SessionCard. Only fire navigation if the finger came
+  // up close to where it went down, so a feed scroll never opens a card.
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const onTapStart = (e: GestureResponderEvent) => {
+    touchStartRef.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+  };
+  const guardTap = (action: () => void) => (e: GestureResponderEvent) => {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+    if (start) {
+      const dx = Math.abs(e.nativeEvent.pageX - start.x);
+      const dy = Math.abs(e.nativeEvent.pageY - start.y);
+      if (dx > TAP_SLOP || dy > TAP_SLOP) return;
+    }
+    action();
+  };
+  const openSheet = () => setSheetVisible(true);
 
   if (slides.length === 0) return null;
 
@@ -244,7 +265,7 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
     return (
       <View style={styles.card}>
         <View style={styles.header}>
-          <Pressable onPress={onPrimaryPress} style={styles.headerLeft}>
+          <Pressable onPressIn={onTapStart} onPress={guardTap(onPrimaryPress)} style={styles.headerLeft}>
             <UserAvatar uri={solo.user_picture} name={solo.user_name ?? solo.user_handle} size={SOLO_AVATAR_SIZE} verified={solo.user_verified} userType={solo.user_type} />
             <View style={styles.headerInfo}>
               <View style={styles.headerNameRow}>
@@ -280,7 +301,9 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
           </View>
           {solo.thumbnail && (
             <Pressable
-              onPress={() => trackedPush(`/session/${solo.session_id}` as any)}
+              onPressIn={onTapStart}
+              onPress={guardTap(() => trackedPush(`/session/${solo.session_id}` as any))}
+              onLongPress={openSheet}
               style={[styles.thumbnail, { aspectRatio: cardAspect, position: 'absolute', top: 0, left: 0 }]}
             >
               <Image
@@ -372,7 +395,7 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
   return (
     <View style={styles.card}>
       <View style={styles.header}>
-        <Pressable onPress={showBreakInfo ? goToBreakOnDate : undefined} style={styles.headerLeft}>
+        <Pressable onPressIn={onTapStart} onPress={showBreakInfo ? guardTap(goToBreakOnDate) : undefined} style={styles.headerLeft}>
           <View style={styles.avatarStack}>
             {photographers.slice(0, 3).map((p, i) => (
               <View
@@ -434,7 +457,12 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
             viewabilityConfig={viewabilityConfig}
             style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
             renderItem={({ item }) => (
-              <Pressable onPress={goToBreakOnDate} style={{ width: slideWidth, aspectRatio: cardAspect }}>
+              <Pressable
+                onPressIn={onTapStart}
+                onPress={guardTap(goToBreakOnDate)}
+                onLongPress={multiSections.length > 0 ? openSheet : undefined}
+                style={{ width: slideWidth, aspectRatio: cardAspect }}
+              >
                 <Image
                   source={{ uri: item.thumbnail! }}
                   style={{ width: slideWidth, aspectRatio: cardAspect }}
