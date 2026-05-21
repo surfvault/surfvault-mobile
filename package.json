@@ -18,7 +18,11 @@
     "submit:ios": "eas submit --platform ios",
     "submit:android": "eas submit --platform android",
     "update:dev": "eas update --branch development",
-    "update:prod": "eas update --branch production"
+    "update:prod": "eas update --branch production",
+    "bump:patch": "npm version patch --no-git-tag-version",
+    "bump:minor": "npm version minor --no-git-tag-version",
+    "bump:major": "npm version major --no-git-tag-version",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@expo/react-native-action-sheet": "^4.1.1",

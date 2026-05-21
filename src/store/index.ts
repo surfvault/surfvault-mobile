@@ -170,6 +170,7 @@ export {
   useGetUserBlocksQuery,
   useReportUserMutation,
   useUpdateMyAdPartnerMutation,
+  useGetAppVersionQuery,
 } from './apis/endpoints/user';
 
 export {

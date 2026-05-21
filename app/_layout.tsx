@@ -23,6 +23,7 @@ import { getOrCreateDeviceId, getDevicePlatform } from '../src/helpers/deviceId'
 import UploadProgressPill from '../src/components/UploadProgressPill';
 import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
 import NotificationPrimingModal from '../src/components/NotificationPrimingModal';
+import ForceUpdateGate from '../src/components/ForceUpdateGate';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
@@ -242,6 +243,9 @@ function AppShell() {
           isOnboarded={isOnboarded}
           onPermissionChanged={registerPushToken}
         />
+        {/* Full-screen blocker when the installed build is below the minimum
+            supported version (renders nothing otherwise; fail-open). */}
+        <ForceUpdateGate />
         <StatusBar style="auto" />
       </View>
     </UserProvider>

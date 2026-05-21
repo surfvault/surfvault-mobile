@@ -10,6 +10,14 @@ const userApi = rootApi.injectEndpoints({
         method: 'GET',
       }),
     }),
+    // Public — drives the launch-time force-update gate. A fresh fetch each
+    // cold start is plenty (config rarely changes).
+    getAppVersion: builder.query<
+      { ios: { minVersion: string | null }; android: { minVersion: string | null } },
+      void
+    >({
+      query: () => ({ url: '/app-version', method: 'GET' }),
+    }),
     getUser: builder.query({
       providesTags: [ApiTag.User, ApiTag.Follow],
       query: ({ handle, viewerId }: { handle: string; viewerId?: string }) => ({
@@ -398,6 +406,7 @@ export const {
   useGetUserBlocksQuery,
   useReportUserMutation,
   useUpdateMyAdPartnerMutation,
+  useGetAppVersionQuery,
 } = userApi;
 
 export { userApi };

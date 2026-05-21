@@ -6,11 +6,17 @@ import { ExpoConfig, ConfigContext } from 'expo/config';
 const envFile = existsSync(join(__dirname, '.env.local')) ? '.env.local' : '.env';
 loadEnv({ path: join(__dirname, envFile) });
 
+// Single source of truth for the marketing version (CFBundleShortVersionString
+// / versionName). Bump with `npm run bump:patch|minor|major` — EAS only
+// auto-increments the build number, not this semver.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { version: appVersion } = require('./package.json') as { version: string };
+
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   name: 'SurfVault',
   slug: 'surfvault-mobile',
-  version: '1.0.0',
+  version: appVersion,
   platforms: ['ios', 'android'],
   orientation: 'portrait',
   icon: './assets/icon.png',
