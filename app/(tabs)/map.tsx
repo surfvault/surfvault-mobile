@@ -11,6 +11,7 @@ import {
   Keyboard,
   InteractionManager,
   Platform,
+  Alert,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
@@ -24,8 +25,9 @@ import { setCoordinates } from '../../src/store/slices/location';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
-import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery } from '../../src/store';
+import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery, useCreateSurfBreakMutation } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
+import AddSurfBreakSheet from '../../src/components/AddSurfBreakSheet';
 import GradientRing, { ACTIVE_STOPS, NOTE_STOPS } from '../../src/components/GradientRing';
 import { FlatList } from 'react-native';
 import React from 'react';
@@ -203,6 +205,12 @@ export default function MapScreen() {
   const [regionStable, setRegionStable] = useState(true);
   // Track committed markers separately so clustering library never sees mid-gesture updates
   const [committedBreaks, setCommittedBreaks] = useState<any[]>([]);
+
+  // Super-admin: long-press the map to drop a new surf break here
+  const isSuperAdmin = !!(user as any)?.super_admin;
+  const [pendingBreakCoord, setPendingBreakCoord] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [addBreakSheetVisible, setAddBreakSheetVisible] = useState(false);
+  const [createSurfBreak] = useCreateSurfBreakMutation();
 
   // Round bounds based on zoom level — coarser when zoomed out, precise when zoomed in
   const precision = region.latitudeDelta > 10 ? 10 : region.latitudeDelta > 1 ? 100 : 1000;
@@ -536,6 +544,37 @@ export default function MapScreen() {
     dismissSelection();
   }, [searchOpen, searchTerm, dismissSelection]);
 
+  const handleMapLongPress = useCallback((e: any) => {
+    if (!isSuperAdmin) return;
+    const coord = e?.nativeEvent?.coordinate;
+    if (!coord) return;
+    Keyboard.dismiss();
+    setSearchOpen(false);
+    dismissSelection();
+    setPendingBreakCoord({ latitude: coord.latitude, longitude: coord.longitude });
+    setAddBreakSheetVisible(true);
+  }, [isSuperAdmin, dismissSelection]);
+
+  const closeAddBreakSheet = useCallback(() => {
+    setAddBreakSheetVisible(false);
+    setPendingBreakCoord(null);
+  }, []);
+
+  const handleCreateBreak = useCallback(async (name: string) => {
+    if (!pendingBreakCoord) return;
+    try {
+      await createSurfBreak({
+        name,
+        lat: Number(pendingBreakCoord.latitude.toFixed(6)),
+        lon: Number(pendingBreakCoord.longitude.toFixed(6)),
+      }).unwrap();
+    } catch (err: any) {
+      throw new Error(err?.data?.message ?? 'Failed to create surf break. Please try again.');
+    }
+    closeAddBreakSheet();
+    Alert.alert('Surf break created', `"${name.trim()}" was added to the map. Its country and region finalize in a moment.`);
+  }, [pendingBreakCoord, createSurfBreak, closeAddBreakSheet]);
+
   return (
     <View style={styles.container}>
       <ClusteredMapView
@@ -556,9 +595,19 @@ export default function MapScreen() {
         maxZoomLevel={18}
         animationEnabled={false}
         onPress={handleMapPress}
+        onLongPress={isSuperAdmin ? handleMapLongPress : undefined}
         renderCluster={renderCluster}
       >
         {markers}
+        {pendingBreakCoord && (
+          <Marker
+            coordinate={pendingBreakCoord}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <Ionicons name="location" size={36} color="#22c55e" />
+          </Marker>
+        )}
       </ClusteredMapView>
 
       {/* Loading */}
@@ -828,6 +877,15 @@ export default function MapScreen() {
       >
         <Ionicons name="navigate-outline" size={18} color={isDark ? '#d1d5db' : '#374151'} />
       </Pressable>
+
+      {isSuperAdmin && (
+        <AddSurfBreakSheet
+          visible={addBreakSheetVisible}
+          coordinate={pendingBreakCoord}
+          onClose={closeAddBreakSheet}
+          onCreate={handleCreateBreak}
+        />
+      )}
 
     </View>
   );

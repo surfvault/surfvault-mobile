@@ -330,6 +330,7 @@ export default function EditProfileScreen() {
                 placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
                 autoCapitalize="none"
                 autoCorrect={false}
+                maxLength={30}
                 style={inputStyle(isDark)}
               />
               {handleChanged && handle !== user?.handle && handle.length >= 3 && (
@@ -413,6 +414,9 @@ export default function EditProfileScreen() {
                     keyboardType="phone-pad"
                     style={inputStyle(isDark)}
                   />
+                  <Text style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                    Include your country code (e.g. +44, +61).
+                  </Text>
                 </View>
 
                 <View style={s.field}>

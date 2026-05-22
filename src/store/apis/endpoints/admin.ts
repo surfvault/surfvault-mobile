@@ -24,7 +24,7 @@ const adminApi = rootApi.injectEndpoints({
       }),
     }),
     createSurfBreak: builder.mutation({
-      invalidatesTags: [],
+      invalidatesTags: [ApiTag.SurfBreak, ApiTag.Map, ApiTag.Country],
       query: (payload: Record<string, unknown>) => ({
         url: '/admin/surf-break',
         method: 'POST',

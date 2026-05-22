@@ -30,6 +30,13 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     supportsTablet: true,
     bundleIdentifier: 'com.surfvaultapp.mobile',
     usesAppleSignIn: true,
+    // Universal Links: shared web URLs auto-open the app when installed.
+    // Path filtering (shareable content only) lives in the AASA file served
+    // at each host's /.well-known/apple-app-site-association.
+    associatedDomains: [
+      'applinks:app.surf-vault.com',
+      'applinks:share.surf-vault.com',
+    ],
     entitlements: {
       'com.apple.developer.applesignin': ['Default'],
     },
@@ -46,6 +53,20 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     edgeToEdgeEnabled: true,
     package: 'com.surfvaultapp.mobile',
+    // App Links: autoVerify against each host's /.well-known/assetlinks.json
+    // (must contain this package's release signing SHA-256 fingerprint).
+    // Route-level filtering happens in app/+native-intent.tsx.
+    intentFilters: [
+      {
+        action: 'VIEW',
+        autoVerify: true,
+        data: [
+          { scheme: 'https', host: 'app.surf-vault.com' },
+          { scheme: 'https', host: 'share.surf-vault.com' },
+        ],
+        category: ['BROWSABLE', 'DEFAULT'],
+      },
+    ],
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     permissions: [
       'ACCESS_FINE_LOCATION',
