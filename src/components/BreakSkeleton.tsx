@@ -1,15 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { View, Animated, StyleSheet, useColorScheme, Dimensions } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 /**
- * Skeleton for the surf break detail feed. Rendered BELOW the existing
- * ScreenHeader (which already renders back/favorite/share buttons), so
- * this component only covers the break name, date picker, and feed cards.
+ * Skeleton for the surf break detail feed. The break page floats its
+ * back/favorite/share controls over the content, so this stands in for the
+ * map hero, then the feed cards below it.
  */
 export default function BreakSkeleton() {
   const isDark = useColorScheme() === 'dark';
   const pulse = useRef(new Animated.Value(0.4)).current;
   const screenWidth = Dimensions.get('window').width;
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     const anim = Animated.loop(
@@ -30,12 +32,22 @@ export default function BreakSkeleton() {
 
   return (
     <View style={styles.wrap}>
-      {/* Break name + location + date pill */}
-      <View style={styles.headerWrap}>
-        <Block style={{ width: '55%', height: 22, borderRadius: 6 }} />
-        <Block style={{ width: '40%', height: 13, borderRadius: 4, marginTop: 8 }} />
-        <Block style={{ width: 110, height: 32, borderRadius: 10, marginTop: 12 }} />
+      {/* Map hero placeholder */}
+      <Block style={{ width: '100%', height: insets.top + 285, borderRadius: 0 }} />
+
+      {/* Locals rail */}
+      <Block style={{ width: 120, height: 20, borderRadius: 6, marginHorizontal: 16, marginTop: 14, marginBottom: 10 }} />
+      <View style={styles.railRow}>
+        {Array.from({ length: 4 }).map((_, i) => (
+          <View key={i} style={styles.railItem}>
+            <Block style={{ width: 68, height: 68, borderRadius: 34 }} />
+            <Block style={{ width: 44, height: 10, borderRadius: 4, marginTop: 8 }} />
+          </View>
+        ))}
       </View>
+
+      {/* Recent Sessions title */}
+      <Block style={{ width: 160, height: 20, borderRadius: 6, marginHorizontal: 16, marginTop: 8, marginBottom: 12 }} />
 
       {/* Feed cards */}
       {Array.from({ length: 2 }).map((_, i) => (
@@ -56,7 +68,8 @@ export default function BreakSkeleton() {
 
 const styles = StyleSheet.create({
   wrap: { flex: 1 },
-  headerWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
+  railRow: { flexDirection: 'row', paddingHorizontal: 12, gap: 8 },
+  railItem: { alignItems: 'center', width: 84 },
   card: { marginBottom: 16 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
 });

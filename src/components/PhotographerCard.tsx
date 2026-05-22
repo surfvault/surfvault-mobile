@@ -1,6 +1,6 @@
 import { View, Text, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
 import UserAvatar from './UserAvatar';
+import { useTrackedPush } from '../context/NavigationContext';
 
 interface PhotographerCardProps {
   photographer: {
@@ -23,12 +23,12 @@ const isNoteActive = (setAt?: string): boolean => {
 };
 
 export default function PhotographerCard({ photographer, compact = false }: PhotographerCardProps) {
-  const router = useRouter();
+  const trackedPush = useTrackedPush();
   const hasActiveNote =
     !!photographer.status_note && isNoteActive(photographer.status_note_set_at);
 
   const handlePress = () => {
-    router.push(`/user/${photographer.handle}`);
+    trackedPush(`/user/${photographer.handle}`);
   };
 
   if (compact) {

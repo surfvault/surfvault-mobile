@@ -139,7 +139,7 @@ export {
   useFollowUserMutation,
   useGetAccessRequestQuery,
   useGetPhotographersQuery,
-  useGetPhotographersAtBreakQuery,
+  useGetLocalsAtBreakQuery,
   useGetPopularTagsQuery,
   useGetSelfQuery,
   useGetUserFavoritesQuery,

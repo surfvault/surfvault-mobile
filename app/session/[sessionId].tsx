@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,7 @@ import {
   Switch,
   Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -71,7 +71,7 @@ import { generateUUID } from '../../src/helpers/uuid';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
 import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photoTimestamps';
 import { getViewerHash } from '../../src/helpers/viewerHash';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import SessionHero from '../../src/components/SessionHero';
 import SessionSkeleton from '../../src/components/SessionSkeleton';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 
@@ -109,6 +109,7 @@ export default function SessionDetailScreen() {
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
   const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
   const requireAuth = useRequireAuth();
 
@@ -1140,6 +1141,22 @@ export default function SessionDetailScreen() {
   // gray subtitle below the username only carries the date.
   const sessionDateLabel = session?.session_date ? formatDate(session.session_date) : '';
   const breakIsTappable = Boolean(showLocation && session?.surf_break_identifier);
+
+  // Hero background: the session's chosen thumbnail photo, else the first
+  // loaded photo. Locked/private sessions have no photos → null → hero falls
+  // back to an ocean color.
+  const heroImageUri = useMemo(() => {
+    if (isLocked) return null;
+    const heroPhoto =
+      (thumbnailPhotoId && sessionMedia.find((m: any) => m.id === thumbnailPhotoId)) ||
+      sessionMedia[0];
+    return heroPhoto?.url ?? heroPhoto?.thumbnail ?? null;
+  }, [isLocked, thumbnailPhotoId, sessionMedia]);
+
+  const goToPhotographer = useCallback(() => {
+    if (sessionHandle) trackedPush(`/user/${sessionHandle}`);
+  }, [sessionHandle, trackedPush]);
+  const openTagSheet = useCallback(() => setTagSheetVisible(true), []);
   const handleBreakPress = useCallback(() => {
     if (!breakIsTappable) return;
     const country = session.country_code ?? session.surf_break_country ?? '';
@@ -1151,19 +1168,6 @@ export default function SessionDetailScreen() {
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScreenHeader
-        title={session?.session_name ?? ''}
-        left={
-          <Pressable onPress={smartBack} hitSlop={8}>
-            <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
-          </Pressable>
-        }
-        right={
-          <Pressable onPress={handleEllipsisMenu} hitSlop={12}>
-            <Ionicons name="ellipsis-horizontal" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
-          </Pressable>
-        }
-      />
       <SafeAreaView className="flex-1 bg-white dark:bg-black" edges={[]}>
         {isLoading ? (
           <SessionSkeleton />
@@ -1176,92 +1180,49 @@ export default function SessionDetailScreen() {
             numColumns={isLocked ? 1 : NUM_COLUMNS}
             key={isLocked ? 'locked' : 'grid'}
             contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? (sessionAction === 'group' || sessionAction === 'ungroup' ? 150 : 80) : 0 }}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={isDark ? '#fff' : '#000'}
+                colors={[isDark ? '#ffffff' : '#000000']}
+                progressViewOffset={insets.top}
+              />
+            }
             ListHeaderComponent={
               <View
-                style={styles.headerWrap}
                 onLayout={(e) => { headerHeightRef.current = e.nativeEvent.layout.height; }}
               >
-                {/* Photographer + date */}
                 {session && (
-                  <Pressable
-                    onPress={() => sessionHandle && trackedPush(`/user/${sessionHandle}`)}
-                    style={styles.photographerRow}
-                  >
-                    <UserAvatar
-                      uri={session.user_picture}
-                      name={session.user_name ?? sessionHandle}
-                      size={56}
-                      verified={session.user_verified}
-                      userType={session.user_type}
-                    />
-                    <View style={{ marginLeft: 12, flex: 1 }}>
-                      <View style={styles.nameRow}>
-                        <Text style={[styles.photographerName, { color: isDark ? '#fff' : '#111827' }]}>
-                          {session.user_name ?? sessionHandle}
-                        </Text>
-                        {(taggedUsers.length > 0 || isOwner) && (
-                          <Pressable
-                            onPress={(e) => { e.stopPropagation(); setTagSheetVisible(true); }}
-                            hitSlop={8}
-                            style={[
-                              styles.taggedBadge,
-                              taggedUsers.length > 0 && styles.taggedBadgeLarge,
-                            ]}
-                          >
-                            <Ionicons
-                              name="people-outline"
-                              size={taggedUsers.length > 0 ? 14 : 12}
-                              color={isDark ? '#9ca3af' : '#6b7280'}
-                            />
-                            {taggedUsers.length > 0 ? (
-                              <Text style={[styles.taggedBadgeText, styles.taggedBadgeTextLarge, { color: isDark ? '#9ca3af' : '#6b7280' }]}>{taggedUsers.length}</Text>
-                            ) : isOwner ? (
-                              <Text style={[styles.taggedBadgeText, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Tag Users</Text>
-                            ) : null}
-                          </Pressable>
-                        )}
-                      </View>
-                      {(showLocation || sessionDateLabel) && (
-                        <View style={styles.subtitleRow}>
-                          {showLocation && (
-                            breakIsTappable ? (
-                              <Pressable
-                                onPress={(e) => { e.stopPropagation(); handleBreakPress(); }}
-                                hitSlop={12}
-                                style={styles.breakLink}
-                              >
-                                <Ionicons name="location" size={14} color={isDark ? '#e5e7eb' : '#374151'} />
-                                <Text style={[styles.breakLinkText, { color: isDark ? '#e5e7eb' : '#374151' }]} numberOfLines={1}>
-                                  {session.surf_break_name}
-                                </Text>
-                              </Pressable>
-                            ) : (
-                              <View style={styles.breakLink}>
-                                <Ionicons name="location-outline" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
-                                <Text style={[styles.breakLinkText, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-                                  {session.surf_break_name}
-                                </Text>
-                              </View>
-                            )
-                          )}
-                          {showLocation && sessionDateLabel && (
-                            <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}> · </Text>
-                          )}
-                          {sessionDateLabel && (
-                            <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                              {sessionDateLabel}
-                            </Text>
-                          )}
-                        </View>
-                      )}
-                    </View>
-                  </Pressable>
+                  <SessionHero
+                    imageUri={heroImageUri}
+                    sessionName={session.session_name ?? 'Session'}
+                    userPicture={session.user_picture}
+                    userName={session.user_name}
+                    userHandle={sessionHandle}
+                    userType={session.user_type}
+                    userVerified={session.user_verified}
+                    surfBreakName={showLocation ? session.surf_break_name : null}
+                    breakIsTappable={breakIsTappable}
+                    onBreakPress={handleBreakPress}
+                    dateLabel={sessionDateLabel}
+                    onAvatarPress={goToPhotographer}
+                    taggedUsers={taggedUsers}
+                    isOwner={isOwner}
+                    onTagPress={openTagSheet}
+                    isDark={isDark}
+                    topInset={insets.top}
+                  />
                 )}
 
-                {/* Group filter chips */}
+                <View style={styles.belowHero}>
+                {/* Group filter chips — horizontally scrollable */}
                 {(groups.length > 0 || isOwner) && (
-                  <View style={styles.groupChips}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.groupChipsScroll}
+                  >
                     {groups.length > 0 && (
                       <Pressable
                         onPress={() => handleGroupFilter(null)}
@@ -1311,10 +1272,13 @@ export default function SessionDetailScreen() {
                         }]}>{groups.length === 0 ? 'Create Group' : 'New'}</Text>
                       </Pressable>
                     )}
-                  </View>
+                  </ScrollView>
                 )}
 
-                <AccessBanner isPrivate={isPrivate} accessRequest={accessRequest} scope="session" />
+                <View style={styles.accessBannerWrap}>
+                  <AccessBanner isPrivate={isPrivate} accessRequest={accessRequest} scope="session" />
+                </View>
+                </View>
               </View>
             }
             ListEmptyComponent={
@@ -1342,6 +1306,16 @@ export default function SessionDetailScreen() {
             showsVerticalScrollIndicator={false}
           />
         )}
+
+        {/* Floating controls — pinned over the hero */}
+        <View pointerEvents="box-none" style={[styles.controls, { paddingTop: insets.top + 6 }]}>
+          <Pressable onPress={smartBack} hitSlop={8} style={styles.ctrlBtn}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
+          </Pressable>
+          <Pressable onPress={handleEllipsisMenu} hitSlop={8} style={styles.ctrlBtn}>
+            <Ionicons name="ellipsis-horizontal" size={20} color="#fff" />
+          </Pressable>
+        </View>
 
         {/* Floating "Request Photos" — non-owners, no active action, not gated */}
         {!isOwner && session && !sessionAction && !isLocked && (
@@ -1807,6 +1781,27 @@ export default function SessionDetailScreen() {
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  controls: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  ctrlBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  belowHero: { paddingTop: 12 },
+  groupChipsScroll: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 18 },
+  accessBannerWrap: { paddingHorizontal: 16 },
   headerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 },
   sessionName: { fontSize: 20, fontWeight: '700', marginBottom: 10 },
   photographerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
