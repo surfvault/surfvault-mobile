@@ -33,14 +33,29 @@ const userApi = rootApi.injectEndpoints({
         limit,
         continuationToken,
         tagged,
+        surfBreakId,
       }: {
         handle: string;
         selfFlag: boolean;
         limit?: number;
         continuationToken?: string;
         tagged?: boolean;
+        surfBreakId?: string;
       }) => ({
-        url: `/user/${handle}/sessions?self=${selfFlag}&limit=${limit ?? 10}&continuationToken=${continuationToken ?? ''}${tagged ? '&tagged=true' : ''}`,
+        url: `/user/${handle}/sessions?self=${selfFlag}&limit=${limit ?? 10}&continuationToken=${continuationToken ?? ''}${tagged ? '&tagged=true' : ''}${surfBreakId ? `&surfBreakId=${surfBreakId}` : ''}`,
+        method: 'GET',
+      }),
+    }),
+    getUserSessionBreaks: builder.query({
+      providesTags: [ApiTag.Session],
+      query: ({
+        handle,
+        selfFlag,
+      }: {
+        handle: string;
+        selfFlag: boolean;
+      }) => ({
+        url: `/user/${handle}/session-breaks?self=${selfFlag}`,
         method: 'GET',
       }),
     }),
@@ -390,6 +405,7 @@ export const {
   useGetUserFavoritesQuery,
   useGetUserFollowingQuery,
   useGetUserSessionsQuery,
+  useGetUserSessionBreaksQuery,
   useUpdateUserRecentSearchesMutation,
   useRequestAccountDeletionMutation,
   useCancelAccountDeletionMutation,

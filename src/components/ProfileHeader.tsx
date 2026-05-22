@@ -35,6 +35,10 @@ interface ProfileHeaderProps {
   onMoreOptions?: () => void;
   // Tap a stat count to open followers/following list
   onViewStats?: (tab: 'followers' | 'following') => void;
+  // Tap the "spots" stat to open the break filter (profile tab, own sessions).
+  onViewSpots?: () => void;
+  // Highlight the spots stat when a break filter is currently applied.
+  spotsFilterActive?: boolean;
 }
 
 export default function ProfileHeader({
@@ -56,6 +60,8 @@ export default function ProfileHeader({
   onShare,
   onMoreOptions,
   onViewStats,
+  onViewSpots,
+  spotsFilterActive = false,
   showStorage = false,
   showActiveToggle = false,
 }: ProfileHeaderProps) {
@@ -166,16 +172,21 @@ export default function ProfileHeader({
             const statsTappable = Boolean(onViewStats) && (isSelf || !isPrivate);
             return (
               <View style={s.statsRow}>
-                <View style={s.statItem}>
-                  <Text style={[s.statNumber, { color: isDark ? '#fff' : '#111827' }]}>
+                <Pressable
+                  onPress={onViewSpots}
+                  disabled={!onViewSpots}
+                  style={s.statItem}
+                  hitSlop={4}
+                >
+                  <Text style={[s.statNumber, { color: spotsFilterActive ? '#0ea5e9' : (isDark ? '#fff' : '#111827') }]}>
                     {isShaper
                       ? boardsCount
                       : isAdvertiser
                         ? (profile?.adsCount ?? profile?.ads_count ?? 0)
                         : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
                   </Text>
-                  <Text style={s.statLabel}>{isShaper ? 'boards' : isAdvertiser ? 'ads' : 'spots'}</Text>
-                </View>
+                  <Text style={[s.statLabel, spotsFilterActive && { color: '#0ea5e9' }]}>{isShaper ? 'boards' : isAdvertiser ? 'ads' : 'spots'}</Text>
+                </Pressable>
                 <Pressable
                   onPress={statsTappable ? () => onViewStats?.('followers') : undefined}
                   disabled={!statsTappable}

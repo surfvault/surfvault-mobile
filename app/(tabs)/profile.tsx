@@ -31,6 +31,7 @@ import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 import {
   useGetUserQuery,
   useGetUserSessionsQuery,
+  useGetUserSessionBreaksQuery,
   ApiTag,
   rootApi,
   useGetUserFavoritesQuery,
@@ -296,6 +297,19 @@ export default function ProfileScreen() {
   const [updateFavorite] = useUpdateUserFavoritesMutation();
   const favorites = isAuthenticated ? (favoritesData?.results?.favorites ?? []) : [];
 
+  // Break filter (grid/list session views only). Picks from breaks the user
+  // actually has sessions at, so there are never dead-end empty filters.
+  const [breakFilterId, setBreakFilterId] = useState<string | null>(null);
+  const [breakFilterSheetVisible, setBreakFilterSheetVisible] = useState(false);
+
+  const supportsBreakFilter = !isShaperSelf && !isAdvertiserSelf;
+
+  const { data: sessionBreaksData, isFetching: isFetchingSessionBreaks } = useGetUserSessionBreaksQuery(
+    { handle: user?.handle ?? '', selfFlag: true },
+    { skip: !user?.handle || !supportsBreakFilter || !breakFilterSheetVisible }
+  );
+  const sessionBreaks = sessionBreaksData?.results?.breaks ?? [];
+
   // Sessions
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
@@ -306,7 +320,7 @@ export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   const { data: sessionsData, isFetching, refetch: refetchSessions } = useGetUserSessionsQuery(
-    { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken },
+    { handle: user?.handle ?? '', selfFlag: true, limit: 10, continuationToken, surfBreakId: breakFilterId ?? undefined },
     { skip: !user?.handle || isShaperSelf || isAdvertiserSelf }
   );
 
@@ -351,6 +365,7 @@ export default function ProfileScreen() {
     taggedSeenIdsRef.current = new Set();
     setTaggedSessions([]);
     setTaggedToken('');
+    setBreakFilterId(null);
   }, [user?.id]);
 
   useEffect(() => {
@@ -395,6 +410,32 @@ export default function ProfileScreen() {
     isFetchingMoreRef.current = true;
     setContinuationToken(nextToken);
   }, [sessionsData, isFetching]);
+
+  // Apply (or clear, when id is null) the break filter. Batch the filter +
+  // pagination reset in one handler so the next render queries the new break
+  // from page 1 with a clean dedup set — never via a useEffect on breakFilterId
+  // (that races the stale RTK Query cache, same gotcha as the web group filter).
+  const handleSelectBreakFilter = useCallback((id: string | null) => {
+    setBreakFilterId(id);
+    setBreakFilterSheetVisible(false);
+    setTabBarVisible(true);
+    seenIdsRef.current = new Set();
+    setSessions([]);
+    setContinuationToken('');
+    // The filter only drives the grid/list session views, so surface the
+    // result if the user picked a break from the tagged/favorites tab.
+    if (id) setActiveTab((t) => (t === 'grid' || t === 'list' ? t : 'grid'));
+  }, [setTabBarVisible]);
+
+  const handleOpenBreakFilter = useCallback(() => {
+    setBreakFilterSheetVisible(true);
+    setTabBarVisible(false);
+  }, [setTabBarVisible]);
+
+  const handleCloseBreakFilter = useCallback(() => {
+    setBreakFilterSheetVisible(false);
+    setTabBarVisible(true);
+  }, [setTabBarVisible]);
 
   useEffect(() => {
     const results = taggedData?.results;
@@ -633,6 +674,8 @@ export default function ProfileScreen() {
         onViewStats={(tab) => {
           if (user?.handle) trackedPush(`/follow-stats/${user.handle}?tab=${tab}` as any);
         }}
+        onViewSpots={supportsBreakFilter ? handleOpenBreakFilter : undefined}
+        spotsFilterActive={!!breakFilterId}
       />
       <View style={[s.tabBar, { borderBottomColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
         <Pressable onPress={() => setActiveTab('grid')} style={[s.tabBtn, activeTab === 'grid' && s.tabBtnActive]}>
@@ -1022,6 +1065,61 @@ export default function ProfileScreen() {
         </View>
       )}
 
+      {/* Break filter picker — lists only breaks the user has sessions at */}
+      {breakFilterSheetVisible && (
+        <View style={[s.sheetOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={handleCloseBreakFilter} />
+          <View style={[s.breakSheet, { backgroundColor: isDark ? '#111827' : '#fff' }]}>
+            <View style={s.sheetHandle}>
+              <View style={[s.sheetHandleBar, { backgroundColor: isDark ? '#4b5563' : '#d1d5db' }]} />
+            </View>
+            <Text style={[s.filterSheetTitle, { color: isDark ? '#fff' : '#111827' }]}>Filter by break</Text>
+            <ScrollView style={s.breakSheetResults} showsVerticalScrollIndicator={false}>
+              <Pressable
+                onPress={() => handleSelectBreakFilter(null)}
+                style={[s.breakOption, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
+              >
+                <Ionicons name="apps-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                <Text style={[s.filterOptionName, { flex: 1, marginLeft: 10, color: isDark ? '#fff' : '#111827' }]}>
+                  All breaks
+                </Text>
+                {!breakFilterId && <Ionicons name="checkmark" size={18} color="#0ea5e9" />}
+              </Pressable>
+              {isFetchingSessionBreaks && <ActivityIndicator size="small" style={{ marginVertical: 16 }} />}
+              {sessionBreaks.map((brk: any) => {
+                const isActive = brk.id === breakFilterId;
+                return (
+                  <Pressable
+                    key={brk.id}
+                    onPress={() => handleSelectBreakFilter(brk.id)}
+                    style={[s.breakOption, { borderBottomColor: isDark ? '#1f2937' : '#f3f4f6' }]}
+                  >
+                    <Ionicons name="location-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                    <View style={{ marginLeft: 10, flex: 1 }}>
+                      <Text style={[s.filterOptionName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                        {brk.name}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: isDark ? '#9ca3af' : '#6b7280', marginTop: 1 }} numberOfLines={1}>
+                        {[brk.region?.replaceAll('_', ' '), brk.country_code].filter(Boolean).join(' · ')}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: isDark ? '#6b7280' : '#9ca3af', marginRight: 8 }}>
+                      {brk.session_count}
+                    </Text>
+                    {isActive && <Ionicons name="checkmark" size={18} color="#0ea5e9" />}
+                  </Pressable>
+                );
+              })}
+              {!isFetchingSessionBreaks && sessionBreaks.length === 0 && (
+                <Text style={{ color: '#9ca3af', textAlign: 'center', paddingVertical: 24, fontSize: 14 }}>
+                  No sessions yet
+                </Text>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      )}
+
       <ActionSheet
         visible={menuVisible}
         sections={menuSections}
@@ -1153,6 +1251,8 @@ const s = StyleSheet.create({
   tabBtnActive: {
     borderBottomWidth: 2, borderBottomColor: '#111827',
   },
+  filterSheetTitle: { fontSize: 17, fontWeight: '700', paddingHorizontal: 16, paddingBottom: 4 },
+  filterOptionName: { fontSize: 14, fontWeight: '600' },
   favRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 14,

@@ -146,6 +146,7 @@ export {
   useGetUserFollowingQuery,
   useGetUserQuery,
   useGetUserSessionsQuery,
+  useGetUserSessionBreaksQuery,
   useRequestAccessToUserMutation,
   useUpdateAccessRequestMutation,
   useUpdateUserFavoritesMutation,
