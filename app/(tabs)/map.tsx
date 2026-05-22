@@ -16,7 +16,7 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
@@ -38,45 +38,82 @@ type FilterType = 'all' | 'favorites' | 'mine';
 const SurfBreakMarker = React.memo(({
   sb,
   markerColor,
-  isDark,
+  isSelected,
   onMarkerPress,
-  onCalloutPress,
-  markerRefSetter,
 }: {
   sb: any;
   markerColor: string;
-  isDark: boolean;
+  isSelected: boolean;
   onMarkerPress: (sb: any) => void;
-  onCalloutPress: (sb: any) => void;
-  markerRefSetter: (id: string, ref: any) => void;
 }) => {
+  // Android snapshots the custom marker view to a bitmap; with tracking off
+  // from the first frame it paints blank. Track briefly on mount and whenever
+  // the appearance changes (color, or dot<->pin on selection), then stop.
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    setTracks(true);
+    const t = setTimeout(() => setTracks(false), 500);
+    return () => clearTimeout(t);
+  }, [markerColor, isSelected]);
+
   const handlePress = useCallback(() => onMarkerPress(sb), [sb, onMarkerPress]);
-  const handleCalloutPress = useCallback(() => onCalloutPress(sb), [sb, onCalloutPress]);
-  const handleRef = useCallback((ref: any) => markerRefSetter(sb.id, ref), [sb.id, markerRefSetter]);
 
   return (
     <Marker
       key={sb.id}
-      ref={handleRef}
       coordinate={{
         latitude: parseFloat(sb.coordinates?.lat) || 0,
         longitude: parseFloat(sb.coordinates?.lon) || 0,
       }}
-      tracksViewChanges={false}
+      tracksViewChanges={tracks}
       onPress={handlePress}
+      // iOS (Apple Maps) propagates a marker tap to the MapView's onPress too,
+      // which would immediately clear the selection this press just set. Stop it
+      // here. No-op on Android (it never propagates marker taps).
+      stopPropagation
+      // Only the selected pin gets an anchor (tip on the coordinate) + raised
+      // zIndex. Setting `anchor` on the plain dot breaks Marker onPress on iOS,
+      // so the unselected dot is left with default anchor/zIndex.
+      {...(isSelected ? { anchor: { x: 0.5, y: 1 }, zIndex: 999 } : null)}
     >
-      <View style={[styles.marker, { backgroundColor: markerColor }]} />
-      <Callout tooltip onPress={handleCalloutPress}>
-        <View style={[styles.callout, { backgroundColor: isDark ? '#1f2937' : '#ffffff' }]}>
-          <Text style={[styles.calloutName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-            {sb.name}
-          </Text>
-          <Text style={[styles.calloutSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-            {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
-          </Text>
-          <Text style={styles.calloutAction}>View Sessions →</Text>
+      {isSelected ? (
+        <View style={styles.selectedPin}>
+          <Ionicons name="location" size={44} color={markerColor} />
         </View>
-      </Callout>
+      ) : (
+        <View style={[styles.marker, { backgroundColor: markerColor }]} />
+      )}
+    </Marker>
+  );
+});
+
+// Cluster bubble. Same Android tracksViewChanges caveat as SurfBreakMarker —
+// track briefly (re-arming on count/color change) then stop.
+const ClusterMarker = React.memo(({
+  id,
+  coordinate,
+  count,
+  color,
+  onPress,
+}: {
+  id: string | number;
+  coordinate: { latitude: number; longitude: number };
+  count: number;
+  color: string;
+  onPress: () => void;
+}) => {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    setTracks(true);
+    const t = setTimeout(() => setTracks(false), 500);
+    return () => clearTimeout(t);
+  }, [count, color]);
+
+  return (
+    <Marker key={`cluster-${id}`} coordinate={coordinate} onPress={onPress} tracksViewChanges={tracks}>
+      <View style={[styles.cluster, { backgroundColor: color }]}>
+        <Text style={styles.clusterText}>{count}</Text>
+      </View>
     </Marker>
   );
 });
@@ -115,7 +152,6 @@ export default function MapScreen() {
   const dispatch = useDispatch();
   const mapRef = useRef<MapView>(null);
   const searchInputRef = useRef<TextInput>(null);
-  const markerRefs = useRef<Record<string, any>>({});
   const hasAnimatedToLocation = useRef(false);
   const isAnimatingRef = useRef(false);
   const [locationGranted, setLocationGranted] = useState(false);
@@ -199,7 +235,6 @@ export default function MapScreen() {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [selectedBreak, setSelectedBreak] = useState<any>(null);
-  const pendingCalloutRef = useRef<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regionStable, setRegionStable] = useState(true);
@@ -266,40 +301,6 @@ export default function MapScreen() {
 
   // Cap markers to prevent clustering library from crashing with too many
   const surfBreaks = committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks;
-
-  // Show pending callout once the marker renders after data loads
-  useEffect(() => {
-    if (!pendingCalloutRef.current) return;
-    const id = pendingCalloutRef.current;
-    let attempts = 0;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const tryShow = () => {
-      if (cancelled || attempts++ > 10) {
-        pendingCalloutRef.current = null;
-        return;
-      }
-      try {
-        const ref = markerRefs.current[id];
-        if (ref && typeof ref.showCallout === 'function') {
-          ref.showCallout();
-          pendingCalloutRef.current = null;
-          return;
-        }
-      } catch {}
-      timer = setTimeout(tryShow, 250);
-    };
-    timer = setTimeout(tryShow, 300);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [data]);
-
-  // Clean up stale marker refs
-  useEffect(() => {
-    const currentIds = new Set(surfBreaks.map((sb: any) => sb.id));
-    for (const id of Object.keys(markerRefs.current)) {
-      if (!currentIds.has(id)) delete markerRefs.current[id];
-    }
-  }, [surfBreaks]);
 
   const { data: searchData, isFetching: searchLoading } = useGetSurfBreaksQuery(
     { search: debouncedTerm, limit: 8, continuationToken: '' },
@@ -396,7 +397,7 @@ export default function MapScreen() {
     if (id) {
       const country = sb.country_code;
       const region = sb.region && sb.region !== '0' ? sb.region : '0';
-      // Stash the break so the map can re-center + reopen its callout when
+      // Stash the break so the map can re-center + reopen its info card when
       // the user pops back from the break page.
       pendingRestoreBreak = sb;
       trackedPush(`/break/${country}/${region}/${id}` as any);
@@ -405,7 +406,7 @@ export default function MapScreen() {
 
   // When the map regains focus and we have a pending break (the user just
   // pressed back from a break page they opened from the map), animate to it
-  // and reopen the callout so they pick up exactly where they left off.
+  // and reopen its info card so they pick up exactly where they left off.
   useFocusEffect(
     useCallback(() => {
       const sb = pendingRestoreBreak;
@@ -423,36 +424,13 @@ export default function MapScreen() {
         latitudeDelta: 0.02,
         longitudeDelta: 0.02,
       }, 500);
+      // Reselect the break so its info card reopens where the user left off.
       setSelectedBreak(sb);
-
-      // Reopen the callout once the marker is mounted. Retry briefly in case
-      // the marker hasn't rendered yet — same pattern as pendingCalloutRef.
-      let attempts = 0;
-      let cancelled = false;
-      const tryShow = () => {
-        if (cancelled || attempts++ > 12) return;
-        const ref = markerRefs.current[sb.id];
-        if (ref?.showCallout) {
-          try { ref.showCallout(); } catch {}
-          return;
-        }
-        setTimeout(tryShow, 200);
-      };
-      const t = setTimeout(tryShow, 600);
-      return () => { cancelled = true; clearTimeout(t); };
     }, [])
   );
 
   const handleMarkerPress = useCallback((sb: any) => {
     setSelectedBreak(sb);
-    setTimeout(() => {
-      try { markerRefs.current[sb.id]?.showCallout?.(); } catch {}
-    }, 100);
-  }, []);
-
-  const markerRefSetter = useCallback((id: string, ref: any) => {
-    if (ref) markerRefs.current[id] = ref;
-    else delete markerRefs.current[id];
   }, []);
 
   const handleSearchInput = useCallback((text: string) => {
@@ -490,7 +468,6 @@ export default function MapScreen() {
         longitudeDelta: 0.02,
       }, 800);
       setSelectedBreak(sb);
-      pendingCalloutRef.current = sb.id;
     }
     setSearchOpen(false);
     setSearchTerm('');
@@ -509,34 +486,33 @@ export default function MapScreen() {
       key={sb.id}
       sb={sb}
       markerColor={markerColor}
-      isDark={isDark}
+      isSelected={selectedBreak?.id === sb.id}
       onMarkerPress={handleMarkerPress}
-      onCalloutPress={navigateToBreakPage}
-      markerRefSetter={markerRefSetter}
     />
-  )), [surfBreaks, markerColor, isDark, handleMarkerPress, navigateToBreakPage, markerRefSetter]);
+  )), [surfBreaks, markerColor, selectedBreak, handleMarkerPress]);
 
   const renderCluster = useCallback((cluster: any) => {
     const { id, geometry, onPress, properties } = cluster;
     const count = properties?.point_count ?? 0;
     return (
-      <Marker
+      <ClusterMarker
         key={`cluster-${id}`}
+        id={id}
         coordinate={{
           latitude: geometry.coordinates[1],
           longitude: geometry.coordinates[0],
         }}
+        count={count}
+        color={markerColor}
         onPress={onPress}
-        tracksViewChanges={false}
-      >
-        <View style={[styles.cluster, { backgroundColor: markerColor }]}>
-          <Text style={styles.clusterText}>{count}</Text>
-        </View>
-      </Marker>
+      />
     );
   }, [markerColor]);
 
-  const handleMapPress = useCallback(() => {
+  const handleMapPress = useCallback((e: any) => {
+    // On iOS a marker tap also fires the map's onPress with this action; ignore
+    // it so tapping a marker doesn't immediately dismiss its info card.
+    if (e?.nativeEvent?.action === 'marker-press') return;
     if (searchOpen && !searchTerm) {
       setSearchOpen(false);
       Keyboard.dismiss();
@@ -587,6 +563,7 @@ export default function MapScreen() {
         userInterfaceStyle={isDark ? 'dark' : 'light'}
         showsUserLocation={locationGranted}
         showsMyLocationButton={false}
+        toolbarEnabled={false}
         clusterColor={markerColor}
         clusterTextColor="#ffffff"
         radius={50}
@@ -602,7 +579,7 @@ export default function MapScreen() {
         {pendingBreakCoord && (
           <Marker
             coordinate={pendingBreakCoord}
-            tracksViewChanges={false}
+            tracksViewChanges={true}
             anchor={{ x: 0.5, y: 1 }}
           >
             <Ionicons name="location" size={36} color="#22c55e" />
@@ -873,10 +850,36 @@ export default function MapScreen() {
         style={[styles.myLocationBtn, {
           backgroundColor: isDark ? 'rgba(17,24,39,0.85)' : 'rgba(255,255,255,0.9)',
           shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
+          bottom: selectedBreak ? 104 : 16,
         }]}
       >
         <Ionicons name="navigate-outline" size={18} color={isDark ? '#d1d5db' : '#374151'} />
       </Pressable>
+
+      {/* Selected break info card — replaces the native map Callout, which is
+          unreliable for custom content on Android. Driven purely by state, so
+          it works identically on both platforms. */}
+      {selectedBreak && (
+        <View style={styles.breakCardWrap} pointerEvents="box-none">
+          <Pressable
+            onPress={() => navigateToBreakPage(selectedBreak)}
+            style={[styles.breakCard, { backgroundColor: isDark ? '#1f2937' : '#ffffff' }]}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.calloutName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
+                {selectedBreak.name}
+              </Text>
+              <Text style={[styles.calloutSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
+                {selectedBreak.region ? `${selectedBreak.region.replaceAll('_', ' ')} · ` : ''}{selectedBreak.country_code ?? ''}
+              </Text>
+              <Text style={styles.calloutAction}>View Sessions →</Text>
+            </View>
+            <Pressable onPress={dismissSelection} hitSlop={10} style={styles.breakCardClose}>
+              <Ionicons name="close" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+            </Pressable>
+          </Pressable>
+        </View>
+      )}
 
       {isSuperAdmin && (
         <AddSurfBreakSheet
@@ -898,9 +901,8 @@ const styles = StyleSheet.create({
     width: 12, height: 12, borderRadius: 6,
     borderWidth: 2, borderColor: '#fff',
   },
-  markerSelected: {
-    width: 18, height: 18, borderRadius: 9,
-    borderWidth: 3,
+  selectedPin: {
+    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
   },
   cluster: {
     width: 36, height: 36, borderRadius: 18,
@@ -908,15 +910,19 @@ const styles = StyleSheet.create({
     borderWidth: 2.5, borderColor: '#fff',
   },
   clusterText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  callout: {
-    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
-    minWidth: 160, maxWidth: 300,
-    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
+  breakCardWrap: {
+    position: 'absolute', left: 12, right: 12, bottom: 16,
   },
-  calloutName: { fontSize: 14, fontWeight: '700' },
-  calloutSub: { fontSize: 11, marginTop: 1 },
-  calloutAction: { fontSize: 11, fontWeight: '600', color: '#0ea5e9', marginTop: 4 },
+  breakCard: {
+    flexDirection: 'row', alignItems: 'center',
+    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 12,
+    shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  breakCardClose: { padding: 4, marginLeft: 8 },
+  calloutName: { fontSize: 16, fontWeight: '700' },
+  calloutSub: { fontSize: 12, marginTop: 1 },
+  calloutAction: { fontSize: 13, fontWeight: '600', color: '#0ea5e9', marginTop: 5 },
   loadingBadge: {
     position: 'absolute', top: 60, alignSelf: 'center',
     borderRadius: 20, padding: 8,

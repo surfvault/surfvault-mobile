@@ -218,10 +218,11 @@ export default function SurfBreakDetailScreen() {
     setContinuationToken('');
   }, []);
 
-  const handleDateChange = useCallback((_event: any, date?: Date) => {
+  const handleDateChange = useCallback((event: any, date?: Date) => {
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
-      if (date) { setSelectedDate(date); resetPagination(); }
+      // event.type is 'dismissed' when CANCEL/back is pressed — only apply on 'set'.
+      if (event?.type === 'set' && date) { setSelectedDate(date); resetPagination(); }
     } else {
       // iOS spinner — just update picker state, apply on Done
       if (date) setPickerDate(date);
@@ -348,17 +349,22 @@ export default function SurfBreakDetailScreen() {
           </View>
         </View>
         {showDatePicker && (
-          <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDatePicker(false)} />
-            <View style={[styles.sheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
-              <View style={styles.sheetHeader}>
-                <Pressable onPress={handleDateDone}>
-                  <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
-                </Pressable>
+          Platform.OS === 'android' ? (
+            // Android renders its own native dialog (with CANCEL/OK) — no custom sheet.
+            <DateTimePicker value={pickerDate} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} />
+          ) : (
+            <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
+              <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDatePicker(false)} />
+              <View style={[styles.sheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
+                <View style={styles.sheetHeader}>
+                  <Pressable onPress={handleDateDone}>
+                    <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
+                  </Pressable>
+                </View>
+                <DateTimePicker value={pickerDate} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} style={{ height: 200 }} />
               </View>
-              <DateTimePicker value={pickerDate} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} style={{ height: 200 }} />
             </View>
-          </View>
+          )
         )}
       </SafeAreaView>
     </>

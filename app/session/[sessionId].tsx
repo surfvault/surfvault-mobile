@@ -1319,7 +1319,7 @@ export default function SessionDetailScreen() {
 
         {/* Floating "Request Photos" — non-owners, no active action, not gated */}
         {!isOwner && session && !sessionAction && !isLocked && (
-          <Pressable onPress={() => handleStartAction('request')} style={styles.requestFab}>
+          <Pressable onPress={() => handleStartAction('request')} style={[styles.requestFab, { bottom: insets.bottom + 16 }]}>
             <Ionicons name="camera-outline" size={18} color="#ffffff" />
             <Text style={styles.requestFabText}>Request Photos</Text>
           </Pressable>
@@ -1331,6 +1331,7 @@ export default function SessionDetailScreen() {
             <View style={[styles.actionBarTall, {
               backgroundColor: isDark ? ac.bgDark : ac.bg,
               borderTopColor: isDark ? ac.borderDark : ac.border,
+              paddingBottom: insets.bottom + 14,
             }]}>
               <View style={styles.actionBarTopRow}>
                 <Pressable onPress={cancelAction} hitSlop={8}>
@@ -1390,6 +1391,7 @@ export default function SessionDetailScreen() {
             <View style={[styles.actionBar, {
               backgroundColor: isDark ? ac.bgDark : ac.bg,
               borderTopColor: isDark ? ac.borderDark : ac.border,
+              paddingBottom: insets.bottom + 14,
             }]}>
               <Pressable onPress={cancelAction} hitSlop={8}>
                 <Ionicons name="close" size={24} color={isDark ? ac.textDark : ac.text} />

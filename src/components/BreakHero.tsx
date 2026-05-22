@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform, Dimensions } from 'react-native';
 import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
@@ -48,6 +48,16 @@ function BreakHero({
   const hasCoords = lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon);
   const heroHeight = topInset + HERO_BODY;
 
+  // Android snapshots a custom marker view to a bitmap once; with
+  // tracksViewChanges=false from the start, the Ionicons glyph hasn't painted
+  // at capture time so the pin renders blank. Track briefly, then stop.
+  const [tracksMarker, setTracksMarker] = useState(true);
+  useEffect(() => {
+    if (!hasCoords) return;
+    const t = setTimeout(() => setTracksMarker(false), 800);
+    return () => clearTimeout(t);
+  }, [hasCoords]);
+
   const initialRegion: Region | undefined = hasCoords
     ? { latitude: lat as number, longitude: lon as number, latitudeDelta: 0.06, longitudeDelta: 0.06 }
     : undefined;
@@ -78,7 +88,7 @@ function BreakHero({
             <Marker
               coordinate={{ latitude: lat as number, longitude: lon as number }}
               anchor={{ x: 0.5, y: 1 }}
-              tracksViewChanges={false}
+              tracksViewChanges={tracksMarker}
             >
               <View style={styles.pin}>
                 <Ionicons name="location" size={40} color="#0ea5e9" />
