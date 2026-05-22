@@ -11,7 +11,7 @@ import {
   Platform,
   RefreshControl,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -24,19 +24,16 @@ import {
   useGetSurfBreakSessionsQuery,
   useUpdateUserFavoritesMutation,
   useGetAdsQuery,
-  useGetShapersForSurfBreakQuery,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
-import ScreenHeader from '../../src/components/ScreenHeader';
+import BreakHero from '../../src/components/BreakHero';
 import SponsoredCard from '../../src/components/SponsoredCard';
-import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
-import LocalPhotographersRail from '../../src/components/LocalPhotographersRail';
+import LocalsRail from '../../src/components/LocalsRail';
 import {
   // groupAdsByPartner intentionally not imported — Phase B retired
   // partner-level ad grouping; each ad is its own promo slot.
   interleavePromoGroups,
-  zipPromoGroups,
   type FeedRow,
 } from '../../src/helpers/interleaveAds';
 
@@ -64,6 +61,7 @@ export default function SurfBreakDetailScreen() {
   const requireAuth = useRequireAuth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
 
   const [continuationToken, setContinuationToken] = useState('');
   const [sessions, setSessions] = useState<any[]>([]);
@@ -116,33 +114,15 @@ export default function SurfBreakDetailScreen() {
     [adsData]
   );
 
-  // Local shapers — region match (or country fallback when this break has
-  // no region). Same _kind: 'ad' | 'shaper' tagging convention as Discover
-  // so the renderer can dispatch on the first entry of each promo slot.
-  const { data: shapersForBreakData } = useGetShapersForSurfBreakQuery(
-    { breakId: breakData?.id ?? '', limit: 10 },
-    { skip: !breakData?.id }
-  );
-  const breakShapers = useMemo(
-    () => shapersForBreakData?.results?.shapers || [],
-    [shapersForBreakData]
+  // Promo stream is ads only — local photographers + shapers render in the
+  // LocalsRail above the feed, not interleaved here. Each ad is its own promo
+  // slot (single-element group); no partner-level grouping (Phase B).
+  const feedAds = useMemo(
+    () => breakAds.map((a: any) => [{ ...a, _kind: 'ad' as const }]),
+    [breakAds]
   );
 
-  // Combined promo stream: shapers + ads share the same AD_EVERY_N_ITEMS
-  // cadence, alternating slot-by-slot (ad-first) so neither side crowds the
-  // other out. Each `_kind` tag lets the renderer dispatch per slot.
-  const feedAds = useMemo(() => {
-    const ads = breakAds.map((a: any) => ({ ...a, _kind: 'ad' as const }));
-    const shapers = breakShapers.map((s: any) => ({ ...s, _kind: 'shaper' as const }));
-    // Phase B: per-ad carousels — each ad is its own promo slot (single-
-    // element group), no partner-level grouping. Cadence is still shared
-    // between ads + shapers via zipPromoGroups.
-    const adGroups = ads.map((a: any) => [a]);
-    const shaperGroups = shapers.map((s: any) => [s]);
-    return zipPromoGroups(adGroups, shaperGroups);
-  }, [breakAds, breakShapers]);
-
-  // Interleave sessions + alternating (ad | shaper) groups at shared cadence.
+  // Interleave sessions + ad groups at the shared cadence.
   const feedRows = useMemo(
     () => interleavePromoGroups(sessions, feedAds) as FeedRow<any, any>[],
     [sessions, feedAds]
@@ -238,10 +218,11 @@ export default function SurfBreakDetailScreen() {
     setContinuationToken('');
   }, []);
 
-  const handleDateChange = useCallback((_event: any, date?: Date) => {
+  const handleDateChange = useCallback((event: any, date?: Date) => {
     if (Platform.OS === 'android') {
       setShowDatePicker(false);
-      if (date) { setSelectedDate(date); resetPagination(); }
+      // event.type is 'dismissed' when CANCEL/back is pressed — only apply on 'set'.
+      if (event?.type === 'set' && date) { setSelectedDate(date); resetPagination(); }
     } else {
       // iOS spinner — just update picker state, apply on Done
       if (date) setPickerDate(date);
@@ -263,26 +244,13 @@ export default function SurfBreakDetailScreen() {
   const regionDisplay = breakData?.region?.replaceAll('_', ' ') ?? (region !== '0' ? region?.replaceAll('_', ' ') : '') ?? '';
   const countryDisplay = breakData?.country_code ?? country?.toUpperCase() ?? '';
 
+  // Coordinates arrive as a JSONB { lat, lon } object (values may be strings).
+  const heroLat = breakData?.coordinates?.lat != null ? parseFloat(String(breakData.coordinates.lat)) : null;
+  const heroLon = breakData?.coordinates?.lon != null ? parseFloat(String(breakData.coordinates.lon)) : null;
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
-      <ScreenHeader
-        left={
-          <Pressable onPress={smartBack} hitSlop={8}>
-            <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
-          </Pressable>
-        }
-        right={
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
-            <Pressable onPress={handleFavorite} hitSlop={12} style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-              <Ionicons name={isFavorited ? 'heart' : 'heart-outline'} size={22} color={isFavorited ? '#ef4444' : (isDark ? '#e5e7eb' : '#374151')} />
-            </Pressable>
-            <Pressable onPress={handleShare} hitSlop={12} style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-              <Ionicons name="share-outline" size={22} color={isDark ? '#e5e7eb' : '#374151'} />
-            </Pressable>
-          </View>
-        }
-      />
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <BreakSkeleton />
@@ -292,16 +260,9 @@ export default function SurfBreakDetailScreen() {
             keyExtractor={(row) => row.key}
             renderItem={({ item: row }) => {
               if (row.type === 'ad') {
-                // Mixed promo stream — first entry's `_kind` picks the
-                // renderer (shaper card vs partner ad carousel). Same
-                // pattern Discover uses in app/(tabs)/index.tsx.
-                const first = row.data[0];
-                if (first?._kind === 'shaper') {
-                  return <ShaperFeedCard shaper={first} />;
-                }
                 return (
                   <SponsoredCard
-                    ad={first}
+                    ad={row.data[0]}
                     placement="content"
                     surfBreakId={breakData?.id}
                   />
@@ -311,24 +272,23 @@ export default function SurfBreakDetailScreen() {
             }}
             ListHeaderComponent={
               <View>
-                <View style={styles.headerWrap}>
-                  <Text style={[styles.breakName, { color: isDark ? '#fff' : '#111827' }]}>{breakName}</Text>
-                  <Text style={[styles.breakLocation, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                    {regionDisplay}{regionDisplay && countryDisplay ? ' · ' : ''}{countryDisplay}
-                  </Text>
-                  <View style={styles.dateRow}>
-                    <Pressable onPress={() => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); }} style={[styles.dateBtn, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-                      <Ionicons name="calendar-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
-                      <Text style={[styles.dateBtnText, { color: isDark ? '#d1d5db' : '#374151' }]}>
-                        {selectedDate ? formatDateLabel(selectedDate) : 'Any date'}
-                      </Text>
-                    </Pressable>
-                    {selectedDate && (
-                      <Pressable onPress={clearDate} hitSlop={8}><Ionicons name="close-circle" size={20} color={isDark ? '#6b7280' : '#9ca3af'} /></Pressable>
-                    )}
-                  </View>
-                </View>
-                <LocalPhotographersRail breakId={breakData?.id} />
+                <BreakHero
+                  breakName={breakName}
+                  regionDisplay={regionDisplay}
+                  countryDisplay={countryDisplay}
+                  lat={heroLat}
+                  lon={heroLon}
+                  isDark={isDark}
+                  topInset={insets.top}
+                  selectedDate={selectedDate}
+                  dateLabel={selectedDate ? formatDateLabel(selectedDate) : ''}
+                  onDatePress={() => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); }}
+                  onClearDate={clearDate}
+                />
+                {!selectedDate && <LocalsRail breakId={breakData?.id} />}
+                {feedRows.length > 0 && (
+                  <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Recent Sessions</Text>
+                )}
               </View>
             }
             ListEmptyComponent={
@@ -361,21 +321,50 @@ export default function SurfBreakDetailScreen() {
             ListFooterComponent={loadingMore ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null}
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5} showsVerticalScrollIndicator={false}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={isDark ? '#fff' : '#000'} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={isDark ? '#fff' : '#000'}
+                colors={[isDark ? '#ffffff' : '#000000']}
+                // Hero is full-bleed under the status bar, so without an offset
+                // the spinner renders under the notch and is invisible.
+                progressViewOffset={insets.top}
+              />
+            }
           />
         )}
-        {showDatePicker && (
-          <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
-            <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDatePicker(false)} />
-            <View style={[styles.sheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
-              <View style={styles.sheetHeader}>
-                <Pressable onPress={handleDateDone}>
-                  <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
-                </Pressable>
-              </View>
-              <DateTimePicker value={pickerDate} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} style={{ height: 200 }} />
-            </View>
+        {/* Floating controls — pinned over the hero map */}
+        <View pointerEvents="box-none" style={[styles.controls, { paddingTop: insets.top + 6 }]}>
+          <Pressable onPress={smartBack} hitSlop={8} style={styles.ctrlBtn}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
+          </Pressable>
+          <View style={styles.ctrlRight}>
+            <Pressable onPress={handleFavorite} hitSlop={8} style={styles.ctrlBtn}>
+              <Ionicons name={isFavorited ? 'heart' : 'heart-outline'} size={20} color={isFavorited ? '#ef4444' : '#fff'} />
+            </Pressable>
+            <Pressable onPress={handleShare} hitSlop={8} style={styles.ctrlBtn}>
+              <Ionicons name="share-outline" size={20} color="#fff" />
+            </Pressable>
           </View>
+        </View>
+        {showDatePicker && (
+          Platform.OS === 'android' ? (
+            // Android renders its own native dialog (with CANCEL/OK) — no custom sheet.
+            <DateTimePicker value={pickerDate} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} />
+          ) : (
+            <View style={[styles.overlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.4)' }]}>
+              <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowDatePicker(false)} />
+              <View style={[styles.sheet, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
+                <View style={styles.sheetHeader}>
+                  <Pressable onPress={handleDateDone}>
+                    <Text style={{ fontSize: 16, color: '#0ea5e9', fontWeight: '600' }}>Done</Text>
+                  </Pressable>
+                </View>
+                <DateTimePicker value={pickerDate} mode="date" display="spinner" onChange={handleDateChange} maximumDate={new Date()} themeVariant={isDark ? 'dark' : 'light'} style={{ height: 200 }} />
+              </View>
+            </View>
+          )
         )}
       </SafeAreaView>
     </>
@@ -384,12 +373,26 @@ export default function SurfBreakDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  headerWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12 },
-  breakName: { fontSize: 22, fontWeight: '700' },
-  breakLocation: { fontSize: 13, marginTop: 3 },
-  dateRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 8 },
-  dateBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
-  dateBtnText: { fontSize: 14, fontWeight: '500' },
+  sectionTitle: { fontSize: 20, fontWeight: '700', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  controls: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  ctrlRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  ctrlBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   emptyWrap: { alignItems: 'center', paddingVertical: 60, paddingHorizontal: 32 },
   emptyTitle: { fontSize: 16, fontWeight: '600', marginTop: 12 },
   localLoveWrap: { width: '100%', marginTop: 32, paddingHorizontal: 12 },

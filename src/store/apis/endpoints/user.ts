@@ -221,10 +221,12 @@ const userApi = rootApi.injectEndpoints({
         method: 'GET',
       }),
     }),
-    getPhotographersAtBreak: builder.query({
+    // Combined "locals" feed — photographers AND shapers whose home break is
+    // within radiusKm of this break, interleaved + relevance-sorted server-side.
+    getLocalsAtBreak: builder.query({
       providesTags: [ApiTag.User],
-      query: ({ breakId, viewerId }: { breakId: string; viewerId?: string }) => ({
-        url: `/surf-breaks/${breakId}/photographers?viewerId=${viewerId ?? ''}`,
+      query: ({ breakId, viewerId, radiusKm }: { breakId: string; viewerId?: string; radiusKm?: number }) => ({
+        url: `/surf-breaks/${breakId}/locals?viewerId=${viewerId ?? ''}${radiusKm != null ? `&radiusKm=${radiusKm}` : ''}`,
         method: 'GET',
       }),
     }),
@@ -395,7 +397,7 @@ export const {
   useFollowUserMutation,
   useUpdateUserFavoritesMutation,
   useGetPhotographersQuery,
-  useGetPhotographersAtBreakQuery,
+  useGetLocalsAtBreakQuery,
   useGetPopularTagsQuery,
   useRequestAccessToUserMutation,
   useGetAccessRequestQuery,

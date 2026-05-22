@@ -13,7 +13,7 @@ import {
   Platform,
   useColorScheme,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -97,6 +97,7 @@ export default function BoardDetailScreen() {
   const { boardId } = useLocalSearchParams<{ boardId: string }>();
   const { user } = useUser();
   const isDark = useColorScheme() === 'dark';
+  const insets = useSafeAreaInsets();
   const smartBack = useSmartBack();
   const trackedPush = useTrackedPush();
   const requireAuth = useRequireAuth();
@@ -711,7 +712,7 @@ export default function BoardDetailScreen() {
               if (!requireAuth()) return;
               setContactOpen(true);
             }}
-            style={s.messageFab}
+            style={[s.messageFab, { bottom: insets.bottom + 16 }]}
           >
             <Ionicons name="chatbubble-ellipses-outline" size={18} color="#fff" />
             <Text style={s.messageFabText}>Message Shaper</Text>
@@ -728,6 +729,7 @@ export default function BoardDetailScreen() {
               {
                 backgroundColor: isDark ? ac.bgDark : ac.bg,
                 borderTopColor: isDark ? ac.borderDark : ac.border,
+                paddingBottom: insets.bottom + 14,
               },
             ]}
           >

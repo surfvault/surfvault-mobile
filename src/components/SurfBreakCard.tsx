@@ -1,8 +1,8 @@
 import { View, Text, Pressable } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
+import { useTrackedPush } from '../context/NavigationContext';
 
 interface SurfBreakCardProps {
   surfBreak: {
@@ -28,7 +28,7 @@ const parseCoord = (v: unknown): number | null => {
 };
 
 export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakCardProps) {
-  const router = useRouter();
+  const trackedPush = useTrackedPush();
 
   const handlePress = () => {
     const ident = surfBreak.surf_break_identifier;
@@ -36,15 +36,18 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
     // Two shapes flow into this card:
     //   1. Composite slug "country/region/break" (used by some endpoints).
     //   2. Bare slug + sibling country_code/region fields (nearby endpoint).
+    // trackedPush (not router.push) so depth increments — otherwise smart-back
+    // from a screen pushed over the break page (e.g. a session) lands on the
+    // tab instead of returning here.
     const parts = ident.split('/');
     if (parts.length === 3) {
-      router.push(`/break/${parts[0]}/${parts[1]}/${parts[2]}`);
+      trackedPush(`/break/${parts[0]}/${parts[1]}/${parts[2]}`);
       return;
     }
     const country = surfBreak.country_code ?? surfBreak.country;
     const region = surfBreak.region && surfBreak.region !== '' ? surfBreak.region : '0';
     if (country) {
-      router.push(`/break/${country}/${region}/${ident}`);
+      trackedPush(`/break/${country}/${region}/${ident}`);
     }
   };
 
