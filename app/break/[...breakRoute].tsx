@@ -285,10 +285,14 @@ export default function SurfBreakDetailScreen() {
                   onDatePress={() => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); }}
                   onClearDate={clearDate}
                 />
-                {!selectedDate && <LocalsRail breakId={breakData?.id} />}
-                {feedRows.length > 0 && (
-                  <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Recent Sessions</Text>
-                )}
+                {/* Negative margin tucks the content up into the hero's faded
+                    bottom so the page reads as one continuous surface. */}
+                <View style={styles.belowHero}>
+                  {!selectedDate && <LocalsRail breakId={breakData?.id} />}
+                  {feedRows.length > 0 && (
+                    <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Recent Sessions</Text>
+                  )}
+                </View>
               </View>
             }
             ListEmptyComponent={
@@ -373,6 +377,7 @@ export default function SurfBreakDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  belowHero: { marginTop: -28 },
   sectionTitle: { fontSize: 20, fontWeight: '700', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
   controls: {
     position: 'absolute',

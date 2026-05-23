@@ -22,6 +22,7 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -75,7 +76,9 @@ import SessionHero from '../../src/components/SessionHero';
 import SessionSkeleton from '../../src/components/SessionSkeleton';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 
-const FETCH_AMOUNT = 30;
+// Page size for the gallery. Sized generously so the densest zoom (5 columns)
+// still fills well past one screen before paginating.
+const FETCH_AMOUNT = 60;
 
 // Per-target cooldown so the post-request follow/notify prompt doesn't nag on
 // repeat requests to the same photographer.
@@ -85,9 +88,13 @@ const postRequestPromptKey = (targetUserId: string) => `post_request_prompt_dism
 // Module-level gate: one view-report per session id per app launch
 const viewedSessionIds = new Set<string>();
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const NUM_COLUMNS = 2;
 const GAP = 4;
-const PHOTO_WIDTH = (SCREEN_WIDTH - GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS;
+// Pinch-to-zoom column range: MIN = most zoomed in (biggest tiles),
+// MAX = most zoomed out (smallest tiles).
+const MIN_COLUMNS = 2;
+const MAX_COLUMNS = 5;
+const DEFAULT_COLUMNS = 3;
+const photoWidthForColumns = (cols: number) => (SCREEN_WIDTH - GAP * (cols + 1)) / cols;
 
 const COLOR_PRESETS = [
   '#0ea5e9', '#3b82f6', '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
@@ -121,6 +128,71 @@ export default function SessionDetailScreen() {
   const nextTokenRef = useRef<string>('');
   const prevInitialFingerprintRef = useRef<string | null>(null);
   const flatListRef = useRef<any>(null);
+
+  // Pinch-to-zoom gallery density. Keeps the virtualized FlatList, so column
+  // changes are committed LIVE as you pinch — items snap straight into the new
+  // column layout (instant reflow: more columns = content packs up into the row
+  // before; fewer = it spreads down). Clamped to [MIN, MAX] so it's a no-op once
+  // you hit a limit. Changing numColumns remounts the FlatList (RN requires a
+  // key change), so after each step we re-anchor scroll to the photo that was
+  // under your fingers, keeping you in place.
+  const [numColumns, setNumColumns] = useState(DEFAULT_COLUMNS);
+  const numColumnsRef = useRef(DEFAULT_COLUMNS);
+  const scrollYRef = useRef(0);
+  // Header height measured at runtime so we can compute the exact pixel offset
+  // of any photo row regardless of how the header expands. Declared here (not
+  // lower) so the pinch gesture/scroll-restore closures can read it.
+  const headerHeightRef = useRef(0);
+  const photoWidth = useMemo(() => photoWidthForColumns(numColumns), [numColumns]);
+  useEffect(() => { numColumnsRef.current = numColumns; }, [numColumns]);
+
+  // Column count when the pinch began + the photo under the focal point (in the
+  // start layout), so scroll can be re-anchored to it after each reflow.
+  const pinchStartColsRef = useRef(DEFAULT_COLUMNS);
+  const pinchAnchorRef = useRef<{ index: number; fy: number } | null>(null);
+
+  const capturePinchAnchor = useCallback((fx: number, fy: number) => {
+    const cols = numColumnsRef.current;
+    pinchStartColsRef.current = cols;
+    const tileW = photoWidthForColumns(cols);
+    const rowHeight = tileW * 1.2 + GAP;
+    const gridY = scrollYRef.current + fy - headerHeightRef.current;
+    const row = Math.max(0, Math.floor((gridY - GAP / 2) / rowHeight));
+    const col = Math.min(cols - 1, Math.max(0, Math.floor((fx - GAP / 2) / (tileW + GAP))));
+    pinchAnchorRef.current = { index: row * cols + col, fy };
+  }, []);
+
+  const setColumnsLive = useCallback((cols: number) => {
+    if (cols === numColumnsRef.current) return; // already there → no-op
+    numColumnsRef.current = cols; // update now so onUpdate won't re-fire the step
+    setNumColumns(cols);
+  }, []);
+
+  const pinchGesture = useMemo(
+    () =>
+      Gesture.Pinch()
+        .runOnJS(true)
+        .onStart((e) => {
+          capturePinchAnchor(e.focalX, e.focalY);
+        })
+        .onUpdate((e) => {
+          // scale > 1 = pinch out = zoom in (fewer columns); < 1 = more columns.
+          const target = Math.round(pinchStartColsRef.current / e.scale);
+          setColumnsLive(Math.max(MIN_COLUMNS, Math.min(MAX_COLUMNS, target)));
+        }),
+    [capturePinchAnchor, setColumnsLive]
+  );
+
+  // After each live column change remounts the grid, re-anchor scroll to the
+  // photo that was under the pinch focal point so the gallery doesn't jump.
+  useEffect(() => {
+    const a = pinchAnchorRef.current;
+    if (!a) return;
+    const rowHeight = photoWidthForColumns(numColumns) * 1.2 + GAP;
+    const newRow = Math.floor(a.index / numColumns);
+    const targetScrollY = Math.max(0, headerHeightRef.current + GAP / 2 + newRow * rowHeight - a.fy);
+    requestAnimationFrame(() => flatListRef.current?.scrollToOffset?.({ offset: targetScrollY, animated: false }));
+  }, [numColumns]);
 
   // Photo viewer (lightbox) — windowed to avoid slow FlatList layout for large sessions
   const [viewerVisible, setViewerVisible] = useState(false);
@@ -460,18 +532,15 @@ export default function SessionDetailScreen() {
     }
   }, [viewerWindowStart, loadingMore]);
 
-  // Header height measured at runtime so we can compute the exact pixel
-  // offset of any photo row regardless of how the header expands.
-  const headerHeightRef = useRef(0);
-
   const handleViewerClose = useCallback(() => {
     setViewerVisible(false);
     const id = viewerCurrentPhotoIdRef.current;
     if (!id || !flatListRef.current) return;
     const idx = sessionMediaRef.current.findIndex((m: any) => m.id === id);
     if (idx < 0) return;
-    const rowIdx = Math.floor(idx / NUM_COLUMNS);
-    const rowHeight = PHOTO_WIDTH * 1.2 + GAP;
+    const cols = numColumnsRef.current;
+    const rowIdx = Math.floor(idx / cols);
+    const rowHeight = photoWidthForColumns(cols) * 1.2 + GAP;
     const offset = headerHeightRef.current + GAP / 2 + rowIdx * rowHeight;
     // Defer past the modal close animation so the FlatList has settled.
     setTimeout(() => {
@@ -1097,16 +1166,16 @@ export default function SessionDetailScreen() {
             }
           }}
           onLongPress={() => handlePhotoLongPress(item)}
-          style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
+          style={{ width: photoWidth, margin: GAP / 2 }}
         >
           <View style={{ position: 'relative' }}>
-            <View style={[styles.photoPlaceholder, { width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+            <View style={[styles.photoPlaceholder, { width: photoWidth, height: photoWidth * 1.2, backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
               <Ionicons name="image-outline" size={28} color={isDark ? '#374151' : '#d1d5db'} />
             </View>
             <Image
               source={{ uri: item.thumbnail ?? item.url }}
               style={[
-                { width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6, position: 'absolute', top: 0, left: 0 },
+                { width: photoWidth, height: photoWidth * 1.2, borderRadius: 6, position: 'absolute', top: 0, left: 0 },
                 inActionMode && isSelected && { borderWidth: 3, borderColor: ac.btn },
               ]}
               contentFit="cover"
@@ -1134,7 +1203,7 @@ export default function SessionDetailScreen() {
         </Pressable>
       );
     },
-    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress, getPhotoKey, isDark]
+    [sessionAction, selectedPhotoIds, togglePhotoSelection, ac.btn, isOwner, thumbnailPhotoId, handlePhotoLongPress, getPhotoKey, isDark, photoWidth]
   );
 
   // The break name renders as its own tappable link with a pin glyph, so the
@@ -1172,14 +1241,20 @@ export default function SessionDetailScreen() {
         {isLoading ? (
           <SessionSkeleton />
         ) : (
+          <GestureDetector gesture={pinchGesture}>
+          {/* Stable wrapper (gesture target): the FlatList remounts on column
+              change (key) but this View doesn't, so the pinch isn't interrupted. */}
+          <View style={{ flex: 1 }}>
           <FlatList
             ref={flatListRef}
             data={isLocked ? [] : sessionMedia}
             keyExtractor={(item) => item.id ?? item.thumbnail}
             renderItem={renderPhoto}
-            numColumns={isLocked ? 1 : NUM_COLUMNS}
-            key={isLocked ? 'locked' : 'grid'}
-            contentContainerStyle={{ padding: GAP / 2, paddingBottom: sessionAction ? (sessionAction === 'group' || sessionAction === 'ungroup' ? 150 : 80) : 0 }}
+            numColumns={isLocked ? 1 : numColumns}
+            key={isLocked ? 'locked' : `grid-${numColumns}`}
+            onScroll={(e) => { scrollYRef.current = e.nativeEvent.contentOffset.y; }}
+            scrollEventThrottle={16}
+            contentContainerStyle={{ paddingBottom: sessionAction ? (sessionAction === 'group' || sessionAction === 'ungroup' ? 150 : 80) : 0 }}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -1257,18 +1332,23 @@ export default function SessionDetailScreen() {
                         onPress={() => setGroupSheetVisible(true)}
                         style={[styles.chip, {
                           flexDirection: 'row', alignItems: 'center', gap: 4,
-                          backgroundColor: 'transparent',
-                          borderWidth: 1, borderStyle: 'dashed',
-                          borderColor: isDark ? '#4b5563' : '#9ca3af',
+                          // Dark: dashed see-through outline (reads well there).
+                          // Light: a violet-tinted action chip — ties to the
+                          // group-mode accent and stands apart from the gray
+                          // filter pills instead of blending in.
+                          backgroundColor: isDark ? 'transparent' : '#f5f3ff',
+                          borderWidth: 1,
+                          borderStyle: isDark ? 'dashed' : 'solid',
+                          borderColor: isDark ? '#4b5563' : '#ddd6fe',
                         }]}
                       >
                         <Ionicons
                           name="add"
                           size={14}
-                          color={isDark ? '#d1d5db' : '#6b7280'}
+                          color={isDark ? '#d1d5db' : '#7c3aed'}
                         />
                         <Text style={[styles.chipText, {
-                          color: isDark ? '#d1d5db' : '#6b7280',
+                          color: isDark ? '#d1d5db' : '#7c3aed',
                         }]}>{groups.length === 0 ? 'Create Group' : 'New'}</Text>
                       </Pressable>
                     )}
@@ -1305,6 +1385,8 @@ export default function SessionDetailScreen() {
             onEndReachedThreshold={0.5}
             showsVerticalScrollIndicator={false}
           />
+          </View>
+          </GestureDetector>
         )}
 
         {/* Floating controls — pinned over the hero */}
@@ -1801,7 +1883,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  belowHero: { paddingTop: 12 },
+  belowHero: { marginTop: -28, paddingTop: 12 },
   groupChipsScroll: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 18 },
   accessBannerWrap: { paddingHorizontal: 16 },
   headerWrap: { paddingHorizontal: 12, paddingTop: 8, paddingBottom: 12 },

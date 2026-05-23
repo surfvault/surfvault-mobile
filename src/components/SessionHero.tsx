@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 
 const HERO_BODY = 300;
-const SCRIM_HEIGHT = 190;
+const SCRIM_HEIGHT = 215;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const MAX_VISIBLE_TAGS = 3;
 
@@ -76,13 +76,20 @@ function SessionHero({
         )}
       </View>
 
-      {/* Bottom scrim for text legibility */}
+      {/* Bottom scrim: darkens for text legibility AND resolves to the content
+          background color at full opacity so the hero dissolves seamlessly into
+          the page below (no hard image→content seam). The dark→bg dissolve fills
+          the whole region BELOW the title block (which sits at bottom:48), so in
+          light mode the photo fades gently into white instead of cutting hard;
+          in dark mode the whole ramp is black so it's invisibly seamless. */}
       <View pointerEvents="none" style={styles.scrimWrap}>
         <Svg width={SCREEN_WIDTH} height={SCRIM_HEIGHT}>
           <Defs>
             <LinearGradient id="sessionHeroScrim" x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0" stopColor="#000000" stopOpacity={0} />
-              <Stop offset="1" stopColor="#000000" stopOpacity={0.82} />
+              <Stop offset="0.5" stopColor="#000000" stopOpacity={0.4} />
+              <Stop offset="0.88" stopColor="#000000" stopOpacity={isDark ? 0.92 : 0.82} />
+              <Stop offset="1" stopColor={isDark ? '#000000' : '#ffffff'} stopOpacity={1} />
             </LinearGradient>
           </Defs>
           <Rect x="0" y="0" width={SCREEN_WIDTH} height={SCRIM_HEIGHT} fill="url(#sessionHeroScrim)" />
@@ -163,7 +170,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 12,
-    bottom: 16,
+    bottom: 48,
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',

@@ -5,7 +5,7 @@ import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 
 const HERO_BODY = 285;
-const SCRIM_HEIGHT = 160;
+const SCRIM_HEIGHT = 195;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 // Minimal dark style — only applies to Google Maps (Android). Apple Maps
@@ -100,13 +100,20 @@ function BreakHero({
         )}
       </View>
 
-      {/* Bottom scrim for text legibility */}
+      {/* Bottom scrim: darkens for text legibility AND resolves to the content
+          background color at full opacity so the hero dissolves seamlessly into
+          the page below (no hard map→content seam). The dark→bg dissolve fills
+          the whole region BELOW the title block (bottom:48), so in light mode the
+          map fades gently into white instead of cutting hard; in dark mode the
+          whole ramp is black so it's invisibly seamless. */}
       <View pointerEvents="none" style={styles.scrimWrap}>
         <Svg width={SCREEN_WIDTH} height={SCRIM_HEIGHT}>
           <Defs>
             <LinearGradient id="breakHeroScrim" x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0" stopColor="#000000" stopOpacity={0} />
-              <Stop offset="1" stopColor="#000000" stopOpacity={0.78} />
+              <Stop offset="0.5" stopColor="#000000" stopOpacity={0.38} />
+              <Stop offset="0.88" stopColor="#000000" stopOpacity={isDark ? 0.92 : 0.8} />
+              <Stop offset="1" stopColor={isDark ? '#000000' : '#ffffff'} stopOpacity={1} />
             </LinearGradient>
           </Defs>
           <Rect x="0" y="0" width={SCREEN_WIDTH} height={SCRIM_HEIGHT} fill="url(#breakHeroScrim)" />
@@ -164,7 +171,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 12,
-    bottom: 16,
+    bottom: 48,
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
