@@ -24,6 +24,7 @@ import UploadProgressPill from '../src/components/UploadProgressPill';
 import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
 import NotificationPrimingModal from '../src/components/NotificationPrimingModal';
 import ForceUpdateGate from '../src/components/ForceUpdateGate';
+import ThemeSync from '../src/components/ThemeSync';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
@@ -225,6 +226,7 @@ function AppShell() {
 
   return (
     <UserProvider user={user}>
+      <ThemeSync />
       <View style={{ flex: 1 }}>
         {bannerVisible && <PendingDeletionBanner />}
         {bannerVisible ? (

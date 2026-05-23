@@ -23,6 +23,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import * as Location from 'expo-location';
 import { setCoordinates } from '../../src/store/slices/location';
 import { useUser } from '../../src/context/UserProvider';
+import { useUserPreferences, formatDistance } from '../../src/helpers/preferences';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery, useCreateSurfBreakMutation } from '../../src/store';
@@ -147,6 +148,7 @@ export default function MapScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
+  const { units, nearby: nearbyPrefs } = useUserPreferences();
   const { isAuthenticated } = useAuth();
   const requireAuth = useRequireAuth();
   const dispatch = useDispatch();
@@ -336,11 +338,11 @@ export default function MapScreen() {
   const hasNearbyCoords = nearbyLat != null && nearbyLon != null;
 
   const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, radiusKm: nearbyPrefs.breaksKm },
     { skip: !hasNearbyCoords }
   );
   const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id },
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id, radiusKm: nearbyPrefs.photographersKm },
     { skip: !hasNearbyCoords || (isAuthenticated && !user?.id) }
   );
   const nearbyBreaks = nearbyBreaksData?.results?.nearbyBreaks ?? nearbyBreaksData?.results?.surfBreaks ?? [];
@@ -784,7 +786,7 @@ export default function MapScreen() {
                             {sb.name}
                           </Text>
                           <Text style={{ fontSize: 11, color: isDark ? '#6b7280' : '#9ca3af' }}>
-                            {sb.distance > 1 ? `${sb.distance.toFixed(0)}km · ` : sb.distance > 0 ? `${(sb.distance * 1000).toFixed(0)}m · ` : ''}
+                            {sb.distance > 0 ? `${formatDistance(sb.distance, units)} · ` : ''}
                             {sb.region ? sb.region.replaceAll('_', ' ') : ''}{sb.country_code ? ` · ${sb.country_code}` : ''}
                           </Text>
                         </View>

@@ -10,7 +10,6 @@ import {
   StyleSheet,
   useColorScheme,
   Platform,
-  Linking,
   ActivityIndicator,
   Keyboard,
   Dimensions,
@@ -553,7 +552,7 @@ export default function ProfileScreen() {
         {
           label: 'Settings',
           icon: 'settings-outline',
-          onPress: () => Linking.openSettings(),
+          onPress: () => trackedPush('/settings'),
         },
       ],
     },
