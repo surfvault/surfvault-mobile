@@ -1,4 +1,5 @@
 import { ApiTag, rootApi } from '../rootApi';
+import { mergePreferences, type PreferencesPatch } from '../../../helpers/preferences';
 // LinkedAccount tag covers the per-user list of linked sibling profiles.
 
 const userApi = rootApi.injectEndpoints({
@@ -112,6 +113,40 @@ const userApi = rootApi.injectEndpoints({
         method: 'PATCH',
         body: metaData,
       }),
+    }),
+    // App preferences (Settings page). Sends only the changed keys; the API
+    // deep-merges into users.preferences and returns the full merged object.
+    // Optimistically patches the getSelf cache so toggles/units/theme apply
+    // instantly, then reconciles with the server's authoritative value.
+    updatePreferences: builder.mutation<
+      { message: string; results: { preferences: any } },
+      { preferences: PreferencesPatch }
+    >({
+      query: ({ preferences }) => ({
+        url: '/user/preferences',
+        method: 'PATCH',
+        body: preferences,
+      }),
+      async onQueryStarted({ preferences }, { dispatch, queryFulfilled }) {
+        const patchResult = dispatch(
+          userApi.util.updateQueryData('getSelf', undefined, (draft: any) => {
+            const user = draft?.results?.user;
+            if (user) user.preferences = mergePreferences(user.preferences, preferences);
+          })
+        );
+        try {
+          const { data } = await queryFulfilled;
+          dispatch(
+            userApi.util.updateQueryData('getSelf', undefined, (draft: any) => {
+              if (draft?.results?.user && data?.results?.preferences) {
+                draft.results.user.preferences = data.results.preferences;
+              }
+            })
+          );
+        } catch {
+          patchResult.undo();
+        }
+      },
     }),
     updateUserPushToken: builder.mutation({
       query: ({ expoPushToken }: { expoPushToken: string }) => ({
@@ -392,6 +427,7 @@ export const {
   useGetUserQuery,
   useUpdateUserHandleMutation,
   useUpdateUserMetaDataMutation,
+  useUpdatePreferencesMutation,
   useUpdateUserPushTokenMutation,
   useClearUserPushTokenMutation,
   useFollowUserMutation,

@@ -152,6 +152,7 @@ export {
   useUpdateUserFavoritesMutation,
   useUpdateUserHandleMutation,
   useUpdateUserMetaDataMutation,
+  useUpdatePreferencesMutation,
   useUpdateUserPushTokenMutation,
   useClearUserPushTokenMutation,
   useUpdateUserRecentSearchesMutation,

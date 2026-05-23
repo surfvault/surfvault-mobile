@@ -19,6 +19,7 @@ import { getBoardPhotoUrl } from '../helpers/mediaUrl';
 import { pickThumbnailPhoto } from './ShaperBoardsGrid';
 import UserAvatar from './UserAvatar';
 import { useRequireAuth } from '../hooks/useRequireAuth';
+import { useUserPreferences, formatDistance as formatDistanceUnit } from '../helpers/preferences';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetOption } from './ActionSheet';
 import ReportBoardSheet from './ReportBoardSheet';
@@ -48,6 +49,7 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
   const isDark = useColorScheme() === 'dark';
   const trackedPush = useTrackedPush();
   const requireAuth = useRequireAuth();
+  const { units } = useUserPreferences();
   const [width, setWidth] = useState(Dimensions.get('window').width);
   const [activeIdx, setActiveIdx] = useState(0);
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -108,7 +110,7 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
              */}
             {shaper.distance_km != null ? (
               <Text style={styles.subtitle} numberOfLines={1}>
-                {formatDistance(shaper.distance_km)} away
+                {formatDistanceUnit(shaper.distance_km, units)} away
               </Text>
             ) : shaper.surf_break_name ? (
               <Text style={styles.subtitle} numberOfLines={1}>
@@ -344,12 +346,6 @@ function BoardSlide({ board, width, isDark }: { board: Board; width: number; isD
       ) : null}
     </View>
   );
-}
-
-function formatDistance(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m`;
-  if (km < 10) return `${km.toFixed(1)} km`;
-  return `${Math.round(km)} km`;
 }
 
 const styles = StyleSheet.create({

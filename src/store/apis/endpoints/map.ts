@@ -23,15 +23,15 @@ const mapApi = rootApi.injectEndpoints({
     }),
     getNearbySurfBreaks: builder.query({
       providesTags: [ApiTag.Map],
-      query: ({ lat, long }: { lat: number; long: number }) => ({
-        url: `/map/nearby-breaks?lat=${lat}&long=${long}`,
+      query: ({ lat, long, radiusKm }: { lat: number; long: number; radiusKm?: number }) => ({
+        url: `/map/nearby-breaks?lat=${lat}&long=${long}${radiusKm != null ? `&radiusKm=${radiusKm}` : ''}`,
         method: 'GET',
       }),
     }),
     getNearbyPhotographers: builder.query({
       providesTags: [ApiTag.Map],
-      query: ({ lat, long, viewerId }: { lat: number; long: number; viewerId?: string }) => ({
-        url: `/map/nearby-photographers?lat=${lat}&long=${long}&viewerId=${viewerId ?? ''}`,
+      query: ({ lat, long, viewerId, radiusKm }: { lat: number; long: number; viewerId?: string; radiusKm?: number }) => ({
+        url: `/map/nearby-photographers?lat=${lat}&long=${long}&viewerId=${viewerId ?? ''}${radiusKm != null ? `&radiusKm=${radiusKm}` : ''}`,
         method: 'GET',
       }),
     }),

@@ -4,6 +4,13 @@ import { useGetLocalsAtBreakQuery } from '../store';
 import { useTrackedPush } from '../context/NavigationContext';
 import { useUser } from '../context/UserProvider';
 import { useAuth } from '../context/AuthProvider';
+import { useUserPreferences, formatDistance } from '../helpers/preferences';
+
+// Break-anchored radius (distance from THIS break to each local's home break).
+// Deliberately NOT the user's "nearby photographers" preference — that's
+// measured from the user, which is the wrong frame for "who's local to a
+// break." 161 km ≈ 100 mi, so the subtitle reads cleanly in the default unit.
+const LOCALS_RADIUS_KM = 161;
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 const isNoteActive = (setAt?: string | null) => {
@@ -27,9 +34,10 @@ export default function LocalsRail({ breakId }: Props) {
   const isDark = useColorScheme() === 'dark';
   const { user } = useUser();
   const { isAuthenticated } = useAuth();
+  const { units } = useUserPreferences();
 
   const { data } = useGetLocalsAtBreakQuery(
-    { breakId: breakId ?? '', viewerId: user?.id },
+    { breakId: breakId ?? '', viewerId: user?.id, radiusKm: LOCALS_RADIUS_KM },
     { skip: !breakId || (isAuthenticated && !user?.id) }
   );
 
@@ -39,6 +47,9 @@ export default function LocalsRail({ breakId }: Props) {
   return (
     <View>
       <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Locals</Text>
+      <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+        within {formatDistance(LOCALS_RADIUS_KM, units)} of this break
+      </Text>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -68,6 +79,7 @@ export default function LocalsRail({ breakId }: Props) {
 
 const styles = StyleSheet.create({
   sectionTitle: { fontSize: 20, fontWeight: '700', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 2 },
+  subtitle: { fontSize: 13, paddingHorizontal: 16, paddingBottom: 2 },
   wrap: { flexGrow: 0 },
   scroll: { paddingHorizontal: 8, paddingTop: 8, paddingBottom: 8, gap: 8 },
   item: { alignItems: 'center', width: ITEM_WIDTH },

@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { PROVIDER_DEFAULT } from 'react-native-maps';
 import { useTrackedPush } from '../context/NavigationContext';
+import { useUserPreferences, formatDistance as formatDistanceUnit } from '../helpers/preferences';
 
 interface SurfBreakCardProps {
   surfBreak: {
@@ -29,6 +30,7 @@ const parseCoord = (v: unknown): number | null => {
 
 export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakCardProps) {
   const trackedPush = useTrackedPush();
+  const { units } = useUserPreferences();
 
   const handlePress = () => {
     const ident = surfBreak.surf_break_identifier;
@@ -51,11 +53,11 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
     }
   };
 
-  // Backend returns distance in km (haversine `6371 * acos(...)`).
+  // Backend returns distance in km (haversine `6371 * acos(...)`); render in
+  // the user's chosen unit.
   const formatDistance = (km?: number) => {
     if (km == null) return '';
-    if (km < 1) return `${Math.round(km * 1000)}m away`;
-    return `${km.toFixed(1)}km away`;
+    return `${formatDistanceUnit(km, units)} away`;
   };
 
   const lat = parseCoord(surfBreak.lat ?? surfBreak.coordinates?.lat);

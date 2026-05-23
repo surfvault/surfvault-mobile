@@ -31,6 +31,7 @@ import {
   useUpdateUserRecentSearchesMutation,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
+import { useUserPreferences, formatDistance } from '../../src/helpers/preferences';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
 import SessionCard from '../../src/components/SessionCard';
@@ -75,6 +76,7 @@ export default function HomeScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
+  const { units, nearby: nearbyPrefs } = useUserPreferences();
   const { isAuthenticated } = useAuth();
   const { setTabBarVisible } = useTabBar();
   const [updateUserRecentSearches] = useUpdateUserRecentSearchesMutation();
@@ -359,11 +361,11 @@ export default function HomeScreen() {
   const nearbyLon = breakLon ?? userLon ?? coords?.lon ?? null;
   const hasNearbyAnchor = nearbyLat != null && nearbyLon != null;
   const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0 },
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, radiusKm: nearbyPrefs.breaksKm },
     { skip: !hasNearbyAnchor }
   );
   const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id },
+    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id, radiusKm: nearbyPrefs.photographersKm },
     { skip: !hasNearbyAnchor || (isAuthenticated && !user?.id) }
   );
 
@@ -877,7 +879,7 @@ export default function HomeScreen() {
                       Nearby Surf Breaks
                     </Text>
                     <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                      Surf breaks within 300km of you
+                      Surf breaks within {formatDistance(nearbyPrefs.breaksKm, units)} of you
                     </Text>
                   </View>
                   <FlatList
@@ -909,7 +911,7 @@ export default function HomeScreen() {
                       Nearby Photographers
                     </Text>
                     <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                      Photographers within 100km of you
+                      Photographers within {formatDistance(nearbyPrefs.photographersKm, units)} of you
                     </Text>
                   </View>
                   <FlatList

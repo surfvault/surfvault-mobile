@@ -12,6 +12,7 @@ interface User {
   onboarded?: boolean;
   status_note?: string;
   status_note_set_at?: string;
+  preferences?: Record<string, unknown>;
   chargebee_customer_id?: string;
   current_storage?: number;
   storage_limit?: number;

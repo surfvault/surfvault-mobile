@@ -20,6 +20,7 @@ import {
   type Board,
 } from '../store';
 import { useUser } from '../context/UserProvider';
+import { useUserPreferences, formatDistance as formatDistanceUnit } from '../helpers/preferences';
 import { useTrackedPush } from '../context/NavigationContext';
 import { getBoardPhotoUrl } from '../helpers/mediaUrl';
 import ActionSheet from './ActionSheet';
@@ -171,6 +172,7 @@ type Slide =
 
 function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boolean }) {
   const trackedPush = useTrackedPush();
+  const { units } = useUserPreferences();
   const [width, setWidth] = useState(Dimensions.get('window').width);
   const [activeIdx, setActiveIdx] = useState(0);
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -270,7 +272,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
   //   3. Empty string — neither known (rare; backend usually populates one)
   const subtitle =
     shaper.distance_km != null
-      ? `${formatDistance(shaper.distance_km)} away`
+      ? `${formatDistanceUnit(shaper.distance_km, units)} away`
       : shaper.surf_break_name ?? '';
 
   return (
@@ -511,12 +513,6 @@ function CtaTile({ isDark, width }: { isDark: boolean; width: number }) {
       </View>
     </View>
   );
-}
-
-function formatDistance(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m`;
-  if (km < 10) return `${km.toFixed(1)} km`;
-  return `${Math.round(km)} km`;
 }
 
 const styles = StyleSheet.create({
