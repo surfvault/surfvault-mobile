@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -33,6 +34,17 @@ import {
   useGetSurfBreaksQuery,
 } from '../store';
 import { generateUUID } from '../helpers/uuid';
+import { useUser } from '../context/UserProvider';
+import {
+  AD_TIER_LABELS,
+  FREE_BREAK_CAP,
+  dailyCreditCost,
+  creditBalance,
+  adTierOf,
+  adPlansUrl,
+  adCreditsUrl,
+  type AdTier,
+} from '../helpers/adTiers';
 
 type Placement = 'content' | 'sidebar';
 type CtaType = 'url' | 'tel';
@@ -111,6 +123,12 @@ export default function CampaignUpload({
   const [createMyAd] = useCreateMyAdMutation();
   const [updateMyAd] = useUpdateMyAdMutation();
 
+  // ----- Advertiser tier + credit wallet (billing hands off to web) -----
+  const { user } = useUser();
+  const adTier: AdTier = adTierOf(user);
+  const balance = creditBalance(user); // { monthly, pack, total }
+  const isFreeTier = adTier === 'free';
+
   // Prefill from the existing ad when editing. Runs once on mount (the
   // edit screen passes a stable ad object). Existing media become remote
   // creatives keyed by their s3_key.
@@ -151,7 +169,7 @@ export default function CampaignUpload({
   }, [editingAd]);
 
   const { data: surfBreaksData } = useGetSurfBreaksQuery(
-    { search: surfBreakSearch, limit: 10, continuationToken: 0 },
+    { search: surfBreakSearch, limit: 10, continuationToken: '0' },
     { skip: surfBreakSearch.length < 2 },
   );
   const surfBreakResults: any[] = (surfBreaksData as any)?.results?.surfBreaks ?? [];
@@ -232,17 +250,24 @@ export default function CampaignUpload({
   };
   const removeBreak = (id: string) => setTargetedBreaks((prev) => prev.filter((b) => b.id !== id));
 
+  // Discover is open to every tier (bought with credits, not gated).
+  const effectiveDiscover = showOnDiscover;
+  const dailyCost = dailyCreditCost(targetedBreaks.length, effectiveDiscover);
+  const daysOfRunway = dailyCost > 0 ? Math.floor(balance.total / dailyCost) : 0;
+  const overFreeBreakCap = isFreeTier && targetedBreaks.length > FREE_BREAK_CAP;
+
   // At least one targeting surface — without it `getAds` will never select
   // this ad, so we block submit instead of shipping a dead row.
-  const hasReach = targetedBreaks.length > 0 || showOnDiscover;
+  const hasReach = targetedBreaks.length > 0 || effectiveDiscover;
 
   // Submit gates: headline + CTA destination + at least one creative + at
-  // least one targeting surface (breaks OR Discover).
+  // least one targeting surface + within the free break cap.
   const canSubmit =
     headline.trim().length > 0 &&
     clickUrl.trim().length > 0 &&
     creatives.length > 0 &&
     hasReach &&
+    !overFreeBreakCap &&
     !submitting;
 
   const submit = useCallback(async () => {
@@ -295,7 +320,7 @@ export default function CampaignUpload({
         starts_at: startsAt ? startsAt.toISOString() : null,
         ends_at: endsAt ? endsAt.toISOString() : null,
         daily_impression_cap_per_user: Number(dailyCap) || 3,
-        show_on_discover: showOnDiscover,
+        show_on_discover: effectiveDiscover,
         surf_break_ids: targetedBreaks.map((b) => b.id),
       };
 
@@ -341,7 +366,7 @@ export default function CampaignUpload({
     }
   }, [
     canSubmit, creatives, thumbnailIndex, placement, clickUrl, headline, body, ctaLabel, ctaType,
-    dailyCap, showOnDiscover, targetedBreaks, startsAt, endsAt, isEdit, editingAd, createMyAdMediaPresignedUrls,
+    dailyCap, effectiveDiscover, targetedBreaks, startsAt, endsAt, isEdit, editingAd, createMyAdMediaPresignedUrls,
     createMyAd, updateMyAd, router,
   ]);
 
@@ -609,21 +634,67 @@ export default function CampaignUpload({
             </View>
           </View>
 
-          {/* Show on discover */}
+          {/* Show on discover — open to every tier (1 credit/day) */}
           <View style={s.toggleRow}>
             <View style={{ flex: 1 }}>
               <Text style={[s.label, { color: text, marginBottom: 0 }]}>Show on Discover</Text>
               <Text style={{ color: muted, fontSize: 12, marginTop: 2 }}>
-                Surface this campaign on the home feed in addition to break-specific contexts.
+                Surface on the home feed (+1 credit/day) in addition to your targeted breaks.
               </Text>
             </View>
             <Switch
-              value={showOnDiscover}
+              value={effectiveDiscover}
               onValueChange={setShowOnDiscover}
               disabled={readOnly}
               trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
             />
           </View>
+
+          {/* Credit cost summary (create only) */}
+          {!readOnly && !isEdit && (
+            <View
+              style={{
+                marginTop: 12, borderWidth: 1, borderRadius: 14, padding: 12,
+                borderColor: isDark ? 'rgba(148,163,184,0.25)' : '#e2e8f0',
+              }}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ color: text, fontWeight: '700', fontSize: 14 }}>Daily cost</Text>
+                <Text style={{ color: isDark ? '#6ee7b7' : '#047857', fontWeight: '800', fontSize: 16 }}>
+                  {dailyCost} credit{dailyCost === 1 ? '' : 's'}/day
+                </Text>
+              </View>
+              <Text style={{ color: muted, fontSize: 11, marginTop: 2 }}>
+                {targetedBreaks.length} break{targetedBreaks.length === 1 ? '' : 's'}{effectiveDiscover ? ' + Discover' : ''} · {AD_TIER_LABELS[adTier]} plan · balance {balance.total} credits{dailyCost > 0 ? ` (≈ ${daysOfRunway} day${daysOfRunway === 1 ? '' : 's'})` : ''}
+              </Text>
+
+              {overFreeBreakCap && (
+                <Text style={{ color: isDark ? '#fcd34d' : '#92400e', fontSize: 11, marginTop: 6 }}>
+                  The Free plan can target up to {FREE_BREAK_CAP} breaks. Subscribe to target more.
+                </Text>
+              )}
+
+              {dailyCost > 0 && balance.total < dailyCost && (
+                <Text style={{ color: isDark ? '#fcd34d' : '#92400e', fontSize: 11, marginTop: 6 }}>
+                  You're low on credits — this won't run once approved until you top up.
+                </Text>
+              )}
+
+              <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
+                <Pressable onPress={() => Linking.openURL(adCreditsUrl()).catch(() => {})}>
+                  <Text style={{ color: isDark ? '#38bdf8' : '#0284c7', fontWeight: '600', fontSize: 12, textDecorationLine: 'underline' }}>
+                    Buy credits
+                  </Text>
+                </Pressable>
+                <Pressable onPress={() => Linking.openURL(adPlansUrl()).catch(() => {})}>
+                  <Text style={{ color: isDark ? '#38bdf8' : '#0284c7', fontWeight: '600', fontSize: 12, textDecorationLine: 'underline' }}>
+                    Subscribe for monthly credits
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          )}
+
           {!readOnly && !hasReach && (
             <View
               style={[
