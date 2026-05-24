@@ -670,6 +670,8 @@ export default function ProfileScreen() {
         currentBreakName={currentBreakName}
         storageUsed={storageUsed}
         storageLimit={storageLimit}
+        adMonthlyCredits={(user as any)?.adPartner?.monthlyCredits ?? 0}
+        adTier={(user as any)?.adPartner?.adTier ?? 'free'}
         onViewStats={(tab) => {
           if (user?.handle) trackedPush(`/follow-stats/${user.handle}?tab=${tab}` as any);
         }}

@@ -37,5 +37,5 @@ export const creditBalance = (user: any): { monthly: number; pack: number; total
 
 // Web app base — billing flows hand off here (billing is web-only).
 export const WEB_APP_BASE = 'https://app.surf-vault.com';
-export const adPlansUrl = () => `${WEB_APP_BASE}/ad-plans`;
+export const adPlansUrl = () => `${WEB_APP_BASE}/plans`;
 export const adCreditsUrl = () => `${WEB_APP_BASE}/ad-pay`; // buy-credits page

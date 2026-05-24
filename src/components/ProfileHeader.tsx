@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import { useGetShaperBoardsQuery } from '../store';
+import { TIER_MONTHLY_GRANT, adPlansUrl, type AdTier } from '../helpers/adTiers';
 
 const isNoteActive = (setAt?: string): boolean => {
   if (!setAt) return false;
@@ -23,6 +24,9 @@ interface ProfileHeaderProps {
   currentBreakName?: string;
   storageUsed?: number;
   storageLimit?: number;
+  // Advertiser credit wallet (self-view; mirrors storage for other types).
+  adMonthlyCredits?: number; // remaining in the current monthly grant
+  adTier?: string;
   // Other user actions
   isFollowing?: boolean;
   isFollowLoading?: boolean;
@@ -52,6 +56,8 @@ export default function ProfileHeader({
   currentBreakName,
   storageUsed = 0,
   storageLimit = 15,
+  adMonthlyCredits = 0,
+  adTier = 'free',
   isFollowing,
   isFollowLoading = false,
   isMessageLoading = false,
@@ -382,6 +388,34 @@ export default function ProfileHeader({
           </View>
         </View>
       )}
+
+      {/* Ad credits (advertiser self-view) — mirrors the storage block ("X of Y
+          credits" + bar), no buttons. Tapping opens web billing (web-only). */}
+      {isSelf && isAdvertiser && (() => {
+        const grant = TIER_MONTHLY_GRANT[adTier as AdTier] ?? 0;
+        const used = Math.max(0, grant - adMonthlyCredits);
+        const pct = grant > 0 ? Math.min((used / grant) * 100, 100) : 0;
+        const low = grant > 0 && adMonthlyCredits / grant <= 0.1;
+        return (
+          <Pressable
+            onPress={() => Linking.openURL(adPlansUrl()).catch(() => {})}
+            style={[s.storageWrap, {
+              backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
+              borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+            }]}
+          >
+            <Text style={[s.storageLabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+              <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{used}</Text>
+              {' '}of{' '}
+              <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{grant}</Text>
+              {' '}credits used
+            </Text>
+            <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+              <View style={[s.storageBarFill, { width: `${pct}%`, backgroundColor: low ? '#f59e0b' : '#0ea5e9' }]} />
+            </View>
+          </Pressable>
+        );
+      })()}
 
     </View>
   );

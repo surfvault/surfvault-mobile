@@ -21,8 +21,6 @@ import {
   usePauseMyAdMutation,
   useResumeMyAdMutation,
 } from '../store';
-import { useUser } from '../context/UserProvider';
-import { AD_TIER_LABELS, creditBalance, adTierOf, adPlansUrl, adCreditsUrl, type AdTier } from '../helpers/adTiers';
 
 /**
  * Mobile parallel to web AdvertiserAdsGallery. Renders the advertiser's
@@ -96,32 +94,6 @@ export default function AdvertiserAdsGrid({
   const isLoading = isSelf ? myQuery.isLoading : publicQuery.isLoading;
   const isError = isSelf ? myQuery.isError : publicQuery.isError;
   const ads: AdRow[] = useMemo(() => data?.results?.ads ?? [], [data]);
-
-  // Tier/slots bar (self-view only). Upgrade hands off to web (billing is
-  // web-only). Caps from the frontend mirror; used = live `included` campaigns.
-  const { user } = useUser();
-  const adTier: AdTier = adTierOf(user);
-  const balance = creditBalance(user);
-  const tierBar = isSelf ? (
-    <View style={s.tierBar}>
-      <Text style={[s.tierBarText, { color: isDark ? '#cbd5e1' : '#475569' }]}>
-        <Text style={{ fontWeight: '700' }}>{AD_TIER_LABELS[adTier]}</Text> plan ·{' '}
-        <Text style={{ color: balance.total <= 0 ? '#f59e0b' : (isDark ? '#cbd5e1' : '#475569'), fontWeight: '600' }}>
-          {balance.total}
-        </Text>{' '}
-        credit{balance.total === 1 ? '' : 's'}
-      </Text>
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Pressable onPress={() => Linking.openURL(adCreditsUrl()).catch(() => {})} style={[s.tierBarBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: isDark ? '#334155' : '#cbd5e1' }]}>
-          <Text style={[s.tierBarBtnText, { color: isDark ? '#cbd5e1' : '#475569' }]}>Top up</Text>
-        </Pressable>
-        <Pressable onPress={() => Linking.openURL(adPlansUrl()).catch(() => {})} style={s.tierBarBtn}>
-          <Ionicons name="arrow-up-circle-outline" size={13} color="#fff" />
-          <Text style={s.tierBarBtnText}>{adTier === 'brand' ? 'Manage' : 'Upgrade'}</Text>
-        </Pressable>
-      </View>
-    </View>
-  ) : null;
 
   // Self-only management state. Tapping a tile on the advertiser's own
   // profile opens an action sheet with status-gated options (pause,
@@ -223,14 +195,11 @@ export default function AdvertiserAdsGrid({
 
   if (!ads.length) {
     return (
-      <View>
-        {tierBar}
-        <View style={s.emptyWrap}>
-          <Ionicons name="megaphone-outline" size={40} color={isDark ? '#374151' : '#d1d5db'} />
-          <Text style={[s.emptyText, { color: '#9ca3af' }]}>
-            {isSelf ? 'No campaigns yet. Tap Campaign to submit one.' : 'No active campaigns.'}
-          </Text>
-        </View>
+      <View style={s.emptyWrap}>
+        <Ionicons name="megaphone-outline" size={40} color={isDark ? '#374151' : '#d1d5db'} />
+        <Text style={[s.emptyText, { color: '#9ca3af' }]}>
+          {isSelf ? 'No campaigns yet. Tap Campaign to submit one.' : 'No active campaigns.'}
+        </Text>
       </View>
     );
   }
@@ -256,7 +225,6 @@ export default function AdvertiserAdsGrid({
 
   return (
     <>
-      {tierBar}
       {mode === 'list' ? (
         // Full-width card layout matching the app's other list views
         // (SessionCard / shaper BoardListCard): header on top, edge-to-edge
@@ -459,15 +427,4 @@ const s = StyleSheet.create({
   loadingWrap: { alignItems: 'center', paddingVertical: 40 },
   emptyWrap: { alignItems: 'center', paddingVertical: 40, gap: 8 },
   emptyText: { fontSize: 14, textAlign: 'center', paddingHorizontal: 16 },
-  tierBar: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingVertical: 8, marginHorizontal: 8, marginBottom: 6,
-    borderRadius: 10, borderWidth: 1, borderColor: 'rgba(148,163,184,0.25)',
-  },
-  tierBarText: { fontSize: 13 },
-  tierBarBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: '#0ea5e9', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8,
-  },
-  tierBarBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 });
