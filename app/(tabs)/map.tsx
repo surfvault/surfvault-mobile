@@ -12,11 +12,12 @@ import {
   InteractionManager,
   Platform,
   Alert,
+  Linking,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
@@ -26,7 +27,8 @@ import { useUser } from '../../src/context/UserProvider';
 import { useUserPreferences, formatDistance } from '../../src/helpers/preferences';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
-import { useGetMapSurfBreaksQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery, useCreateSurfBreakMutation } from '../../src/store';
+import { useGetMapSurfBreaksQuery, useGetMapAdsQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery, useCreateSurfBreakMutation, useRecordAdImpressionMutation } from '../../src/store';
+import { buildAdClickUrl, currentDevice } from '../../src/helpers/adTracking';
 import UserAvatar from '../../src/components/UserAvatar';
 import AddSurfBreakSheet from '../../src/components/AddSurfBreakSheet';
 import GradientRing, { ACTIVE_STOPS, NOTE_STOPS } from '../../src/components/GradientRing';
@@ -286,6 +288,36 @@ export default function MapScreen() {
     [data]
   );
 
+  // Per-ad venue pins (mobile-only ad map surface). Same viewport bounds as the
+  // break query; backend returns approved+active ads whose venue is in-bounds
+  // and that target ≥1 break.
+  const { data: adData } = useGetMapAdsQuery(
+    { minLat, maxLat, minLon, maxLon },
+    { skip: isZoomedTooFarOut }
+  );
+  const mapAds = useMemo(() => adData?.results?.ads ?? [], [adData]);
+  const [recordImpression] = useRecordAdImpressionMutation();
+
+  const openAdClick = useCallback((ad: any) => {
+    if (!ad?.id) return;
+    const trackUrl = buildAdClickUrl(ad.id, { placement: 'map', device: currentDevice() });
+    if (ad.cta_type === 'tel' && ad.click_url) {
+      const number = String(ad.click_url).replace(/^tel:/i, '').trim();
+      Alert.alert(ad.company_name || 'Call', number, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Call',
+          onPress: () => {
+            fetch(trackUrl).catch(() => { /* tracking best-effort */ });
+            Linking.openURL(`tel:${number}`).catch(() => { /* noop */ });
+          },
+        },
+      ]);
+      return;
+    }
+    Linking.openURL(trackUrl).catch(() => { /* noop */ });
+  }, []);
+
   // Only commit new markers when region is stable AND all animations are done
   useEffect(() => {
     if (isZoomedTooFarOut) {
@@ -493,6 +525,48 @@ export default function MapScreen() {
     />
   )), [surfBreaks, markerColor, selectedBreak, handleMarkerPress]);
 
+  // Ad venue pins — excluded from clustering (cluster={false}) so a sponsored
+  // pin never disappears into a surf-break cluster. Amber default pin to read as
+  // distinct from breaks. Tap → impression; callout tap → click-through.
+  const adMarkers = useMemo(() => mapAds.map((ad: any) => {
+    const lat = Number(ad.place_lat);
+    const lon = Number(ad.place_lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return (
+      <Marker
+        key={`ad-${ad.id}`}
+        // `cluster` is consumed by react-native-map-clustering, not part of the
+        // react-native-maps Marker prop types — spread it untyped.
+        {...({ cluster: false } as any)}
+        coordinate={{ latitude: lat, longitude: lon }}
+        pinColor="#f59e0b"
+        onPress={() => {
+          recordImpression({ adId: ad.id, placement: 'map', device: currentDevice() }).catch(() => { /* best-effort */ });
+        }}
+      >
+        <Callout onPress={() => openAdClick(ad)}>
+          <View style={styles.adCallout}>
+            <View style={styles.adCalloutBadge}>
+              <Text style={styles.adCalloutBadgeText}>SPONSORED</Text>
+            </View>
+            <Text style={styles.adCalloutTitle} numberOfLines={1}>
+              {ad.headline || ad.company_name || 'Sponsored'}
+            </Text>
+            {ad.place_name ? (
+              <Text style={styles.adCalloutSub} numberOfLines={1}>{ad.place_name}</Text>
+            ) : null}
+            {Number(ad.venue_count) > 1 ? (
+              <Text style={styles.adCalloutSub} numberOfLines={1}>+{Number(ad.venue_count) - 1} more here</Text>
+            ) : null}
+            <Text style={styles.adCalloutCta} numberOfLines={1}>
+              {ad.cta_label || (ad.cta_type === 'tel' ? 'Call' : 'Learn more')} ›
+            </Text>
+          </View>
+        </Callout>
+      </Marker>
+    );
+  }), [mapAds, recordImpression, openAdClick]);
+
   const renderCluster = useCallback((cluster: any) => {
     const { id, geometry, onPress, properties } = cluster;
     const count = properties?.point_count ?? 0;
@@ -578,6 +652,7 @@ export default function MapScreen() {
         renderCluster={renderCluster}
       >
         {markers}
+        {adMarkers}
         {pendingBreakCoord && (
           <Marker
             coordinate={pendingBreakCoord}
@@ -899,6 +974,16 @@ export default function MapScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   map: { flex: 1 },
+  // Ad pin callout (light card; map callouts don't theme reliably, keep neutral).
+  adCallout: { width: 180, paddingVertical: 2 },
+  adCalloutBadge: {
+    alignSelf: 'flex-start', backgroundColor: 'rgba(245,158,11,0.15)',
+    borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1, marginBottom: 3,
+  },
+  adCalloutBadgeText: { fontSize: 8, fontWeight: '800', letterSpacing: 0.4, color: '#b45309' },
+  adCalloutTitle: { fontSize: 13, fontWeight: '700', color: '#111827' },
+  adCalloutSub: { fontSize: 11, color: '#6b7280', marginTop: 1 },
+  adCalloutCta: { fontSize: 12, fontWeight: '600', color: '#0284c7', marginTop: 3 },
   marker: {
     width: 12, height: 12, borderRadius: 6,
     borderWidth: 2, borderColor: '#fff',

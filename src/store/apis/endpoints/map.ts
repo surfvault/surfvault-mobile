@@ -61,6 +61,26 @@ const mapApi = rootApi.injectEndpoints({
       }),
       keepUnusedDataFor: 60,
     }),
+    // Per-ad venue pins for the map (mobile-only surface). Approved + active ads
+    // whose venue falls in the viewport and that target ≥1 break.
+    getMapAds: builder.query({
+      providesTags: [ApiTag.Map],
+      query: ({
+        minLat,
+        maxLat,
+        minLon,
+        maxLon,
+      }: {
+        minLat: number;
+        maxLat: number;
+        minLon: number;
+        maxLon: number;
+      }) => ({
+        url: `/map/ads?minLat=${minLat}&maxLat=${maxLat}&minLon=${minLon}&maxLon=${maxLon}`,
+        method: 'GET',
+      }),
+      keepUnusedDataFor: 60,
+    }),
   }),
   overrideExisting: false,
 });
@@ -70,6 +90,7 @@ export const {
   useGetNearbySurfBreaksQuery,
   useGetNearbyPhotographersQuery,
   useGetMapSurfBreaksQuery,
+  useGetMapAdsQuery,
 } = mapApi;
 
 export { mapApi };

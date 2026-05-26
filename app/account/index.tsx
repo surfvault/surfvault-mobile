@@ -13,10 +13,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
-import { TIER_MONTHLY_GRANT, AD_TIER_LABELS, adTierOf, creditBalance } from '../../src/helpers/adTiers';
+import { TIER_MONTHLY_GRANT, AD_TIER_LABELS, adTierOf, creditBalance, adPlansUrl } from '../../src/helpers/adTiers';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useSmartBack } from '../../src/context/NavigationContext';
 import ScreenHeader from '../../src/components/ScreenHeader';
@@ -400,9 +401,12 @@ export default function AccountScreen() {
                 </View>
               </View>
 
-              <Text style={[s.planHint, { color: mutedText }]}>
-                Manage your plan & buy credits at app.surf-vault.com/plans
-              </Text>
+              <Pressable onPress={() => Linking.openURL(adPlansUrl((user as any)?.email)).catch(() => {})} hitSlop={6}>
+                <Text style={[s.planHint, { color: mutedText }]}>
+                  Manage your plan & credits on the web{' '}
+                  <Text style={{ color: '#0ea5e9', fontWeight: '600' }}>↗</Text>
+                </Text>
+              </Pressable>
             </>
           ) : (
             <>
@@ -443,9 +447,12 @@ export default function AccountScreen() {
                 </View>
               </View>
 
-              <Text style={[s.planHint, { color: mutedText }]}>
-                Manage your subscription at app.surf-vault.com/plans
-              </Text>
+              <Pressable onPress={() => Linking.openURL(adPlansUrl((user as any)?.email)).catch(() => {})} hitSlop={6}>
+                <Text style={[s.planHint, { color: mutedText }]}>
+                  Manage your subscription on the web{' '}
+                  <Text style={{ color: '#0ea5e9', fontWeight: '600' }}>↗</Text>
+                </Text>
+              </Pressable>
             </>
           )}
         </View>

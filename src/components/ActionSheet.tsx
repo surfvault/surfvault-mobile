@@ -30,10 +30,14 @@ export interface ActionSheetOption {
   imageUri?: string | null;
   /** Optional secondary line under the label (e.g. user_type pill text). */
   subtitle?: string;
+  /** Render the subtitle verbatim (no capitalize transform). */
+  subtitleLowercase?: boolean;
   /** Optional node rendered inline immediately after the label (e.g. a small badge). */
   labelBadge?: ReactNode;
   /** Renders an active checkmark on the right side of the row. */
   trailingCheckmark?: boolean;
+  /** Renders a small unread dot badge on the icon/avatar (top-right). */
+  unread?: boolean;
   /** Centers the label text horizontally and suppresses the icon slot. */
   centered?: boolean;
 }
@@ -154,6 +158,7 @@ export default function ActionSheet({ visible, options, sections, title, header,
             style={{ width: 36, height: 36, borderRadius: 18 }}
             contentFit="cover"
           />
+          {opt.unread ? <View style={[styles.unreadDot, { borderColor: isDark ? '#2c2c2e' : '#fff' }]} /> : null}
         </View>
       );
     }
@@ -173,6 +178,7 @@ export default function ActionSheet({ visible, options, sections, title, header,
           size={20}
           color={color}
         />
+        {opt.unread ? <View style={[styles.unreadDot, { borderColor: isDark ? '#2c2c2e' : '#fff' }]} /> : null}
       </View>
     );
   };
@@ -290,7 +296,7 @@ export default function ActionSheet({ visible, options, sections, title, header,
                               fontSize: 10,
                               color: isDark ? '#9ca3af' : '#6b7280',
                               marginTop: 2,
-                              textTransform: 'capitalize',
+                              textTransform: opt.subtitleLowercase ? 'none' : 'capitalize',
                               textAlign: opt.centered ? 'center' : 'left',
                             }}
                             numberOfLines={1}
@@ -449,6 +455,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
+  },
+  unreadDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 13,
+    height: 13,
+    borderRadius: 6.5,
+    backgroundColor: '#ef4444',
+    borderWidth: 2,
   },
   rowText: {
     fontSize: 16,

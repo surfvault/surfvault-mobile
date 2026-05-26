@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -35,10 +35,13 @@ import {
 } from '../store';
 import { generateUUID } from '../helpers/uuid';
 import { useUser } from '../context/UserProvider';
+import { useSmartBack } from '../context/NavigationContext';
+import VenuePicker from './VenuePicker';
 import {
   AD_TIER_LABELS,
   FREE_BREAK_CAP,
   dailyCreditCost,
+  campaignWindowDays,
   creditBalance,
   adTierOf,
   adPlansUrl,
@@ -83,6 +86,7 @@ export default function CampaignUpload({
   readOnly = false,
 }: { editingAd?: any; readOnly?: boolean } = {}) {
   const router = useRouter();
+  const smartBack = useSmartBack();
   const isDark = useColorScheme() === 'dark';
   const isEdit = !!editingAd && !readOnly;
 
@@ -102,6 +106,10 @@ export default function CampaignUpload({
   // which date the spinner edits.
   const [startsAt, setStartsAt] = useState<Date | null>(null);
   const [endsAt, setEndsAt] = useState<Date | null>(null);
+  // Optional per-ad venue pin (mobile map). null coords = no pin.
+  const [venueLat, setVenueLat] = useState<number | null>(null);
+  const [venueLon, setVenueLon] = useState<number | null>(null);
+  const [venueName, setVenueName] = useState('');
   const [datePickerFor, setDatePickerFor] = useState<'start' | 'end' | null>(null);
 
   // Creatives — up to MAX_MEDIA slides. Order in this array becomes the
@@ -145,6 +153,9 @@ export default function CampaignUpload({
     setPlacement(editingAd.placement_key === 'sidebar' ? 'sidebar' : 'content');
     setDailyCap(String(editingAd.daily_impression_cap_per_user ?? 3));
     setShowOnDiscover(editingAd.show_on_discover !== false);
+    setVenueLat(editingAd.place_lat != null ? Number(editingAd.place_lat) : null);
+    setVenueLon(editingAd.place_lon != null ? Number(editingAd.place_lon) : null);
+    setVenueName(editingAd.place_name ?? '');
     setStartsAt(editingAd.starts_at ? new Date(editingAd.starts_at) : null);
     setEndsAt(editingAd.ends_at ? new Date(editingAd.ends_at) : null);
     // Targeted breaks: editingAd.surf_break_targets is [{id,name}] when the
@@ -172,7 +183,7 @@ export default function CampaignUpload({
     { search: surfBreakSearch, limit: 10, continuationToken: '0' },
     { skip: surfBreakSearch.length < 2 },
   );
-  const surfBreakResults: any[] = (surfBreaksData as any)?.results?.surfBreaks ?? [];
+  const surfBreakResults: any[] = (surfBreaksData as any)?.results?.breaks ?? (surfBreaksData as any)?.results?.surfBreaks ?? [];
 
   const pickCreatives = useCallback(async () => {
     const remaining = MAX_MEDIA - creatives.length;
@@ -256,18 +267,89 @@ export default function CampaignUpload({
   const daysOfRunway = dailyCost > 0 ? Math.floor(balance.total / dailyCost) : 0;
   const overFreeBreakCap = isFreeTier && targetedBreaks.length > FREE_BREAK_CAP;
 
+  // Full-window forecast: when an end date is set, does the balance cover the
+  // whole flight or will it auto-pause partway? (null = open-ended ad.)
+  const windowDays = campaignWindowDays(startsAt, endsAt);
+  const fullWindowCost = windowDays != null ? dailyCost * windowDays : null;
+  const coversWindow = fullWindowCost == null ? null : balance.total >= fullWindowCost;
+  const pauseDate = (() => {
+    if (windowDays == null || coversWindow !== false) return null;
+    const d = new Date();
+    d.setDate(d.getDate() + daysOfRunway);
+    return d;
+  })();
+
   // At least one targeting surface — without it `getAds` will never select
   // this ad, so we block submit instead of shipping a dead row.
   const hasReach = targetedBreaks.length > 0 || effectiveDiscover;
 
+  // Original snapshot of the ad being edited, normalized the SAME way the
+  // prefill effect populates the form, so an untouched form compares equal.
+  // Media/thumbnail compared by s3 key (uri) — robust against legacy rows
+  // whose ad_media id is null.
+  const original = useMemo(() => {
+    if (!editingAd) return null;
+    const media = Array.isArray(editingAd.media) ? [...editingAd.media] : [];
+    media.sort((a: any, b: any) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const rawBody = editingAd.body ?? '';
+    const cleanBody = ['null', 'undefined'].includes(String(rawBody).trim().toLowerCase()) ? '' : rawBody;
+    const thumbMedia = editingAd.thumbnail_ad_media_id
+      ? media.find((m: any) => m.id === editingAd.thumbnail_ad_media_id)
+      : media[0];
+    return {
+      headline: (editingAd.headline ?? '').trim(),
+      body: String(cleanBody).trim(),
+      clickUrl: (editingAd.click_url ?? '').trim(),
+      ctaLabel: (editingAd.cta_label ?? '').trim(),
+      ctaType: editingAd.cta_type === 'tel' ? 'tel' : 'url',
+      placement: editingAd.placement_key === 'sidebar' ? 'sidebar' : 'content',
+      dailyCap: String(editingAd.daily_impression_cap_per_user ?? 3),
+      showOnDiscover: editingAd.show_on_discover !== false,
+      startsAt: editingAd.starts_at ? new Date(editingAd.starts_at).getTime() : null,
+      endsAt: editingAd.ends_at ? new Date(editingAd.ends_at).getTime() : null,
+      breakIds: (Array.isArray(editingAd.surf_break_targets) ? editingAd.surf_break_targets.map((b: any) => b.id) : []).slice().sort(),
+      mediaKeys: media.map((m: any) => m.s3_key),
+      thumbKey: thumbMedia?.s3_key ?? null,
+      venue: `${editingAd.place_lat ?? ''}|${editingAd.place_lon ?? ''}|${editingAd.place_name ?? ''}`,
+    };
+  }, [editingAd]);
+
+  // In edit mode, only allow Save once something actually changed.
+  const isDirty = useMemo(() => {
+    if (!isEdit || !original) return true; // create mode never gates on dirtiness
+    const current = {
+      headline: headline.trim(),
+      body: body.trim(),
+      clickUrl: clickUrl.trim(),
+      ctaLabel: ctaLabel.trim(),
+      ctaType,
+      placement,
+      dailyCap,
+      showOnDiscover,
+      startsAt: startsAt ? startsAt.getTime() : null,
+      endsAt: endsAt ? endsAt.getTime() : null,
+      breakIds: targetedBreaks.map((b) => b.id).slice().sort(),
+      mediaKeys: creatives.map((c) => c.uri),
+      thumbKey: creatives[thumbnailIndex]?.uri ?? null,
+      venue: `${venueLat ?? ''}|${venueLon ?? ''}|${(Number.isFinite(venueLat) && venueName.trim()) ? venueName.trim() : ''}`,
+    };
+    return JSON.stringify(current) !== JSON.stringify(original);
+  }, [
+    isEdit, original, headline, body, clickUrl, ctaLabel, ctaType, placement,
+    dailyCap, showOnDiscover, startsAt, endsAt, targetedBreaks, creatives, thumbnailIndex,
+    venueLat, venueLon, venueName,
+  ]);
+
   // Submit gates: headline + CTA destination + at least one creative + at
-  // least one targeting surface + within the free break cap.
+  // least one targeting surface + within the free break cap. In edit mode,
+  // also require an actual change.
   const canSubmit =
     headline.trim().length > 0 &&
     clickUrl.trim().length > 0 &&
     creatives.length > 0 &&
     hasReach &&
     !overFreeBreakCap &&
+    isDirty &&
     !submitting;
 
   const submit = useCallback(async () => {
@@ -322,6 +404,9 @@ export default function CampaignUpload({
         daily_impression_cap_per_user: Number(dailyCap) || 3,
         show_on_discover: effectiveDiscover,
         surf_break_ids: targetedBreaks.map((b) => b.id),
+        place_lat: Number.isFinite(venueLat) ? venueLat : null,
+        place_lon: Number.isFinite(venueLon) ? venueLon : null,
+        place_name: (Number.isFinite(venueLat) && Number.isFinite(venueLon) && venueName.trim()) ? venueName.trim() : null,
       };
 
       if (isEdit) {
@@ -329,7 +414,7 @@ export default function CampaignUpload({
         Alert.alert(
           'Changes saved',
           'Edits to creative or copy send the campaign back for review.',
-          [{ text: 'OK', onPress: () => router.back() }],
+          [{ text: 'OK', onPress: () => smartBack() }],
         );
         return;
       }
@@ -367,7 +452,7 @@ export default function CampaignUpload({
   }, [
     canSubmit, creatives, thumbnailIndex, placement, clickUrl, headline, body, ctaLabel, ctaType,
     dailyCap, effectiveDiscover, targetedBreaks, startsAt, endsAt, isEdit, editingAd, createMyAdMediaPresignedUrls,
-    createMyAd, updateMyAd, router,
+    createMyAd, updateMyAd, router, smartBack,
   ]);
 
   const bg = isDark ? '#000' : '#fff';
@@ -381,7 +466,7 @@ export default function CampaignUpload({
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
         <View style={s.headerRow}>
           {(isEdit || readOnly) && (
-            <Pressable onPress={() => router.back()} hitSlop={8} style={{ marginRight: 12 }}>
+            <Pressable onPress={smartBack} hitSlop={8} style={{ marginRight: 12 }}>
               <Ionicons name="chevron-back" size={26} color={text} />
             </Pressable>
           )}
@@ -577,6 +662,29 @@ export default function CampaignUpload({
                 Leave blank to fall back to your service area (set in Edit Profile).
               </Text>
             )}
+            {!readOnly && overFreeBreakCap && (
+              <View
+                style={[
+                  s.placementNote,
+                  {
+                    backgroundColor: isDark ? 'rgba(139,92,246,0.12)' : '#f5f3ff',
+                    borderColor: isDark ? 'rgba(139,92,246,0.3)' : '#ddd6fe',
+                  },
+                ]}
+              >
+                <Ionicons name="information-circle-outline" size={14} color="#8b5cf6" />
+                <Text style={[s.placementNoteText, { color: isDark ? '#c4b5fd' : '#6d28d9' }]}>
+                  The Free plan can target up to {FREE_BREAK_CAP} breaks.{' '}
+                  <Text
+                    onPress={() => Linking.openURL(adPlansUrl((user as any)?.email)).catch(() => {})}
+                    style={{ fontWeight: '700', textDecorationLine: 'underline' }}
+                  >
+                    Subscribe
+                  </Text>
+                  {' '}to target more.
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Campaign window (optional) — start/end dates. Matches web. */}
@@ -615,6 +723,27 @@ export default function CampaignUpload({
             )}
           </View>
 
+          {/* Per-ad venue pin (optional) — renders on the mobile map near the
+              ad's targeted breaks. */}
+          {!readOnly ? (
+            <View style={s.field}>
+              <Text style={[s.label, { color: text }]}>Venue on map (optional)</Text>
+              <VenuePicker
+                lat={venueLat}
+                lon={venueLon}
+                name={venueName}
+                onChange={({ lat, lon, name }) => { setVenueLat(lat); setVenueLon(lon); setVenueName(name); }}
+              />
+            </View>
+          ) : (venueLat != null && venueLon != null) ? (
+            <View style={s.field}>
+              <Text style={[s.label, { color: text }]}>Venue</Text>
+              <Text style={{ color: muted, fontSize: 13 }}>
+                {venueName || `${venueLat.toFixed(4)}, ${venueLon.toFixed(4)}`}
+              </Text>
+            </View>
+          ) : null}
+
           {/* Daily cap — bounded chip selection mirrors the Placement / CTA
               chip rows. Caps user-side at 10; admin can set higher for
               premium partnerships. Backend clamp is still 1-100. */}
@@ -650,45 +779,80 @@ export default function CampaignUpload({
             />
           </View>
 
-          {/* Credit cost summary (create only) */}
-          {!readOnly && !isEdit && (
+          {/* Credit cost summary (create + edit) */}
+          {!readOnly && (
             <View
               style={{
-                marginTop: 12, borderWidth: 1, borderRadius: 14, padding: 12,
+                marginBottom: 16, borderWidth: 1, borderRadius: 14, padding: 16,
                 borderColor: isDark ? 'rgba(148,163,184,0.25)' : '#e2e8f0',
+                backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#f8fafc',
               }}
             >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ color: text, fontWeight: '700', fontSize: 14 }}>Daily cost</Text>
-                <Text style={{ color: isDark ? '#6ee7b7' : '#047857', fontWeight: '800', fontSize: 16 }}>
-                  {dailyCost} credit{dailyCost === 1 ? '' : 's'}/day
+              {/* Header */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <Text style={{ color: text, fontWeight: '700', fontSize: 15 }}>Daily cost</Text>
+                <Text style={{ color: isDark ? '#6ee7b7' : '#047857', fontWeight: '800', fontSize: 18 }}>
+                  {dailyCost}
+                  <Text style={{ fontSize: 12, fontWeight: '600' }}> credit{dailyCost === 1 ? '' : 's'}/day</Text>
                 </Text>
               </View>
-              <Text style={{ color: muted, fontSize: 11, marginTop: 2 }}>
-                {targetedBreaks.length} break{targetedBreaks.length === 1 ? '' : 's'}{effectiveDiscover ? ' + Discover' : ''} · {AD_TIER_LABELS[adTier]} plan · balance {balance.total} credits{dailyCost > 0 ? ` (≈ ${daysOfRunway} day${daysOfRunway === 1 ? '' : 's'})` : ''}
-              </Text>
 
-              {overFreeBreakCap && (
-                <Text style={{ color: isDark ? '#fcd34d' : '#92400e', fontSize: 11, marginTop: 6 }}>
-                  The Free plan can target up to {FREE_BREAK_CAP} breaks. Subscribe to target more.
-                </Text>
+              {/* Breakdown */}
+              <View style={{ marginTop: 12, gap: 6 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ color: muted, fontSize: 12 }}>Targeting</Text>
+                  <Text style={{ color: text, fontSize: 12, fontWeight: '500' }}>
+                    {targetedBreaks.length} break{targetedBreaks.length === 1 ? '' : 's'}{effectiveDiscover ? ' + Discover' : ''}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ color: muted, fontSize: 12 }}>Plan</Text>
+                  <Text style={{ color: text, fontSize: 12, fontWeight: '500' }}>{AD_TIER_LABELS[adTier]}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ color: muted, fontSize: 12 }}>Balance</Text>
+                  <Text style={{ color: text, fontSize: 12, fontWeight: '500' }}>
+                    {balance.total} credits{dailyCost > 0 && windowDays == null ? ` · ~${daysOfRunway} day${daysOfRunway === 1 ? '' : 's'}` : ''}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Full-window forecast (only when an end date is set) */}
+              {dailyCost > 0 && windowDays != null && coversWindow === true && (
+                <View style={{ marginTop: 12, padding: 9, borderRadius: 9, backgroundColor: isDark ? 'rgba(16,185,129,0.12)' : '#ecfdf5' }}>
+                  <Text style={{ color: isDark ? '#6ee7b7' : '#047857', fontSize: 11, lineHeight: 16 }}>
+                    Funded through {endsAt ? fmtWindowDate(endsAt) : ''} — this {windowDays}-day flight costs {fullWindowCost} credits, within your {balance.total}.
+                  </Text>
+                </View>
+              )}
+              {dailyCost > 0 && windowDays != null && coversWindow === false && (
+                <View style={{ marginTop: 12, padding: 9, borderRadius: 9, backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : '#fffbeb' }}>
+                  <Text style={{ color: isDark ? '#fcd34d' : '#92400e', fontSize: 11, lineHeight: 16 }}>
+                    Running through {endsAt ? fmtWindowDate(endsAt) : ''} ({windowDays} days) needs {fullWindowCost} credits — you have {balance.total}, so it'll pause around {pauseDate ? fmtWindowDate(pauseDate) : ''} (day {daysOfRunway}).
+                  </Text>
+                </View>
               )}
 
               {dailyCost > 0 && balance.total < dailyCost && (
-                <Text style={{ color: isDark ? '#fcd34d' : '#92400e', fontSize: 11, marginTop: 6 }}>
-                  You're low on credits — this won't run once approved until you top up.
+                <Text style={{ color: isDark ? '#fcd34d' : '#92400e', fontSize: 11, marginTop: 10, lineHeight: 16 }}>
+                  You're low on credits — campaigns pause when your balance runs out. Top up to keep running.
                 </Text>
               )}
 
-              <View style={{ flexDirection: 'row', gap: 12, marginTop: 10 }}>
-                <Pressable onPress={() => Linking.openURL(adCreditsUrl()).catch(() => {})}>
-                  <Text style={{ color: isDark ? '#38bdf8' : '#0284c7', fontWeight: '600', fontSize: 12, textDecorationLine: 'underline' }}>
-                    Buy credits
+              {/* Billing handoff — web checkout (no in-app payment, per billing strategy) */}
+              <View style={{
+                marginTop: 14, paddingTop: 12, flexDirection: 'row', gap: 18,
+                borderTopWidth: StyleSheet.hairlineWidth,
+                borderTopColor: isDark ? 'rgba(148,163,184,0.25)' : '#e2e8f0',
+              }}>
+                <Pressable onPress={() => Linking.openURL(adCreditsUrl((user as any)?.email)).catch(() => {})}>
+                  <Text style={{ color: isDark ? '#38bdf8' : '#0284c7', fontWeight: '600', fontSize: 12 }}>
+                    Buy credits ↗
                   </Text>
                 </Pressable>
-                <Pressable onPress={() => Linking.openURL(adPlansUrl()).catch(() => {})}>
-                  <Text style={{ color: isDark ? '#38bdf8' : '#0284c7', fontWeight: '600', fontSize: 12, textDecorationLine: 'underline' }}>
-                    Subscribe for monthly credits
+                <Pressable onPress={() => Linking.openURL(adPlansUrl((user as any)?.email)).catch(() => {})}>
+                  <Text style={{ color: isDark ? '#38bdf8' : '#0284c7', fontWeight: '600', fontSize: 12 }}>
+                    Subscribe ↗
                   </Text>
                 </Pressable>
               </View>

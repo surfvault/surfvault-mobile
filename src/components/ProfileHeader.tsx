@@ -2,7 +2,7 @@ import { View, Text, Pressable, StyleSheet, Linking, ActivityIndicator } from 'r
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
-import { useGetShaperBoardsQuery } from '../store';
+import { useGetShaperBoardsQuery, useGetAdvertiserAdsQuery, useGetMyCampaignsQuery } from '../store';
 import { TIER_MONTHLY_GRANT, adPlansUrl, type AdTier } from '../helpers/adTiers';
 
 const isNoteActive = (setAt?: string): boolean => {
@@ -84,6 +84,20 @@ export default function ProfileHeader({
     { skip: !isShaper || !profile?.handle }
   );
   const boardsCount = shaperBoardsData?.results?.boards?.length ?? 0;
+  // Advertiser "ads" count — reuse the grid's fetch (RTK Query dedupes): self
+  // sees all campaigns (every status) via /campaigns; public viewers see the
+  // approved+active ads via /advertisers/{handle}/ads.
+  const { data: advertiserAdsData } = useGetAdvertiserAdsQuery(
+    { handle: profile?.handle ?? '' },
+    { skip: !isAdvertiser || isSelf || !profile?.handle }
+  );
+  const { data: myCampaignsData } = useGetMyCampaignsQuery(
+    undefined,
+    { skip: !isAdvertiser || !isSelf }
+  );
+  const adsCount = isSelf
+    ? (myCampaignsData?.results?.ads?.length ?? 0)
+    : (advertiserAdsData?.results?.ads?.length ?? 0);
   const storagePct = storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0;
 
   const formatStorage = (gb: number): string => {
@@ -188,7 +202,7 @@ export default function ProfileHeader({
                     {isShaper
                       ? boardsCount
                       : isAdvertiser
-                        ? (profile?.adsCount ?? profile?.ads_count ?? 0)
+                        ? adsCount
                         : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
                   </Text>
                   <Text style={[s.statLabel, spotsFilterActive && { color: '#0ea5e9' }]}>{isShaper ? 'boards' : isAdvertiser ? 'ads' : 'spots'}</Text>
@@ -398,7 +412,7 @@ export default function ProfileHeader({
         const low = grant > 0 && adMonthlyCredits / grant <= 0.1;
         return (
           <Pressable
-            onPress={() => Linking.openURL(adPlansUrl()).catch(() => {})}
+            onPress={() => Linking.openURL(adPlansUrl((profile as any)?.email)).catch(() => {})}
             style={[s.storageWrap, {
               backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
               borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',

@@ -50,6 +50,7 @@ import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
 import { formatSessionDate } from '../../src/helpers/dateTime';
+import { fetchAccountBadge, type AccountBadge } from '../../src/helpers/accountBadges';
 
 const formatCount = (n: number): string => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
@@ -72,7 +73,7 @@ export default function ProfileScreen() {
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
   const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
-  const { accounts: linkedAccounts, activeUserId, switchTo: switchLinkedAccount, patchAccount } =
+  const { accounts: linkedAccounts, activeUserId, switchTo: switchLinkedAccount, patchAccount, getFreshToken } =
     useLinkedAccounts();
   // Refresh persisted display fields (verified, picture, etc.) for each
   // linked account when the switcher opens, so the sheet matches current
@@ -108,6 +109,51 @@ export default function ProfileScreen() {
       })();
     });
   }, [accountSwitcherVisible, linkedAccounts, patchAccount]);
+
+  // Per-account unread counts (messages + notifications) shown under each
+  // handle in the switcher. Fetched once per sheet-open with each account's
+  // own (refreshed) token — they're inactive, so we can't use RTK Query.
+  const [accountBadges, setAccountBadges] = useState<Record<string, AccountBadge>>({});
+  const linkedAccountsRef = useRef(linkedAccounts);
+  linkedAccountsRef.current = linkedAccounts;
+  const badgesFetchedForOpenRef = useRef(false);
+  useEffect(() => {
+    if (!accountSwitcherVisible) { badgesFetchedForOpenRef.current = false; return; }
+    if (badgesFetchedForOpenRef.current) return; // already fetched for this open
+    badgesFetchedForOpenRef.current = true;
+    let cancelled = false;
+    (async () => {
+      // Sequential so getFreshToken's refresh-token rotation persists cleanly
+      // (a parallel burst could clobber each other's writeState).
+      for (const acct of linkedAccountsRef.current) {
+        if (acct.status !== 'ok' || cancelled) continue;
+        const token = await getFreshToken(acct.userId);
+        if (!token || cancelled) continue;
+        try {
+          const badge = await fetchAccountBadge(token);
+          if (!cancelled) setAccountBadges((prev) => ({ ...prev, [acct.userId]: badge }));
+        } catch { /* best-effort */ }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [accountSwitcherVisible, getFreshToken]);
+
+  // Compact "3 messages · 2 notifications" line; omits zero parts, undefined
+  // when fully caught up so the row stays clean.
+  const badgeSubtitle = (userId: string): string | undefined => {
+    const b = accountBadges[userId];
+    if (!b) return undefined;
+    const parts: string[] = [];
+    if (b.messages > 0) parts.push(`${b.messages} message${b.messages === 1 ? '' : 's'}`);
+    if (b.notifications > 0) parts.push(`${b.notifications} notification${b.notifications === 1 ? '' : 's'}`);
+    return parts.length ? parts.join(' · ') : undefined;
+  };
+  // Any unread (chats or notifications) → show the dot badge on the avatar.
+  const hasUnread = (userId: string): boolean => {
+    const b = accountBadges[userId];
+    return !!b && (b.messages > 0 || b.notifications > 0);
+  };
+
   // Sibling profiles linked on this device, excluding the active one.
   const siblingAccounts = linkedAccounts.filter((a) => a.userId !== activeUserId);
   const hasSiblings = siblingAccounts.length > 0;
@@ -1140,6 +1186,9 @@ export default function ProfileScreen() {
                 .filter((a) => a.userId === activeUserId)
                 .map((acct) => ({
                   label: acct.handle ?? acct.name ?? acct.email ?? 'Account',
+                  subtitle: badgeSubtitle(acct.userId),
+                  subtitleLowercase: true,
+                  unread: hasUnread(acct.userId),
                   labelBadge:
                     acct.userType === 'surfer' || acct.userType === 'photographer' || acct.userType === 'shaper'
                       ? (
@@ -1158,9 +1207,12 @@ export default function ProfileScreen() {
               ...siblingAccounts.map((acct) => ({
                 label: acct.handle ?? acct.name ?? acct.email ?? 'Account',
                 // Expired accounts keep the "Tap to re-authenticate" hint as
-                // a subtitle so the user knows what'll happen on tap.
+                // a subtitle so the user knows what'll happen on tap; active
+                // ones show their unread message + notification counts.
                 subtitle:
-                  acct.status === 'expired' ? 'Tap to re-authenticate' : undefined,
+                  acct.status === 'expired' ? 'Tap to re-authenticate' : badgeSubtitle(acct.userId),
+                subtitleLowercase: true,
+                unread: acct.status !== 'expired' && hasUnread(acct.userId),
                 labelBadge:
                   acct.status !== 'expired' && (acct.userType === 'surfer' || acct.userType === 'photographer' || acct.userType === 'shaper')
                     ? (
