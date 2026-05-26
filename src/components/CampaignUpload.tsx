@@ -37,6 +37,7 @@ import { generateUUID } from '../helpers/uuid';
 import { useUser } from '../context/UserProvider';
 import { useSmartBack } from '../context/NavigationContext';
 import VenuePicker from './VenuePicker';
+import MapView, { Marker } from 'react-native-maps';
 import {
   AD_TIER_LABELS,
   FREE_BREAK_CAP,
@@ -738,9 +739,41 @@ export default function CampaignUpload({
           ) : (venueLat != null && venueLon != null) ? (
             <View style={s.field}>
               <Text style={[s.label, { color: text }]}>Venue</Text>
-              <Text style={{ color: muted, fontSize: 13 }}>
-                {venueName || `${venueLat.toFixed(4)}, ${venueLon.toFixed(4)}`}
+              {venueName ? (
+                <Text style={{ color: text, fontSize: 14, fontWeight: '500', marginBottom: 6 }}>{venueName}</Text>
+              ) : null}
+              <Text style={{ color: muted, fontSize: 11, marginBottom: 8 }}>
+                {venueLat.toFixed(4)}, {venueLon.toFixed(4)}
               </Text>
+              <View
+                style={{
+                  height: 180,
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  borderWidth: 1,
+                  borderColor: isDark ? 'rgba(148,163,184,0.25)' : '#e2e8f0',
+                }}
+                // pointerEvents="none" so the form ScrollView still scrolls
+                // past the map (no gesture conflict in this read-only preview).
+                pointerEvents="none"
+              >
+                <MapView
+                  style={{ flex: 1 }}
+                  initialRegion={{
+                    latitude: venueLat,
+                    longitude: venueLon,
+                    latitudeDelta: 0.02,
+                    longitudeDelta: 0.02,
+                  }}
+                  scrollEnabled={false}
+                  zoomEnabled={false}
+                  rotateEnabled={false}
+                  pitchEnabled={false}
+                  toolbarEnabled={false}
+                >
+                  <Marker coordinate={{ latitude: venueLat, longitude: venueLon }} pinColor="#0ea5e9" />
+                </MapView>
+              </View>
             </View>
           ) : null}
 

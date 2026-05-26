@@ -56,8 +56,12 @@ export const creditBalance = (user: any): { monthly: number; pack: number; total
   return { monthly, pack, total: ap.credits ?? monthly + pack };
 };
 
-// Web app base — billing flows hand off here (billing is web-only).
-export const WEB_APP_BASE = 'https://app.surf-vault.com';
+// Web app base — billing flows hand off here (billing is web-only). Read from
+// the EAS-build env (dev profile → dev web, prod profile → prod web), with a
+// safe prod fallback so a missing config never opens a broken URL.
+import Constants from 'expo-constants';
+export const WEB_APP_BASE: string =
+  (Constants.expoConfig?.extra?.webAppBase as string | undefined) ?? 'https://app.surf-vault.com';
 // `from=app` tells the web app this is the native billing handoff: suppress the
 // "download the app" takeover (they came FROM the app — nudging back is a dead
 // loop) and pre-fill login. `login_hint` (the user's email) smooths the one-time

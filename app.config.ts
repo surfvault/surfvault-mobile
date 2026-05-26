@@ -151,6 +151,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ],
   extra: {
     apiBaseUrl: process.env.API_BASE_URL ?? 'https://dev-api.surf-vault.com',
+    // Web app base — billing handoffs (plans/credits) open this URL. Env-bound
+    // so dev builds hit the dev web, prod builds hit prod (no more clicking a
+    // dev TestFlight link and landing on production checkout).
+    webAppBase: process.env.WEB_APP_BASE ?? 'https://app.surf-vault.com',
     auth0Domain: process.env.AUTH0_DOMAIN ?? '',
     auth0ClientId: process.env.AUTH0_CLIENT_ID ?? '',
     auth0Audience: process.env.AUTH0_AUDIENCE ?? '',
