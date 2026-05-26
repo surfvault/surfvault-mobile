@@ -48,12 +48,17 @@ export const campaignWindowDays = (
 
 export const adTierOf = (user: any): AdTier => (user?.adPartner?.adTier ?? 'free') as AdTier;
 
-export const creditBalance = (user: any): { monthly: number; pack: number; total: number } => {
+export const creditBalance = (
+  user: any,
+): { monthly: number; pack: number; packUsed: number; total: number } => {
   const ap = user?.adPartner;
-  if (!ap) return { monthly: 0, pack: 0, total: 0 };
+  if (!ap) return { monthly: 0, pack: 0, packUsed: 0, total: 0 };
   const monthly = ap.monthlyCredits ?? 0;
   const pack = ap.packCredits ?? 0;
-  return { monthly, pack, total: ap.credits ?? monthly + pack };
+  // This-cycle pack usage. Resets on cycle rollover. Lets the bar color the
+  // "used" portion by source: sky for monthly-used, amber for pack-used.
+  const packUsed = ap.packCreditsUsed ?? 0;
+  return { monthly, pack, packUsed, total: ap.credits ?? monthly + pack };
 };
 
 // Web app base — billing flows hand off here (billing is web-only). Read from

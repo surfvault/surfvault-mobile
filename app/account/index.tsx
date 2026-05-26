@@ -125,9 +125,13 @@ export default function AccountScreen() {
   const adTier = adTierOf(user);
   const adBal = creditBalance(user);
   const adGrant = TIER_MONTHLY_GRANT[adTier] ?? 0;
-  const adUsed = Math.max(0, adGrant - adBal.monthly);
-  const adPct = adGrant > 0 ? Math.min((adUsed / adGrant) * 100, 100) : 0;
-  const adLow = adGrant > 0 && adBal.monthly / adGrant <= 0.1;
+  const adMonthlyUsed = Math.max(0, adGrant - adBal.monthly);
+  // Slot = original capacity this cycle. Pack-used is added back so "Y" is
+  // stable across the cycle (doesn't shrink as pack gets spent).
+  const adTotalSlot = adGrant + adBal.pack + adBal.packUsed;
+  const adTotalUsed = adMonthlyUsed + adBal.packUsed;
+  // "Low" gates on remaining total balance, not bar %.
+  const adLow = adGrant > 0 && adBal.total <= adGrant * 0.1;
   const hasPendingDeletion = !!user?.deletion_requested_at;
   const deletionDate = user?.deletion_scheduled_for
     ? new Date(user.deletion_scheduled_for as string).toLocaleDateString('en-US', {
@@ -366,26 +370,47 @@ export default function AccountScreen() {
             <>
               <Text style={[s.sectionTitle, { color: primaryText }]}>Ad credits & plan</Text>
 
+              {/* X of Y credits used, where Y = grant + pack (full current
+                  slot). Single bar replaces the old Monthly/Extra split —
+                  breakdown text below carries the cycle vs persistent nuance. */}
               <View style={s.storageRow}>
-                <Text style={[s.storageLabel, { color: subText }]}>
-                  {adBal.pack > 0 ? `+ ${adBal.pack} top-up credits` : 'monthly allowance'}
-                </Text>
+                <Text style={[s.storageLabel, { color: subText }]}>credits used</Text>
                 <Text style={[s.storageValue, { color: primaryText }]}>
-                  {adUsed}
+                  {adTotalUsed}
                   <Text style={{ color: mutedText, fontSize: 14 }}>
-                    {' '}/ {adGrant} used
+                    {' '}of {adTotalSlot.toLocaleString()}
                   </Text>
                 </Text>
               </View>
 
-              <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
-                <View
-                  style={[
-                    s.storageBarFill,
-                    { width: `${adPct}%`, backgroundColor: adLow ? '#f59e0b' : '#0ea5e9' },
-                  ]}
-                />
+              {/* USED portion split by source — sky (monthly burn), amber
+                  (extra burn). Everything unused stays slate (bar background). */}
+              <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb', flexDirection: 'row' }]}>
+                <View style={{
+                  height: '100%',
+                  width: `${adTotalSlot > 0 ? (adMonthlyUsed / adTotalSlot) * 100 : 0}%`,
+                  backgroundColor: adLow ? '#f59e0b' : '#0ea5e9',
+                }} />
+                <View style={{
+                  height: '100%',
+                  width: `${adTotalSlot > 0 ? (adBal.packUsed / adTotalSlot) * 100 : 0}%`,
+                  backgroundColor: '#fbbf24',
+                }} />
               </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#0ea5e9', marginRight: 6 }} />
+                <Text style={[s.storageLabel, { color: mutedText, fontSize: 11 }]}>
+                  <Text style={{ fontWeight: '600', color: subText }}>{adBal.monthly} monthly</Text> remaining (resets each cycle)
+                </Text>
+              </View>
+              {adBal.pack > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#fbbf24', marginRight: 6 }} />
+                  <Text style={[s.storageLabel, { color: mutedText, fontSize: 11 }]}>
+                    <Text style={{ fontWeight: '600', color: subText }}>{adBal.pack.toLocaleString()} extra</Text> (never expires)
+                  </Text>
+                </View>
+              )}
 
               <View style={[s.divider, { backgroundColor: dividerColor, marginTop: 16, marginBottom: 14 }]} />
 
