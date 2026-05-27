@@ -13,6 +13,7 @@
       },
       "env": {
         "API_BASE_URL": "https://dev-api.surf-vault.com",
+        "WEB_APP_BASE": "https://dev-app.surf-vault.com",
         "AUTH0_DOMAIN": "dev-auth.surf-vault.com",
         "AUTH0_CLIENT_ID": "N1ZZuwobgJpTBJyYX6gI8ewlZxj7puyh",
         "AUTH0_AUDIENCE": "https://dev-api.surfvault.com",
@@ -33,6 +34,7 @@
       "env": {
         "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "API_BASE_URL": "https://api.surf-vault.com",
+        "WEB_APP_BASE": "https://app.surf-vault.com",
         "AUTH0_DOMAIN": "auth.surf-vault.com",
         "AUTH0_CLIENT_ID": "LbIRFqvSqLPZwNq45FgjfTTmm9ow847O",
         "AUTH0_AUDIENCE": "https://api.surfvault.com",

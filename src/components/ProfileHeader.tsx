@@ -2,7 +2,8 @@ import { View, Text, Pressable, StyleSheet, Linking, ActivityIndicator } from 'r
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
-import { useGetShaperBoardsQuery } from '../store';
+import { useGetShaperBoardsQuery, useGetAdvertiserAdsQuery, useGetMyCampaignsQuery } from '../store';
+import { TIER_MONTHLY_GRANT, adPlansUrl, type AdTier } from '../helpers/adTiers';
 
 const isNoteActive = (setAt?: string): boolean => {
   if (!setAt) return false;
@@ -23,6 +24,11 @@ interface ProfileHeaderProps {
   currentBreakName?: string;
   storageUsed?: number;
   storageLimit?: number;
+  // Advertiser credit wallet (self-view; mirrors storage for other types).
+  adMonthlyCredits?: number; // remaining in the current monthly grant
+  adPackCredits?: number; // persistent "extra" credits purchased à la carte
+  adPackCreditsUsed?: number; // pack credits debited this cycle (resets each cycle)
+  adTier?: string;
   // Other user actions
   isFollowing?: boolean;
   isFollowLoading?: boolean;
@@ -52,6 +58,10 @@ export default function ProfileHeader({
   currentBreakName,
   storageUsed = 0,
   storageLimit = 15,
+  adMonthlyCredits = 0,
+  adPackCredits = 0,
+  adPackCreditsUsed = 0,
+  adTier = 'free',
   isFollowing,
   isFollowLoading = false,
   isMessageLoading = false,
@@ -78,6 +88,20 @@ export default function ProfileHeader({
     { skip: !isShaper || !profile?.handle }
   );
   const boardsCount = shaperBoardsData?.results?.boards?.length ?? 0;
+  // Advertiser "ads" count — reuse the grid's fetch (RTK Query dedupes): self
+  // sees all campaigns (every status) via /campaigns; public viewers see the
+  // approved+active ads via /advertisers/{handle}/ads.
+  const { data: advertiserAdsData } = useGetAdvertiserAdsQuery(
+    { handle: profile?.handle ?? '' },
+    { skip: !isAdvertiser || isSelf || !profile?.handle }
+  );
+  const { data: myCampaignsData } = useGetMyCampaignsQuery(
+    undefined,
+    { skip: !isAdvertiser || !isSelf }
+  );
+  const adsCount = isSelf
+    ? (myCampaignsData?.results?.ads?.length ?? 0)
+    : (advertiserAdsData?.results?.ads?.length ?? 0);
   const storagePct = storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0;
 
   const formatStorage = (gb: number): string => {
@@ -182,7 +206,7 @@ export default function ProfileHeader({
                     {isShaper
                       ? boardsCount
                       : isAdvertiser
-                        ? (profile?.adsCount ?? profile?.ads_count ?? 0)
+                        ? adsCount
                         : (profile?.surfBreaksCount ?? profile?.mySpots?.length ?? profile?.my_spots?.length ?? 0)}
                   </Text>
                   <Text style={[s.statLabel, spotsFilterActive && { color: '#0ea5e9' }]}>{isShaper ? 'boards' : isAdvertiser ? 'ads' : 'spots'}</Text>
@@ -368,20 +392,69 @@ export default function ProfileHeader({
         </>
       )}
 
-      {/* Storage (profile tab only) */}
+      {/* Storage (profile tab only) — tappable; opens /account for plan + usage
+          breakdown (mirrors the advertiser credit bar behavior right below). */}
       {showStorage && (
-        <View style={[s.storageWrap, {
-          backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
-          borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-        }]}>
+        <Pressable
+          onPress={() => router.push('/account')}
+          style={[s.storageWrap, {
+            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
+            borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+          }]}
+        >
           <Text style={[s.storageLabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
             {formatStorage(storageUsed)} of {formatStorage(storageLimit)}
           </Text>
           <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
             <View style={[s.storageBarFill, { width: `${storagePct}%`, backgroundColor: storagePct > 90 ? '#f59e0b' : '#0ea5e9' }]} />
           </View>
-        </View>
+        </Pressable>
       )}
+
+      {/* Ad credits (advertiser self-view) — simple X-of-Y used + bar, matching
+          the consumer "storage used" pattern. Tap → /account for the full
+          breakdown (monthly cycle, extra credits, runway forecast). Pack
+          credits don't show here; they live on the breakdown page. */}
+      {isSelf && isAdvertiser && (() => {
+        const grant = TIER_MONTHLY_GRANT[adTier as AdTier] ?? 0;
+        const monthlyUsed = Math.max(0, grant - adMonthlyCredits);
+        // Slot = original capacity this cycle. Pack-used is added back so "Y"
+        // is stable across the cycle (doesn't shrink as pack gets spent).
+        const totalSlot = grant + adPackCredits + adPackCreditsUsed;
+        const totalUsed = monthlyUsed + adPackCreditsUsed;
+        const total = adMonthlyCredits + adPackCredits;
+        const low = grant > 0 && total <= grant * 0.1;
+        return (
+          <Pressable
+            onPress={() => router.push('/account')}
+            style={[s.storageWrap, {
+              backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
+              borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+            }]}
+          >
+            <Text style={[s.storageLabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+              <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{totalUsed}</Text>
+              {' '}of{' '}
+              <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{totalSlot.toLocaleString()}</Text>
+              {' '}credits used
+            </Text>
+            {/* USED portion split by source — sky (monthly burn), amber (extra
+                burn). Everything unused stays slate (the bar background). */}
+            <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb', flexDirection: 'row', overflow: 'hidden' }]}>
+              <View style={{
+                height: '100%',
+                width: `${totalSlot > 0 ? (monthlyUsed / totalSlot) * 100 : 0}%`,
+                backgroundColor: low ? '#f59e0b' : '#0ea5e9',
+              }} />
+              <View style={{
+                height: '100%',
+                width: `${totalSlot > 0 ? (adPackCreditsUsed / totalSlot) * 100 : 0}%`,
+                backgroundColor: '#fbbf24',
+              }} />
+            </View>
+          </Pressable>
+        );
+      })()}
 
     </View>
   );

@@ -909,7 +909,7 @@ export default function SessionDetailScreen() {
     const totalBytes = result.assets.reduce((sum, a) => sum + (a.fileSize ?? 0), 0);
     const storageCheck = checkStorageCapacity(user, totalBytes);
     if (!storageCheck.hasSpace) {
-      showStorageLimitAlert(storageCheck);
+      showStorageLimitAlert(storageCheck, { email: (user as any)?.email });
       return;
     }
 

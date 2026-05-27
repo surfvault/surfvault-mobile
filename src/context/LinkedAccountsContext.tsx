@@ -46,7 +46,7 @@ interface LinkedAccountsContextType extends LinkedAccountsState {
   /** Add an account to the linked set (post-Auth0-login) and make it active. */
   addAccount: (
     creds: { accessToken: string; refreshToken: string; expiresAt: number },
-    profile: Pick<AccountSession, 'userId' | 'handle' | 'name' | 'picture' | 'userType' | 'email'>
+    profile: Pick<AccountSession, 'userId' | 'handle' | 'name' | 'picture' | 'userType' | 'email' | 'verified'>
   ) => Promise<void>;
   /**
    * Make `userId` the active account: refresh its access token if needed,
@@ -74,6 +74,14 @@ interface LinkedAccountsContextType extends LinkedAccountsState {
    * columns.
    */
   patchAccount: (userId: string, patch: Partial<AccountSession>) => Promise<void>;
+  /**
+   * Return a usable (refreshed-if-needed) access token for a linked account
+   * WITHOUT switching to it — used to read per-account data (e.g. unread
+   * badge counts) for the inactive accounts in the switcher. Persists any
+   * refresh-token rotation so the account stays usable. Returns null if the
+   * account is gone or its refresh token is dead.
+   */
+  getFreshToken: (userId: string) => Promise<string | null>;
   /** True while async work is in flight (initial hydrate, refresh, switch). */
   busy: boolean;
 }
@@ -87,6 +95,7 @@ const LinkedAccountsContext = createContext<LinkedAccountsContextType>({
   markExpired: () => {},
   signOutCurrent: async () => {},
   patchAccount: async () => {},
+  getFreshToken: async () => null,
   busy: false,
 });
 
@@ -197,7 +206,7 @@ export function LinkedAccountsProvider({ children }: { children: React.ReactNode
   const addAccount = useCallback(
     async (
       creds: { accessToken: string; refreshToken: string; expiresAt: number },
-      profile: Pick<AccountSession, 'userId' | 'handle' | 'name' | 'picture' | 'userType' | 'email'>
+      profile: Pick<AccountSession, 'userId' | 'handle' | 'name' | 'picture' | 'userType' | 'email' | 'verified'>
     ) => {
       const session: AccountSession = {
         ...profile,
@@ -302,10 +311,27 @@ export function LinkedAccountsProvider({ children }: { children: React.ReactNode
       }
 
       await writeState({ accounts: nextAccounts, activeUserId: null });
-      await saveAuthToken(null);
+      await clearAuthToken();
       store.dispatch(rootApi.util.resetApiState());
     },
     [writeState, switchTo]
+  );
+
+  const getFreshToken = useCallback(
+    async (userId: string): Promise<string | null> => {
+      const account = stateRef.current.accounts.find((a) => a.userId === userId);
+      if (!account) return null;
+      const fresh = await refreshIfNeeded(account);
+      if (!fresh) return null;
+      // Persist any rotation — refresh-token rotation invalidates the old token
+      // on use, so failing to save the new one would break the account.
+      if (fresh.refreshToken !== account.refreshToken || fresh.accessToken !== account.accessToken) {
+        const accounts = stateRef.current.accounts.map((a) => (a.userId === userId ? fresh : a));
+        await writeState({ ...stateRef.current, accounts });
+      }
+      return fresh.accessToken;
+    },
+    [refreshIfNeeded, writeState]
   );
 
   const value = useMemo<LinkedAccountsContextType>(
@@ -318,9 +344,10 @@ export function LinkedAccountsProvider({ children }: { children: React.ReactNode
       markExpired,
       signOutCurrent,
       patchAccount,
+      getFreshToken,
       busy,
     }),
-    [state, addAccount, switchTo, removeAccount, markExpired, signOutCurrent, patchAccount, busy]
+    [state, addAccount, switchTo, removeAccount, markExpired, signOutCurrent, patchAccount, getFreshToken, busy]
   );
 
   return <LinkedAccountsContext.Provider value={value}>{children}</LinkedAccountsContext.Provider>;

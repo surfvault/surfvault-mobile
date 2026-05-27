@@ -59,6 +59,7 @@ export type {
 export {
   useGetMapSearchContentQuery,
   useGetMapSurfBreaksQuery,
+  useGetMapAdsQuery,
   useGetNearbyPhotographersQuery,
   useGetNearbySurfBreaksQuery,
 } from './apis/endpoints/map';

@@ -11,8 +11,9 @@ import {
   Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useTrackedPush } from '../context/NavigationContext';
+import { dailyCreditCost } from '../helpers/adTiers';
 import ActionSheet, { type ActionSheetOption } from './ActionSheet';
 import {
   useGetAdvertiserAdsQuery,
@@ -50,17 +51,33 @@ type AdRow = {
   ends_at?: string | null;
   headline?: string;
   cta_label?: string | null;
+  cta_type?: 'url' | 'tel';
   click_url?: string | null;
   media_url?: string | null;
   hero_media_url?: string | null;
   thumbnail_ad_media_id?: string | null;
   media?: AdMedia[];
+  impression_count?: number;
+  click_count?: number;
+  show_on_discover?: boolean;
+  surf_break_targets?: Array<{ id: string; name: string }>;
 };
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const GUTTER = 2;
+// Mirror the profile session grid: 3 portrait tiles, 1px gutter.
+const GRID_GAP = 1;
 const COLS = 3;
-const TILE_SIZE = (SCREEN_WIDTH - GUTTER * (COLS - 1)) / COLS;
+const TILE_W = (SCREEN_WIDTH - GRID_GAP * (COLS - 1)) / COLS;
+const TILE_H = TILE_W * 1.3;
+
+// Compact count formatter — matches SessionCard / profile grid so every
+// card's stat chip reads the same.
+const formatCount = (n: number): string => {
+  const v = Number(n) || 0;
+  if (v >= 1000000) return `${(v / 1000000).toFixed(v >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
+  if (v >= 1000) return `${(v / 1000).toFixed(v >= 10000 ? 0 : 1).replace(/\.0$/, '')}k`;
+  return String(v);
+};
 
 function pickThumbnailKey(ad: AdRow): string | null {
   const media = ad.media ?? [];
@@ -151,6 +168,21 @@ export default function AdvertiserAdsGrid({
         trackedPush(`/campaign/${id}/edit` as any);
       },
     });
+    // Test the CTA destination so the owner can confirm the link / call works
+    // and lands where expected. Opens the raw destination (no click logged).
+    if (sheetTarget.click_url) {
+      const isTel = sheetTarget.cta_type === 'tel';
+      const raw = sheetTarget.click_url;
+      const dest = isTel ? (raw.startsWith('tel:') ? raw : `tel:${raw}`) : raw;
+      options.push({
+        label: isTel ? 'Test call' : 'Test link',
+        icon: isTel ? 'call-outline' : 'open-outline',
+        onPress: () => {
+          closeSheet();
+          Linking.openURL(dest).catch(() => Alert.alert('Could not open', 'This link could not be opened on your device.'));
+        },
+      });
+    }
     if (status === 'approved') {
       options.push({
         label: 'Pause campaign',
@@ -213,25 +245,30 @@ export default function AdvertiserAdsGrid({
     const isExpired = status === 'approved' && !!ad.ends_at && new Date(ad.ends_at).getTime() < Date.now();
     const pillStatus: NonNullable<AdRow['status']> | 'expired' = isExpired ? 'expired' : status;
     const isLive = status === 'approved' && ad.is_active !== false && !isExpired;
+    const mediaCount = Array.isArray(ad.media) ? ad.media.length : 0;
+    // Daily credit burn = 1 per targeted break + 1 if on Discover.
+    const dailyCost = dailyCreditCost(
+      Array.isArray(ad.surf_break_targets) ? ad.surf_break_targets.length : 0,
+      ad.show_on_discover === true,
+    );
     const onPress = () => {
-      // Self view → open the action sheet for management. Public viewers
-      // tap-through to click_url on approved tiles only.
-      if (isSelf) { setSheetTarget(ad); return; }
+      // Self view → tap-through to edit (the ellipsis hosts pause/resume/delete).
+      // Public viewers tap-through to click_url on approved tiles only.
+      if (isSelf) { trackedPush(`/campaign/${ad.id}/edit` as any); return; }
       if (!isLive) return;
       if (ad.click_url) Linking.openURL(ad.click_url).catch(() => { /* noop */ });
     };
-    return { thumb, status, pillStatus, isLive, onPress };
+    return { thumb, status, pillStatus, isLive, mediaCount, dailyCost, onPress };
   };
 
   return (
     <>
       {mode === 'list' ? (
-        // Full-width card layout matching the app's other list views
-        // (SessionCard / shaper BoardListCard): header on top, edge-to-edge
-        // thumbnail below.
+        // Full-width card mirroring SessionCard: header (title + CTA + status +
+        // ellipsis) on top, edge-to-edge thumbnail with a bottom-left stats chip.
         <View>
           {ads.map((ad) => {
-            const { thumb, pillStatus, isLive, onPress } = adMeta(ad);
+            const { thumb, pillStatus, isLive, mediaCount, dailyCost, onPress } = adMeta(ad);
             return (
               <View key={ad.id} style={s.listCard}>
                 <View style={s.listCardHeader}>
@@ -245,10 +282,16 @@ export default function AdvertiserAdsGrid({
                       </Text>
                     ) : null}
                   </View>
+                  {/* Header "banner" (self-view): credit burn + status next to
+                      each other (mirrors web), then the ellipsis. */}
                   {isSelf && (
-                    <Pressable onPress={() => setSheetTarget(ad)} hitSlop={8}>
-                      <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
-                    </Pressable>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <CreditChip cost={dailyCost} />
+                      <StatusPill status={pillStatus} />
+                      <Pressable onPress={() => setSheetTarget(ad)} hitSlop={8}>
+                        <Ionicons name="ellipsis-horizontal" size={20} color="#9ca3af" />
+                      </Pressable>
+                    </View>
                   )}
                 </View>
                 <Pressable
@@ -263,13 +306,9 @@ export default function AdvertiserAdsGrid({
                       <Ionicons name="megaphone-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
                     </View>
                   )}
-                  {/* Status pill only on self-view (public viewers only see
-                      approved ads; the profile is already marked SPONSORED). */}
-                  {isSelf && (
-                    <View style={s.tileTopLeft}>
-                      <StatusPill status={pillStatus} />
-                    </View>
-                  )}
+                  <View style={s.listStatsBL} pointerEvents="none">
+                    <StatsChip mediaCount={mediaCount} impressions={ad.impression_count} clicks={ad.click_count} showAnalytics={!!isSelf} large />
+                  </View>
                 </Pressable>
               </View>
             );
@@ -278,11 +317,12 @@ export default function AdvertiserAdsGrid({
       ) : (
       <View style={s.grid}>
       {ads.map((ad) => {
-        const { thumb, pillStatus, isLive, onPress } = adMeta(ad);
+        const { thumb, pillStatus, isLive, mediaCount, dailyCost, onPress } = adMeta(ad);
         return (
           <Pressable
             key={ad.id}
             onPress={onPress}
+            onLongPress={isSelf ? () => setSheetTarget(ad) : undefined}
             disabled={!isSelf && !isLive}
             style={[
               s.tile,
@@ -298,22 +338,42 @@ export default function AdvertiserAdsGrid({
               </View>
             )}
 
-            {/* Status pill only on the self-view. Public visitors only see
-                approved ads and the profile is already marked SPONSORED, so a
-                per-tile "Sponsored" chip is redundant. */}
-            {isSelf && (
-              <View style={s.tileTopLeft}>
-                <StatusPill status={pillStatus} />
+            {/* TOP-LEFT chip — status dot (self) + name + CTA label (mirrors the
+                session grid tile's chip; the dot replaces a full status pill so a
+                long name has room on a tiny tile). */}
+            {(ad.headline || ad.cta_label) && (
+              <View style={s.gridTopLeft} pointerEvents="none">
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  {isSelf && (
+                    <View style={[s.statusDot, { backgroundColor: STATUS_META[pillStatus]?.color ?? '#475569' }]} />
+                  )}
+                  {ad.headline ? (
+                    <Text style={[s.gridTitleText, { flexShrink: 1 }]} numberOfLines={1}>{ad.headline}</Text>
+                  ) : null}
+                </View>
+                {ad.cta_label ? (
+                  <Text style={[s.gridSubText, { opacity: 0.8 }]} numberOfLines={1}>{ad.cta_label}</Text>
+                ) : null}
               </View>
             )}
 
-            {ad.headline ? (
-              <View style={s.tileBottom} pointerEvents="none">
-                <Text style={s.tileHeadline} numberOfLines={2}>
-                  {ad.headline}
-                </Text>
-              </View>
-            ) : null}
+            {/* BOTTOM-LEFT — daily credit burn stacked above the view/click
+                stats (self-view shows both). */}
+            <View style={s.gridBottomLeft} pointerEvents="none">
+              {isSelf && <CreditChip cost={dailyCost} />}
+              <StatsChip mediaCount={mediaCount} impressions={ad.impression_count} clicks={ad.click_count} showAnalytics={!!isSelf} />
+            </View>
+
+            {/* BOTTOM-RIGHT — ellipsis actions (self-view only). */}
+            {isSelf && (
+              <Pressable
+                onPress={(e) => { e.stopPropagation(); setSheetTarget(ad); }}
+                hitSlop={6}
+                style={s.gridEllipsisBtn}
+              >
+                <Ionicons name="ellipsis-horizontal" size={14} color="#fff" />
+              </Pressable>
+            )}
           </Pressable>
         );
       })}
@@ -330,24 +390,81 @@ export default function AdvertiserAdsGrid({
   );
 }
 
+// Shared status label + color. The full pill (list + grid would-be) and the
+// compact grid dot both read from this so they never drift.
+type AdStatus = NonNullable<AdRow['status']> | 'expired';
+const STATUS_META: Record<AdStatus, { label: string; color: string }> = {
+  approved: { label: 'Active',   color: '#10b981' },  // emerald
+  expired:  { label: 'Expired',  color: '#475569' },  // slate
+  pending:  { label: 'Pending',  color: '#f59e0b' },  // amber
+  rejected: { label: 'Rejected', color: '#dc2626' },  // red
+  paused:   { label: 'Paused',   color: '#475569' },  // slate
+  draft:    { label: 'Draft',    color: '#475569' },  // slate
+};
+
 /**
- * Status chrome for the advertiser self-view (these pills only render for the
- * owner). Approved+live shows a green "Active" pill — on your own profile
- * "Sponsored" is redundant since every ad here is sponsored.
+ * Status chrome for the advertiser self-view. Full text pill (used in the list
+ * header where there's room). The grid tile uses a compact colored dot instead
+ * so a long name doesn't fight the pill on a tiny tile.
  */
-function StatusPill({ status }: { status: NonNullable<AdRow['status']> | 'expired' }) {
-  const map = {
-    approved: { label: 'Active',   bg: 'rgba(16,185,129,0.92)' },  // emerald
-    expired:  { label: 'Expired',  bg: 'rgba(71,85,105,0.9)' },    // slate
-    pending:  { label: 'Pending',  bg: 'rgba(245,158,11,0.92)' },  // amber
-    rejected: { label: 'Rejected', bg: 'rgba(220,38,38,0.92)' },   // red
-    paused:   { label: 'Paused',   bg: 'rgba(71,85,105,0.9)' },    // slate
-    draft:    { label: 'Draft',    bg: 'rgba(71,85,105,0.9)' },    // slate
-  } as const;
-  const entry = map[status] ?? map.draft;
+function StatusPill({ status }: { status: AdStatus }) {
+  const entry = STATUS_META[status] ?? STATUS_META.draft;
   return (
-    <View style={[s.pill, { backgroundColor: entry.bg }]}>
+    <View style={[s.pill, { backgroundColor: entry.color }]}>
       <Text style={[s.pillText, { color: '#fff' }]}>{entry.label}</Text>
+    </View>
+  );
+}
+
+/**
+ * Bottom-left stats chip — media count always; impressions + clicks only on the
+ * self-view (private analytics, like SessionCard's owner-only view count).
+ * `large` matches SessionCard's thumbnail badge; default matches the grid tile.
+ */
+function StatsChip({ mediaCount, impressions, clicks, showAnalytics, large = false }: {
+  mediaCount: number;
+  impressions?: number;
+  clicks?: number;
+  showAnalytics: boolean;
+  large?: boolean;
+}) {
+  const iconSize = large ? 11 : 10;
+  // On the compact grid tile, views/clicks matter more than the slide count, so
+  // drop media there. List view (room for all three) and public grid tiles
+  // (analytics are private, so media is the only stat) keep it.
+  const showMedia = !(showAnalytics && !large);
+  return (
+    <View style={large ? s.chipLg : s.chip} pointerEvents="none">
+      {showMedia && (
+        <>
+          <Ionicons name="images-outline" size={iconSize} color="#fff" />
+          <Text style={s.statsChipText}>{formatCount(mediaCount)}</Text>
+        </>
+      )}
+      {showAnalytics && (
+        <>
+          {showMedia && <Text style={[s.statsChipText, { opacity: 0.7 }]}> · </Text>}
+          <Ionicons name="eye-outline" size={iconSize} color="#fff" />
+          <Text style={s.statsChipText}>{formatCount(impressions ?? 0)}</Text>
+          <Text style={[s.statsChipText, { opacity: 0.7 }]}> · </Text>
+          <Ionicons name="open-outline" size={iconSize} color="#fff" />
+          <Text style={s.statsChipText}>{formatCount(clicks ?? 0)}</Text>
+        </>
+      )}
+    </View>
+  );
+}
+
+/**
+ * Daily credit-burn chip — lets the owner glance across cards and see which
+ * campaigns spend the most per day. Self-view only. Positioned by the caller
+ * (grid: stacked above the stats; list: in the header next to the status).
+ */
+function CreditChip({ cost, large = false }: { cost: number; large?: boolean }) {
+  return (
+    <View style={large ? s.chipLg : s.chip} pointerEvents="none">
+      <FontAwesome5 name="coins" size={large ? 10 : 8} color="#fbbf24" />
+      <Text style={s.creditChipText}>{cost}/day</Text>
     </View>
   );
 }
@@ -356,7 +473,7 @@ const s = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: GUTTER,
+    gap: GRID_GAP,
   },
   listCard: {
     marginBottom: 16,
@@ -372,13 +489,13 @@ const s = StyleSheet.create({
   listCardSubtitle: { fontSize: 13, marginTop: 1 },
   listCardThumb: {
     width: '100%',
-    aspectRatio: 4 / 3,
+    aspectRatio: 5 / 4,
     position: 'relative',
   },
   listCardImage: { width: '100%', height: '100%' },
   tile: {
-    width: TILE_SIZE,
-    height: TILE_SIZE,
+    width: TILE_W,
+    height: TILE_H,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -388,25 +505,40 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tileTopLeft: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
+  // Grid tile overlays — mirror the profile session grid chrome.
+  gridTopLeft: {
+    position: 'absolute', top: 4, left: 4, maxWidth: TILE_W - 8,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
+    paddingHorizontal: 5, paddingVertical: 2,
   },
-  tileBottom: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 6,
-    paddingVertical: 6,
+  gridTitleText: { fontSize: 9, fontWeight: '700', color: '#fff' },
+  gridSubText: { fontSize: 9, fontWeight: '600', color: '#fff' },
+  statusDot: { width: 7, height: 7, borderRadius: 3.5 },
+  gridEllipsisBtn: {
+    position: 'absolute', bottom: 4, right: 4,
+    width: 22, height: 22, borderRadius: 6,
     backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  tileHeadline: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
+  // Bottom-left overlay containers (caller positions; chips are visual-only).
+  gridBottomLeft: {
+    position: 'absolute', bottom: 4, left: 4,
+    alignItems: 'flex-start', gap: 3,
   },
+  listStatsBL: { position: 'absolute', bottom: 10, left: 10 },
+  // Position-agnostic chip — small (grid) + large (list) variants.
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,
+    paddingHorizontal: 5, paddingVertical: 2,
+  },
+  chipLg: {
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 10,
+    paddingHorizontal: 7, paddingVertical: 3,
+  },
+  statsChipText: { fontSize: 11, fontWeight: '600', color: '#fff' },
+  creditChipText: { fontSize: 10, fontWeight: '700', color: '#fff' },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -414,9 +546,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
-  },
-  pillSponsored: {
-    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   pillText: {
     fontSize: 9,

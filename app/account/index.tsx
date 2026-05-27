@@ -13,9 +13,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
+import { TIER_MONTHLY_GRANT, AD_TIER_LABELS, adTierOf, creditBalance, adPlansUrl } from '../../src/helpers/adTiers';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useSmartBack } from '../../src/context/NavigationContext';
 import ScreenHeader from '../../src/components/ScreenHeader';
@@ -46,6 +48,18 @@ function getPlanName(chargebeeType: string | null | undefined): string {
 function formatStorage(gb: number): string {
   if (gb < 1) return `${(gb * 1024).toFixed(0)} MB`;
   return `${gb.toFixed(1)} GB`;
+}
+
+const USER_TYPE_LABELS: Record<string, string> = {
+  surfer: 'Surfer',
+  photographer: 'Photographer',
+  shaper: 'Shaper',
+  advertiser: 'Advertiser',
+};
+
+function formatUserType(userType: string | null | undefined): string {
+  if (!userType) return 'Surfer';
+  return USER_TYPE_LABELS[userType] ?? 'Surfer';
 }
 
 type Connection = {
@@ -105,6 +119,19 @@ export default function AccountScreen() {
   const storagePct = storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0;
   const photoCount = (user?.photo_count as number | undefined) ?? 0;
   const planName = getPlanName(user?.chargebee_subscription_type as string | undefined);
+
+  // Advertiser credit wallet (shown in place of storage for advertisers).
+  const isAdvertiser = user?.user_type === 'advertiser';
+  const adTier = adTierOf(user);
+  const adBal = creditBalance(user);
+  const adGrant = TIER_MONTHLY_GRANT[adTier] ?? 0;
+  const adMonthlyUsed = Math.max(0, adGrant - adBal.monthly);
+  // Slot = original capacity this cycle. Pack-used is added back so "Y" is
+  // stable across the cycle (doesn't shrink as pack gets spent).
+  const adTotalSlot = adGrant + adBal.pack + adBal.packUsed;
+  const adTotalUsed = adMonthlyUsed + adBal.packUsed;
+  // "Low" gates on remaining total balance, not bar %.
+  const adLow = adGrant > 0 && adBal.total <= adGrant * 0.1;
   const hasPendingDeletion = !!user?.deletion_requested_at;
   const deletionDate = user?.deletion_scheduled_for
     ? new Date(user.deletion_scheduled_for as string).toLocaleDateString('en-US', {
@@ -326,50 +353,133 @@ export default function AccountScreen() {
             <Text style={[s.detailLabel, { color: subText }]}>Member since</Text>
             <Text style={[s.detailValue, { color: primaryText }]}>{memberSince}</Text>
           </View>
-        </View>
 
-        {/* Storage + Plan */}
-        <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
-          <Text style={[s.sectionTitle, { color: primaryText }]}>Storage & plan</Text>
+          <View style={[s.divider, { backgroundColor: dividerColor }]} />
 
-          <View style={s.storageRow}>
-            <Text style={[s.storageLabel, { color: subText }]}>
-              {photoCount.toLocaleString()} {photoCount === 1 ? 'photo' : 'photos'}
-            </Text>
-            <Text style={[s.storageValue, { color: primaryText }]}>
-              {formatStorage(storageUsed)}
-              <Text style={{ color: mutedText, fontSize: 14 }}>
-                {' '}/ {formatStorage(storageLimit)}
-              </Text>
-            </Text>
-          </View>
-
-          <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
-            <View
-              style={[
-                s.storageBarFill,
-                { width: `${storagePct}%`, backgroundColor: storagePct > 90 ? '#f59e0b' : '#0ea5e9' },
-              ]}
-            />
-          </View>
-
-          <View style={[s.divider, { backgroundColor: dividerColor, marginTop: 16, marginBottom: 14 }]} />
-
-          <View style={s.planRow}>
-            <Text style={[s.detailLabel, { color: subText }]}>Plan</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[s.planName, { color: primaryText }]}>{planName}</Text>
-              {planName !== 'Free' && (
-                <View style={[s.planBadge, { backgroundColor: isDark ? 'rgba(14,165,233,0.15)' : '#e0f2fe' }]}>
-                  <Text style={{ color: '#0ea5e9', fontSize: 12, fontWeight: '600' }}>Active</Text>
-                </View>
-              )}
+          <View style={s.detailRow}>
+            <Text style={[s.detailLabel, { color: subText }]}>Account type</Text>
+            <View style={[s.typePill, { backgroundColor: isDark ? 'rgba(14,165,233,0.15)' : '#e0f2fe' }]}>
+              <Text style={s.typePillText}>{formatUserType(user?.user_type as string | undefined)}</Text>
             </View>
           </View>
+        </View>
 
-          <Text style={[s.planHint, { color: mutedText }]}>
-            Manage your subscription at app.surf-vault.com/plans
-          </Text>
+        {/* Storage + Plan (advertisers see Ad credits + plan instead) */}
+        <View style={[s.card, { backgroundColor: cardBg, borderColor: cardBorder }]}>
+          {isAdvertiser ? (
+            <>
+              <Text style={[s.sectionTitle, { color: primaryText }]}>Ad credits & plan</Text>
+
+              {/* X of Y credits used, where Y = grant + pack (full current
+                  slot). Single bar replaces the old Monthly/Extra split —
+                  breakdown text below carries the cycle vs persistent nuance. */}
+              <View style={s.storageRow}>
+                <Text style={[s.storageLabel, { color: subText }]}>credits used</Text>
+                <Text style={[s.storageValue, { color: primaryText }]}>
+                  {adTotalUsed}
+                  <Text style={{ color: mutedText, fontSize: 14 }}>
+                    {' '}of {adTotalSlot.toLocaleString()}
+                  </Text>
+                </Text>
+              </View>
+
+              {/* USED portion split by source — sky (monthly burn), amber
+                  (extra burn). Everything unused stays slate (bar background). */}
+              <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb', flexDirection: 'row' }]}>
+                <View style={{
+                  height: '100%',
+                  width: `${adTotalSlot > 0 ? (adMonthlyUsed / adTotalSlot) * 100 : 0}%`,
+                  backgroundColor: adLow ? '#f59e0b' : '#0ea5e9',
+                }} />
+                <View style={{
+                  height: '100%',
+                  width: `${adTotalSlot > 0 ? (adBal.packUsed / adTotalSlot) * 100 : 0}%`,
+                  backgroundColor: '#fbbf24',
+                }} />
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 8 }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#0ea5e9', marginRight: 6 }} />
+                <Text style={[s.storageLabel, { color: mutedText, fontSize: 11 }]}>
+                  <Text style={{ fontWeight: '600', color: subText }}>{adBal.monthly} monthly</Text> remaining (resets each cycle)
+                </Text>
+              </View>
+              {adBal.pack > 0 && (
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#fbbf24', marginRight: 6 }} />
+                  <Text style={[s.storageLabel, { color: mutedText, fontSize: 11 }]}>
+                    <Text style={{ fontWeight: '600', color: subText }}>{adBal.pack.toLocaleString()} extra</Text> (never expires)
+                  </Text>
+                </View>
+              )}
+
+              <View style={[s.divider, { backgroundColor: dividerColor, marginTop: 16, marginBottom: 14 }]} />
+
+              <View style={s.planRow}>
+                <Text style={[s.detailLabel, { color: subText }]}>Plan</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={[s.planName, { color: primaryText }]}>{AD_TIER_LABELS[adTier]}</Text>
+                  {adTier !== 'free' && (
+                    <View style={[s.planBadge, { backgroundColor: isDark ? 'rgba(14,165,233,0.15)' : '#e0f2fe' }]}>
+                      <Text style={{ color: '#0ea5e9', fontSize: 12, fontWeight: '600' }}>Active</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              <Pressable onPress={() => Linking.openURL(adPlansUrl((user as any)?.email)).catch(() => {})} hitSlop={6}>
+                <Text style={[s.planHint, { color: mutedText }]}>
+                  Manage your plan & credits on the web{' '}
+                  <Text style={{ color: '#0ea5e9', fontWeight: '600' }}>↗</Text>
+                </Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text style={[s.sectionTitle, { color: primaryText }]}>Storage & plan</Text>
+
+              <View style={s.storageRow}>
+                <Text style={[s.storageLabel, { color: subText }]}>
+                  {photoCount.toLocaleString()} {photoCount === 1 ? 'photo' : 'photos'}
+                </Text>
+                <Text style={[s.storageValue, { color: primaryText }]}>
+                  {formatStorage(storageUsed)}
+                  <Text style={{ color: mutedText, fontSize: 14 }}>
+                    {' '}/ {formatStorage(storageLimit)}
+                  </Text>
+                </Text>
+              </View>
+
+              <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
+                <View
+                  style={[
+                    s.storageBarFill,
+                    { width: `${storagePct}%`, backgroundColor: storagePct > 90 ? '#f59e0b' : '#0ea5e9' },
+                  ]}
+                />
+              </View>
+
+              <View style={[s.divider, { backgroundColor: dividerColor, marginTop: 16, marginBottom: 14 }]} />
+
+              <View style={s.planRow}>
+                <Text style={[s.detailLabel, { color: subText }]}>Plan</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text style={[s.planName, { color: primaryText }]}>{planName}</Text>
+                  {planName !== 'Free' && (
+                    <View style={[s.planBadge, { backgroundColor: isDark ? 'rgba(14,165,233,0.15)' : '#e0f2fe' }]}>
+                      <Text style={{ color: '#0ea5e9', fontSize: 12, fontWeight: '600' }}>Active</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              <Pressable onPress={() => Linking.openURL(adPlansUrl((user as any)?.email)).catch(() => {})} hitSlop={6}>
+                <Text style={[s.planHint, { color: mutedText }]}>
+                  Manage your subscription on the web{' '}
+                  <Text style={{ color: '#0ea5e9', fontWeight: '600' }}>↗</Text>
+                </Text>
+              </Pressable>
+            </>
+          )}
         </View>
 
         {/* Deletion Section */}
@@ -521,6 +631,12 @@ const s = StyleSheet.create({
     gap: 6,
   },
   connectionText: { fontSize: 14, fontWeight: '500' },
+  typePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  typePillText: { color: '#0ea5e9', fontSize: 13, fontWeight: '600' },
   storageRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

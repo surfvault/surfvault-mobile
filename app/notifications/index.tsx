@@ -69,6 +69,7 @@ const getNotifIcon = (type: string): { name: string; color: string } => {
     case 'userAccessRequestApproval': return { name: 'checkmark-circle-outline', color: '#22c55e' };
     case 'adApproved': return { name: 'megaphone-outline', color: '#22c55e' };
     case 'adRejected': return { name: 'megaphone-outline', color: '#ef4444' };
+    case 'creditPackPurchased': return { name: 'cash-outline', color: '#fbbf24' };
     default: return { name: 'notifications-outline', color: '#6b7280' };
   }
 };
@@ -201,6 +202,7 @@ const getNotifTitle = (n: any): string => {
     case 'adApproved': return 'Campaign Approved';
     case 'adRejected': return 'Campaign Rejected';
     case 'newCampaignSubmission': return 'Ad Request';
+    case 'creditPackPurchased': return 'Credits Added';
     default: return 'Notification';
   }
 };

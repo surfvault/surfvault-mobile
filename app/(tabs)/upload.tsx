@@ -292,7 +292,7 @@ function SessionOrBoardCreate() {
     const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
     const storageCheck = checkStorageCapacity(user, totalBytes);
     if (!storageCheck.hasSpace) {
-      showStorageLimitAlert(storageCheck);
+      showStorageLimitAlert(storageCheck, { email: (user as any)?.email });
       return;
     }
     const totalSizeGB = storageCheck.totalSizeGB;

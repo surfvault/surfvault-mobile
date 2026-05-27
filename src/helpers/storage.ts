@@ -1,4 +1,5 @@
-import { Alert } from 'react-native';
+import { Alert, Linking } from 'react-native';
+import { adPlansUrl } from './adTiers';
 
 type StorageUser = { current_storage?: number | string | null; storage_limit?: number | string | null } | null | undefined;
 
@@ -26,14 +27,22 @@ export function checkStorageCapacity(user: StorageUser, totalBytes: number): Sto
 const formatGB = (gb: number): string => (gb < 0.01 ? '0 MB' : gb < 1 ? `${(gb * 1024).toFixed(0)} MB` : `${gb.toFixed(2)} GB`);
 
 /**
- * Show a storage-limit alert. No upgrade CTA (App Store compliance).
+ * Show a storage-limit alert with a "Manage plan" CTA that opens the web
+ * checkout handoff (storage plans are managed on the web — billing strategy).
+ * Pass the user's email for login pre-fill on the handoff.
  */
-export function showStorageLimitAlert(check: StorageCheckResult) {
+export function showStorageLimitAlert(check: StorageCheckResult, opts?: { email?: string | null }) {
   const needed = formatGB(check.totalSizeGB);
   const remaining = formatGB(check.remainingGB);
   Alert.alert(
     'Storage Full',
-    `This upload needs ${needed}, but you only have ${remaining} remaining. Free up space by deleting photos, or manage your subscription at surf-vault.com.`,
-    [{ text: 'OK' }],
+    `This upload needs ${needed}, but you only have ${remaining} remaining. Free up space by deleting photos, or upgrade your storage plan.`,
+    [
+      { text: 'Not now', style: 'cancel' },
+      {
+        text: 'Manage plan',
+        onPress: () => { Linking.openURL(adPlansUrl(opts?.email)).catch(() => {}); },
+      },
+    ],
   );
 }

@@ -238,6 +238,11 @@ export default function SponsoredCard({
                       transition={200}
                     />
                   ) : null}
+                  {ad.cta_label ? (
+                    <View style={styles.ctaPill} pointerEvents="none">
+                      <Text style={styles.ctaPillText} numberOfLines={1}>{ad.cta_label}</Text>
+                    </View>
+                  ) : null}
                 </Pressable>
               );
             }}
@@ -279,6 +284,11 @@ export default function SponsoredCard({
               contentFit="cover"
               transition={200}
             />
+          ) : null}
+          {ad.cta_label ? (
+            <View style={styles.ctaPill} pointerEvents="none">
+              <Text style={styles.ctaPillText} numberOfLines={1}>{ad.cta_label}</Text>
+            </View>
           ) : null}
         </Pressable>
       )}
@@ -453,5 +463,27 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
+  },
+  // White CTA-label pill, bottom-right of the hero. Non-interactive — the
+  // whole card already opens click_url, so taps fall through.
+  ctaPill: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    maxWidth: '60%',
+    backgroundColor: '#fff',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
+  },
+  ctaPillText: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
