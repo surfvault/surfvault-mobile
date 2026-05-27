@@ -16,9 +16,8 @@ import {
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
-import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
 import BottomSheet from '@gorhom/bottom-sheet';
 import { Dimensions } from 'react-native';
@@ -41,25 +40,45 @@ import React from 'react';
 
 type FilterType = 'all' | 'favorites' | 'mine';
 
-// Memoized marker component — prevents clustering library from re-diffing on every render
+// Module-scope subscription store for selection state. Markers subscribe via
+// `useSyncExternalStore` and re-render ONLY when their own isSelected value
+// actually flips. Keeps the markers array reference stable (no parent
+// useMemo bust on selection) AND avoids the per-marker re-render that a
+// Context provider would cause when its value changes.
+let currentSelectedBreakId: string | null = null;
+const breakSelectionListeners = new Set<() => void>();
+function setSelectedBreakIdStore(id: string | null) {
+  if (currentSelectedBreakId === id) return;
+  currentSelectedBreakId = id;
+  breakSelectionListeners.forEach((l) => l());
+}
+function subscribeBreakSelection(listener: () => void) {
+  breakSelectionListeners.add(listener);
+  return () => { breakSelectionListeners.delete(listener); };
+}
+
 const SurfBreakMarker = React.memo(({
   sb,
   markerColor,
-  isSelected,
   onMarkerPress,
 }: {
   sb: any;
   markerColor: string;
-  isSelected: boolean;
   onMarkerPress: (sb: any) => void;
 }) => {
-  // Android snapshots the custom marker view to a bitmap; with tracking off
-  // from the first frame it paints blank. Track briefly on mount and whenever
-  // the appearance changes (color, or dot<->pin on selection), then stop.
+  // useSyncExternalStore compares snapshots with Object.is — markers whose
+  // returned boolean didn't change are skipped by React entirely, no
+  // re-render at all. Only the previously- and newly-selected markers wake up.
+  const isSelected = React.useSyncExternalStore(
+    subscribeBreakSelection,
+    () => currentSelectedBreakId === sb.id,
+  );
+  // Android snapshots the custom marker view to a bitmap; track briefly on
+  // mount, color change, and selection change so the new view actually paints.
   const [tracks, setTracks] = useState(true);
   useEffect(() => {
     setTracks(true);
-    const t = setTimeout(() => setTracks(false), 500);
+    const t = setTimeout(() => setTracks(false), 400);
     return () => clearTimeout(t);
   }, [markerColor, isSelected]);
 
@@ -74,53 +93,17 @@ const SurfBreakMarker = React.memo(({
       }}
       tracksViewChanges={tracks}
       onPress={handlePress}
-      // iOS (Apple Maps) propagates a marker tap to the MapView's onPress too,
-      // which would immediately clear the selection this press just set. Stop it
-      // here. No-op on Android (it never propagates marker taps).
       stopPropagation
-      // Only the selected pin gets an anchor (tip on the coordinate) + raised
-      // zIndex. Setting `anchor` on the plain dot breaks Marker onPress on iOS,
-      // so the unselected dot is left with default anchor/zIndex.
-      {...(isSelected ? { anchor: { x: 0.5, y: 1 }, zIndex: 999 } : null)}
+      zIndex={isSelected ? 9999 : undefined}
     >
       {isSelected ? (
-        <View style={styles.selectedPin}>
-          <Ionicons name="location" size={44} color={markerColor} />
+        <View style={styles.selectedHaloWrap}>
+          <View style={[styles.selectedHalo, { backgroundColor: markerColor }]} />
+          <View style={[styles.selectedCore, { backgroundColor: markerColor }]} />
         </View>
       ) : (
         <View style={[styles.marker, { backgroundColor: markerColor }]} />
       )}
-    </Marker>
-  );
-});
-
-// Cluster bubble. Same Android tracksViewChanges caveat as SurfBreakMarker —
-// track briefly (re-arming on count/color change) then stop.
-const ClusterMarker = React.memo(({
-  id,
-  coordinate,
-  count,
-  color,
-  onPress,
-}: {
-  id: string | number;
-  coordinate: { latitude: number; longitude: number };
-  count: number;
-  color: string;
-  onPress: () => void;
-}) => {
-  const [tracks, setTracks] = useState(true);
-  useEffect(() => {
-    setTracks(true);
-    const t = setTimeout(() => setTracks(false), 500);
-    return () => clearTimeout(t);
-  }, [count, color]);
-
-  return (
-    <Marker key={`cluster-${id}`} coordinate={coordinate} onPress={onPress} tracksViewChanges={tracks}>
-      <View style={[styles.cluster, { backgroundColor: color }]}>
-        <Text style={styles.clusterText}>{count}</Text>
-      </View>
     </Marker>
   );
 });
@@ -237,6 +220,10 @@ export default function MapScreen() {
     }
   }, [deviceCoords]);
 
+  // Safe-area top inset — used to position the my-location button just below
+  // the search button regardless of platform (iOS notch is ~50px, Android
+  // status bar is ~24px, so a hardcoded `top` value drifts between platforms).
+  const safeAreaInsets = useSafeAreaInsets();
   const [region, setRegion] = useState<Region>(initialMapRegion);
   const [filter, setFilter] = useState<FilterType>('all');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -250,6 +237,10 @@ export default function MapScreen() {
   // map is zoomed past the threshold below.
   const [selectedAd, setSelectedAd] = useState<any>(null);
   const [sheetMode, setSheetMode] = useState<SheetMode>('break');
+  // Mirror selection state into the module-scope subscription store so
+  // SurfBreakMarker components can subscribe surgically (only re-render the
+  // markers whose isSelected actually flipped, not all 100+ of them).
+  useEffect(() => { setSelectedBreakIdStore(selectedBreak?.id ?? null); }, [selectedBreak]);
   const sheetRef = useRef<BottomSheet>(null);
   const CARD_WIDTH = Math.round(Dimensions.get('window').width * 0.85);
   // Capture the initial zoom-range state once at mount so the BottomSheet
@@ -359,13 +350,10 @@ export default function MapScreen() {
     return () => handle.cancel();
   }, [latestBreaks, regionStable, isZoomedTooFarOut]);
 
-  // Cap markers to prevent clustering library from crashing with too many.
-  // Memoized so the array reference is stable across unrelated re-renders
-  // (e.g. selection changes from carousel swipes). Without this, the slice
-  // ran on every parent render and produced a new array each time, which
-  // made `react-native-map-clustering` re-cluster on every selection change,
-  // unmounting/remounting every marker — the user-visible "pins flash and
-  // disappear" symptom.
+  // Cap markers to prevent the clustering library from crashing with too
+  // many. 200 is a reasonable upper bound on the iOS / Android map renderers
+  // before performance degrades. Memoized so the array reference stays stable
+  // across unrelated parent re-renders.
   const surfBreaks = useMemo(
     () => (committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks),
     [committedBreaks],
@@ -554,35 +542,26 @@ export default function MapScreen() {
     kind: 'ad' as const,
     id: String(a.id),
     company: a.company_name ?? 'Sponsored',
-    title: a.headline || a.company_name || 'Sponsored',
+    title: a.headline || '',
     placeName: a.place_name ?? null,
     venueCount: a.venue_count ? Number(a.venue_count) : undefined,
     ctaLabel: a.cta_label || (a.cta_type === 'tel' ? 'Call' : 'Learn more'),
-    thumbnailUrl: a.thumbnail_url ?? a.image_url ?? null,
+    // `getMapAds` server-side already resolves the best thumbnail (preferring
+    // the explicit thumbnail_ad_media_id, falling back to the first sorted
+    // media slide, then legacy media_url) and ships it as `thumbnail`. The
+    // value is a full CDN URL ready for <Image source={{ uri }} />.
+    thumbnailUrl: a.thumbnail ?? a.logo_url ?? null,
     lat: parseFloat(a.place_lat ?? a.lat ?? 0),
     lon: parseFloat(a.place_lon ?? a.lon ?? 0),
   }), []);
 
-  // Sheet lists are VIEWPORT-anchored: only breaks/ads currently visible on
-  // the map appear. Sorted by distance from map center so the closest items
-  // come first in the carousel — feels like "what's right in front of me."
-  // Re-shuffling on pan is naturally debounced by the existing region update
-  // pipeline. Because the list is keyed on viewport rather than selection,
-  // swiping the carousel can safely change the selected pin without causing
-  // any list-reorder loop.
-  const inViewportBreaks = useMemo(() => {
-    const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
-    const minLat = latitude - latitudeDelta / 2;
-    const maxLat = latitude + latitudeDelta / 2;
-    const minLon = longitude - longitudeDelta / 2;
-    const maxLon = longitude + longitudeDelta / 2;
-    return (committedBreaks as any[]).filter((b: any) => {
-      const lat = parseFloat(b.coordinates?.lat ?? b.lat ?? 0);
-      const lon = parseFloat(b.coordinates?.lon ?? b.lon ?? 0);
-      return !isNaN(lat) && !isNaN(lon) && lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon;
-    });
-  }, [committedBreaks, region]);
-
+  // Sheet lists mirror what's RENDERED on the map. Both `committedBreaks` and
+  // `mapAds` are already viewport-bounded server-side via the map queries —
+  // re-filtering by `region` client-side would cause an off-by-one when the
+  // current region has drifted slightly from the last API query (markers
+  // still on screen but technically outside the new bounds → would render on
+  // the map but vanish from the list). We just sort by distance from the
+  // current map center for a "closest first" carousel order.
   const sortByDistanceFromCenter = useCallback(<T extends { lat: number; lon: number }>(items: T[]) => {
     const cLat = region.latitude;
     const cLon = region.longitude;
@@ -594,12 +573,11 @@ export default function MapScreen() {
   }, [region.latitude, region.longitude]);
 
   const sheetBreaks = useMemo<MapNearbyItem[]>(() => {
-    const items = inViewportBreaks.map(breakToItem);
+    const items = (committedBreaks as any[]).map(breakToItem);
     return sortByDistanceFromCenter(items);
-  }, [inViewportBreaks, breakToItem, sortByDistanceFromCenter]);
+  }, [committedBreaks, breakToItem, sortByDistanceFromCenter]);
 
   const sheetAds = useMemo<MapNearbyItem[]>(() => {
-    // mapAds is already viewport-bounded server-side; no extra filtering needed.
     const items = (mapAds as any[]).map(adToItem);
     return sortByDistanceFromCenter(items);
   }, [mapAds, adToItem, sortByDistanceFromCenter]);
@@ -624,18 +602,20 @@ export default function MapScreen() {
     [selectedBreak, selectedAd, mapAds, committedBreaks],
   );
 
-  // Tap a card in the sheet → navigate (breaks) or open click URL (ads).
+  // Tap a card in the sheet → navigate (breaks) or open click URL (ads). Look
+  // up in `committedBreaks` (the same source that populates the sheet + map),
+  // NOT the home-anchored `nearbyBreaks` from the search panel.
   const handleSheetPressItem = useCallback(
     (item: MapNearbyItem) => {
       if (item.kind === 'break') {
-        const sb = nearbyBreaks.find((b: any) => String(b.id) === item.id);
+        const sb = committedBreaks.find((b: any) => String(b.id) === item.id);
         if (sb) navigateToBreakPage(sb);
       } else {
         const ad = mapAds.find((a: any) => String(a.id) === item.id);
         if (ad) openAdClick(ad);
       }
     },
-    [nearbyBreaks, mapAds, navigateToBreakPage, openAdClick],
+    [committedBreaks, mapAds, navigateToBreakPage, openAdClick],
   );
 
   // Zoom-driven sheet visibility. When the user zooms in past the regional
@@ -703,19 +683,27 @@ export default function MapScreen() {
 
   const markerColor = filter === 'favorites' ? '#ef4444' : filter === 'mine' ? '#8b5cf6' : '#0ea5e9';
 
+  // Stable array — does NOT depend on selectedBreak. Each marker subscribes to
+  // the module-scope selection store via `useSyncExternalStore`, so when
+  // selection changes only the two affected markers re-render (the rest of
+  // the array re-uses its previous JSX). The array reference passed to
+  // <MapView> is identical across selection changes, so the native subview
+  // list never receives spurious insert/remove ops.
   const markers = useMemo(() => surfBreaks.map((sb: any) => (
     <SurfBreakMarker
       key={sb.id}
       sb={sb}
       markerColor={markerColor}
-      isSelected={selectedBreak?.id === sb.id}
       onMarkerPress={handleMarkerPress}
     />
-  )), [surfBreaks, markerColor, selectedBreak, handleMarkerPress]);
+  )), [surfBreaks, markerColor, handleMarkerPress]);
 
-  // Ad venue pins — excluded from clustering (cluster={false}) so a sponsored
-  // pin never disappears into a surf-break cluster. Amber default pin to read as
-  // distinct from breaks. Tap → impression; callout tap → click-through.
+  // Ad venue pins. Amber default, red when selected. Tap → impression + open
+  // sheet to ad mode. Inline rendering (no wrapper component) because the
+  // wrapper layer was specifically a clustering-library workaround, and we
+  // dropped clustering. `selectedAd` is in the useMemo deps so the array
+  // recreates on selection change — fine for a small list (5–10 ads max),
+  // and there's no clustering pass to over-react to the new array reference.
   const adMarkers = useMemo(() => mapAds.map((ad: any) => {
     const lat = Number(ad.place_lat);
     const lon = Number(ad.place_lon);
@@ -724,37 +712,13 @@ export default function MapScreen() {
     return (
       <Marker
         key={`ad-${ad.id}`}
-        // `cluster` is consumed by react-native-map-clustering, not part of the
-        // react-native-maps Marker prop types — spread it untyped.
-        {...({ cluster: false } as any)}
         coordinate={{ latitude: lat, longitude: lon }}
-        // Selected ad uses red pin (Apple Maps' "selected place" color) to
-        // stand out from the amber default. zIndex raises it above unselected
-        // ad pins so the selection ring isn't covered by neighbors.
         pinColor={isSelected ? '#ef4444' : '#f59e0b'}
-        zIndex={isSelected ? 999 : undefined}
+        zIndex={isSelected ? 9999 : undefined}
         onPress={() => handleAdMarkerPress(ad)}
       />
     );
   }), [mapAds, handleAdMarkerPress, selectedAd]);
-
-  const renderCluster = useCallback((cluster: any) => {
-    const { id, geometry, onPress, properties } = cluster;
-    const count = properties?.point_count ?? 0;
-    return (
-      <ClusterMarker
-        key={`cluster-${id}`}
-        id={id}
-        coordinate={{
-          latitude: geometry.coordinates[1],
-          longitude: geometry.coordinates[0],
-        }}
-        count={count}
-        color={markerColor}
-        onPress={onPress}
-      />
-    );
-  }, [markerColor]);
 
   const handleMapPress = useCallback((e: any) => {
     // On iOS a marker tap also fires the map's onPress with this action; ignore
@@ -800,7 +764,7 @@ export default function MapScreen() {
 
   return (
     <View style={styles.container}>
-      <ClusteredMapView
+      <MapView
         ref={mapRef as any}
         style={styles.map}
         initialRegion={initialMapRegion}
@@ -811,16 +775,25 @@ export default function MapScreen() {
         showsUserLocation={locationGranted}
         showsMyLocationButton={false}
         toolbarEnabled={false}
-        clusterColor={markerColor}
-        clusterTextColor="#ffffff"
-        radius={50}
-        minPoints={2}
         minZoomLevel={2}
         maxZoomLevel={18}
-        animationEnabled={false}
+        // Push the map's apparent center upward so Google Maps' Android-only
+        // auto-center-on-marker-tap behavior lands the marker in the visible
+        // top portion of the screen instead of being hidden behind the bottom
+        // sheet. iOS doesn't auto-center so padding only affects which area
+        // is treated as "center" for user-location framing; harmless there.
+        mapPadding={{
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: Math.round(Dimensions.get('window').height * 0.4),
+        }}
+        // Keep all markers mounted across viewport pans to avoid the
+        // `-[AIRMap insertReactSubview:atIndex:]` crash class on the new
+        // architecture — costs a bit of memory but is the documented fix.
+        removeClippedSubviews={false}
         onPress={handleMapPress}
         onLongPress={isSuperAdmin ? handleMapLongPress : undefined}
-        renderCluster={renderCluster}
       >
         {markers}
         {adMarkers}
@@ -833,7 +806,7 @@ export default function MapScreen() {
             <Ionicons name="location" size={36} color="#22c55e" />
           </Marker>
         )}
-      </ClusteredMapView>
+      </MapView>
 
       {/* Loading */}
       {isFetching && (
@@ -1067,8 +1040,10 @@ export default function MapScreen() {
       </SafeAreaView>
 
 
-      {/* My location button */}
-      <Pressable
+      {/* My location button — hidden while the search panel is open since the
+          panel expands down the top-right corner and the button would render
+          on top of (or right next to) the Cancel link. */}
+      {!searchOpen && <Pressable
         onPress={async () => {
           // Try Redux coords first, then fetch fresh location
           let lat = deviceCoords?.lat;
@@ -1096,19 +1071,17 @@ export default function MapScreen() {
           }
         }}
         style={[styles.myLocationBtn, {
+          // Compute top relative to the search button's bottom edge:
+          //   safe-area-top (varies by platform) + searchIconWrap.paddingTop (8)
+          //   + searchIconBtn height (44) + 16px gap = insets.top + 68
+          // Keeps the gap visually identical on iOS and Android.
+          top: safeAreaInsets.top + 68,
           backgroundColor: isDark ? 'rgba(17,24,39,0.85)' : 'rgba(255,255,255,0.9)',
           shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
-          // Lift slightly when the sheet is at peek (zoomed-in default) so the
-          // button doesn't sit right on top of the handle bar. We only know
-          // for sure that the sheet is at peek (not half/full) when the user
-          // hasn't dragged it up. The 60px clearance covers the peek bar +
-          // a little breathing room — when they drag the sheet up, the button
-          // is fine staying put because the sheet content covers it anyway.
-          bottom: sheetInZoomRange ? 80 : 16,
         }]}
       >
         <Ionicons name="navigate-outline" size={18} color={isDark ? '#d1d5db' : '#374151'} />
-      </Pressable>
+      </Pressable>}
 
       {/* Nearby content bottom sheet — replaces the old static break card +
           floating ad Callout. Half-snap = type-locked carousel; full-snap =
@@ -1160,15 +1133,23 @@ const styles = StyleSheet.create({
     width: 12, height: 12, borderRadius: 6,
     borderWidth: 2, borderColor: '#fff',
   },
-  selectedPin: {
-    shadowColor: '#000', shadowOpacity: 0.35, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
-  },
-  cluster: {
-    width: 36, height: 36, borderRadius: 18,
+  // Selected-break overlay: concentric halo + dot. Outer ring is translucent
+  // and 32px wide; inner core is solid and 14px wide, both in the marker
+  // color. Reads as "this one's selected" without obscuring the spot itself.
+  selectedHaloWrap: {
+    width: 32, height: 32,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2.5, borderColor: '#fff',
   },
-  clusterText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  selectedHalo: {
+    position: 'absolute',
+    width: 32, height: 32, borderRadius: 16,
+    opacity: 0.28,
+  },
+  selectedCore: {
+    width: 14, height: 14, borderRadius: 7,
+    borderWidth: 2.5, borderColor: '#fff',
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
+  },
   breakCardWrap: {
     position: 'absolute', left: 12, right: 12, bottom: 16,
   },
@@ -1250,7 +1231,10 @@ const styles = StyleSheet.create({
   },
   nearbyPickerInput: { flex: 1, marginLeft: 6, fontSize: 14 },
   myLocationBtn: {
-    position: 'absolute', bottom: 16, right: 12,
+    // `top` is set dynamically from `useSafeAreaInsets()` so the gap below the
+    // search button is identical on iOS (notch) and Android (status bar) —
+    // hardcoding it drifted because the safe-area top differs by ~25px.
+    position: 'absolute', right: 12,
     width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
   },

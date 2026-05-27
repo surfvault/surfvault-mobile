@@ -75,17 +75,21 @@ export default function MapNearbyCard({ item, isDark, onPress, width }: Props) {
       <View style={{ flex: 1, minWidth: 0 }}>
         {isAd ? (
           <>
-            <View style={styles.adBadgeRow}>
+            {/* Top row: ad partner name (largest) + SPONSORED pill on the right */}
+            <View style={styles.adHeaderRow}>
+              <Text style={[styles.adCompanyHeadline, { color: primaryColor }]} numberOfLines={1}>
+                {item.company}
+              </Text>
               <View style={styles.sponsoredPill}>
                 <Text style={styles.sponsoredText}>SPONSORED</Text>
               </View>
-              <Text style={[styles.adCompany, { color: subColor }]} numberOfLines={1}>
-                {item.company}
-              </Text>
             </View>
-            <Text style={[styles.title, { color: primaryColor }]} numberOfLines={1}>
-              {item.title}
-            </Text>
+            {/* Stacked: ad title (headline) + venue name */}
+            {!!item.title && (
+              <Text style={[styles.adTitleLine, { color: primaryColor }]} numberOfLines={1}>
+                {item.title}
+              </Text>
+            )}
             {!!item.placeName && (
               <Text style={[styles.sub, { color: subColor }]} numberOfLines={1}>
                 {item.placeName}
@@ -133,7 +137,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   thumbImg: { width: '100%', height: '100%' },
-  adBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  // Ad card header: large partner name fills available width with the
+  // SPONSORED pill anchored to the right edge.
+  adHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  adCompanyHeadline: { flex: 1, fontSize: 17, fontWeight: '800' },
   sponsoredPill: {
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -141,7 +148,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fde68a',
   },
   sponsoredText: { fontSize: 8, fontWeight: '800', letterSpacing: 0.4, color: '#b45309' },
-  adCompany: { fontSize: 11, fontWeight: '500', flex: 1 },
+  adTitleLine: { fontSize: 14, fontWeight: '600' },
   title: { fontSize: 15, fontWeight: '700' },
   sub: { fontSize: 12, marginTop: 2 },
   breakCta: { fontSize: 12, fontWeight: '700', color: '#0ea5e9', marginTop: 4 },

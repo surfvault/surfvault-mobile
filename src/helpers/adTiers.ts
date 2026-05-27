@@ -1,6 +1,6 @@
 // Mobile mirror of surfvault-api/shared/ad_tiers.ts (credit model). Used to show
 // live credit cost + balance and to gate the free break cap. Billing is web-only
-// (no in-app Chargebee per the billing strategy) — top-up/subscribe open the web
+// (no in-app Chargebee per the billing strategy) — buy-credits/subscribe open the web
 // app. The server is always authoritative; this only shapes the UI.
 
 export type AdTier = 'free' | 'spotlight' | 'reach' | 'brand';

@@ -24,16 +24,19 @@ import {
   useGetSurfBreakSessionsQuery,
   useUpdateUserFavoritesMutation,
   useGetAdsQuery,
+  useGetShapersForSurfBreakQuery,
 } from '../../src/store';
 import SessionCard from '../../src/components/SessionCard';
 import BreakHero from '../../src/components/BreakHero';
 import SponsoredCard from '../../src/components/SponsoredCard';
+import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
 import LocalsRail from '../../src/components/LocalsRail';
 import {
   // groupAdsByPartner intentionally not imported — Phase B retired
   // partner-level ad grouping; each ad is its own promo slot.
   interleavePromoGroups,
+  zipPromoGroups,
   type FeedRow,
 } from '../../src/helpers/interleaveAds';
 
@@ -114,18 +117,39 @@ export default function SurfBreakDetailScreen() {
     [adsData]
   );
 
-  // Promo stream is ads only — local photographers + shapers render in the
-  // LocalsRail above the feed, not interleaved here. Each ad is its own promo
-  // slot (single-element group); no partner-level grouping (Phase B).
+  // Promo stream = paid ads + shapers, alternated (ad first). Shapers ALSO
+  // appear in the LocalsRail above the feed (rail is mobile-only); the feed
+  // interleave gives them additional in-line visibility alongside paid ads
+  // without crowding either out. Each promo entry is its own slot — partner-
+  // level grouping is retired (Phase B).
+  const { data: shapersData } = useGetShapersForSurfBreakQuery(
+    { breakId: breakData?.id ?? '', limit: 6 },
+    { skip: !breakData?.id }
+  );
+  const breakShapers = useMemo(
+    () => shapersData?.results?.shapers ?? [],
+    [shapersData]
+  );
+
   const feedAds = useMemo(
     () => breakAds.map((a: any) => [{ ...a, _kind: 'ad' as const }]),
     [breakAds]
   );
+  const feedShapers = useMemo(
+    () => breakShapers.map((s: any) => [{ ...s, id: String(s.id), _kind: 'shaper' as const }]),
+    [breakShapers]
+  );
+  // Zip alternates: ad → shaper → ad → shaper. Either side may be longer;
+  // leftovers from the longer side drain at the end.
+  const promoGroups = useMemo(
+    () => zipPromoGroups(feedAds, feedShapers),
+    [feedAds, feedShapers]
+  );
 
-  // Interleave sessions + ad groups at the shared cadence.
+  // Interleave sessions + ad/shaper groups at the shared cadence.
   const feedRows = useMemo(
-    () => interleavePromoGroups(sessions, feedAds) as FeedRow<any, any>[],
-    [sessions, feedAds]
+    () => interleavePromoGroups(sessions, promoGroups) as FeedRow<any, any>[],
+    [sessions, promoGroups]
   );
 
   // First page comes from the break query. Guard against metadata-only refetches
@@ -260,9 +284,15 @@ export default function SurfBreakDetailScreen() {
             keyExtractor={(row) => row.key}
             renderItem={({ item: row }) => {
               if (row.type === 'ad') {
+                const promo = row.data[0] as any;
+                // Promo rows carry _kind to distinguish ad vs shaper since they
+                // share the same FeedRow type ('ad' here is a generic "promo").
+                if (promo?._kind === 'shaper') {
+                  return <ShaperFeedCard shaper={promo} />;
+                }
                 return (
                   <SponsoredCard
-                    ad={row.data[0]}
+                    ad={promo}
                     placement="content"
                     surfBreakId={breakData?.id}
                   />

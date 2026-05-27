@@ -14,8 +14,8 @@
 // passes it down — when the parent flips the selection (e.g. user tapped a
 // marker), the sheet auto-scrolls its carousel to that index.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
-import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
+import { StyleSheet, Text, View } from 'react-native';
+import BottomSheet, { BottomSheetView, BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import MapNearbyCard, { MapNearbyItem } from './MapNearbyCard';
 
 export type SheetMode = 'break' | 'ad';
@@ -70,7 +70,7 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
   //   2 = full (~85% — sectioned breaks + ads rows)
   //   -1 = closed (off-screen; used only when zoomed out past the threshold)
   const snapPoints = useMemo(() => ['6%', '38%', '85%'], []);
-  const carouselRef = useRef<FlatList<MapNearbyItem>>(null);
+  const carouselRef = useRef<any>(null);
   // Track which ads we've already counted an impression for in this sheet
   // open — prevents re-firing as the user swipes back and forth.
   const seenAdsRef = useRef<Set<string>>(new Set());
@@ -168,10 +168,10 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
       ? Math.max(0, carouselList.findIndex((it) => it.id === selectedId))
       : 0;
     return (
-      <FlatList
-        ref={carouselRef}
+      <BottomSheetFlatList
+        ref={carouselRef as any}
         data={carouselList}
-        keyExtractor={(it) => `${it.kind}-${it.id}`}
+        keyExtractor={(it: MapNearbyItem) => `${it.kind}-${it.id}`}
         horizontal
         pagingEnabled
         snapToInterval={cardWidth + 12}
@@ -180,7 +180,7 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
         contentContainerStyle={styles.carouselContent}
         ItemSeparatorComponent={() => <View style={{ width: 12 }} />}
         initialScrollIndex={initialIdx > 0 ? initialIdx : undefined}
-        getItemLayout={(_, index) => ({
+        getItemLayout={(_: any, index: number) => ({
           length: cardWidth + 12,
           offset: (cardWidth + 12) * index,
           index,
@@ -188,7 +188,7 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
         onViewableItemsChanged={handleViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         onMomentumScrollEnd={handleMomentumScrollEnd}
-        renderItem={({ item }) => (
+        renderItem={({ item }: { item: MapNearbyItem }) => (
           <MapNearbyCard item={item} isDark={isDark} onPress={() => onPressItem(item)} width={cardWidth} />
         )}
         ListEmptyComponent={
@@ -209,14 +209,14 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
           None nearby yet.
         </Text>
       ) : (
-        <FlatList
+        <BottomSheetFlatList
           data={items}
-          keyExtractor={(it) => `${it.kind}-${it.id}`}
+          keyExtractor={(it: MapNearbyItem) => `${it.kind}-${it.id}`}
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={{ paddingHorizontal: 16 }}
           ItemSeparatorComponent={() => <View style={{ width: 10 }} />}
-          renderItem={({ item }) => (
+          renderItem={({ item }: { item: MapNearbyItem }) => (
             <MapNearbyCard item={item} isDark={isDark} onPress={() => onPressItem(item)} width={260} />
           )}
         />
@@ -224,28 +224,57 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
     </View>
   );
 
-  // Section order: selected type pinned on top.
+  // Section order at full snap: selected type pinned on top. Headings match
+  // the "In This Area" framing — these describe what's visible in the current
+  // map viewport.
   const sections =
     mode === 'ad'
-      ? [{ title: 'Nearby Sponsors', items: ads }, { title: 'Nearby Surf Breaks', items: breaks }]
-      : [{ title: 'Nearby Surf Breaks', items: breaks }, { title: 'Nearby Sponsors', items: ads }];
+      ? [{ title: 'Local Business', items: ads }, { title: 'Surf Breaks', items: breaks }]
+      : [{ title: 'Surf Breaks', items: breaks }, { title: 'Local Business', items: ads }];
 
   return (
     <BottomSheet
       ref={ref}
       index={initialIndex}
       snapPoints={snapPoints}
-      enablePanDownToClose
+      // Drag-down does NOT close the sheet — the lowest snap is peek, which
+      // is the "dismissed" state when zoomed-in. Full hide only happens
+      // imperatively via `close()` from the parent's zoom-out effect. This
+      // keeps the peek bar visible whenever the user is in the peekable
+      // zoom range, regardless of how aggressively they swipe down.
+      enablePanDownToClose={false}
+      // On Android, the BottomSheet's vertical pan gesture defaults to
+      // grabbing horizontal swipes inside its content too, which kills the
+      // carousel's pagingEnabled swipe. Disabling content panning forces the
+      // user to drag the handle for snap changes — but the horizontal
+      // carousel inside works untouched. Tradeoff: can't drag the bottom
+      // sheet up/down by grabbing a card; must use the handle. Acceptable
+      // because the handle is a clear affordance.
+      enableContentPanningGesture={false}
+      // Disable overdrag so a hard swipe up from peek (6%) cannot blow past
+      // half (38%) and land at full (85%) in one gesture. The user wants
+      // peek → half on first swipe, half → full on second swipe — each
+      // gesture should stop at the nearest snap point, not overshoot.
+      enableOverDrag={false}
+      // Snap to the next sequential point (not the nearest by velocity) so a
+      // single swipe always advances exactly one snap level.
+      animateOnMount={false}
       onChange={handleSheetChange}
       backgroundStyle={{ backgroundColor: isDark ? '#0f172a' : '#fff' }}
       handleIndicatorStyle={{ backgroundColor: isDark ? '#4b5563' : '#d1d5db' }}
     >
       <BottomSheetView style={{ flex: 1, paddingTop: 6 }}>
-        {/* Peek (index 0): only the handle is visible — neither carousel nor
-            sections render. Half (index 1): carousel. Full (index 2): both. */}
-        {snapIndex >= 1 && renderCarousel()}
+        {/* Three distinct contents, one per snap point:
+              Peek  (0): handle only
+              Half  (1): carousel (one row of cards near the map center)
+              Full  (2): "In This Area" heading + Surf Breaks section +
+                         Local Business section. Carousel is REPLACED, not
+                         duplicated, since the sections cover the same data
+                         with more breathing room. */}
+        {snapIndex === 1 && renderCarousel()}
         {snapIndex >= 2 && (
           <View style={styles.sectionsWrap}>
+            <Text style={[styles.areaTitle, { color: isDark ? '#fff' : '#111827' }]}>In This Area</Text>
             {sections.map((s) => (
               <React.Fragment key={s.title}>{renderSection(s.title, s.items)}</React.Fragment>
             ))}
@@ -260,7 +289,14 @@ export default MapNearbySheet;
 
 const styles = StyleSheet.create({
   carouselContent: { paddingHorizontal: 16, paddingVertical: 8 },
-  sectionsWrap: { paddingTop: 12, gap: 14 },
+  sectionsWrap: { paddingTop: 4, gap: 18 },
+  areaTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 8,
+  },
   section: {},
   sectionTitle: {
     fontSize: 13,

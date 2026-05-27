@@ -341,15 +341,22 @@ export default function CampaignUpload({
     venueLat, venueLon, venueName,
   ]);
 
+  // Credit gate: hard-block submission when day-one cost > current balance.
+  // Backend mirrors this with a 402 insufficient_credits response so stale
+  // clients can't bypass it. Total balance (monthly + extra) is used since
+  // extra credits are real spendable funds.
+  const insufficientCredits = dailyCost > 0 && balance.total < dailyCost;
+
   // Submit gates: headline + CTA destination + at least one creative + at
-  // least one targeting surface + within the free break cap. In edit mode,
-  // also require an actual change.
+  // least one targeting surface + within the free break cap + enough credits
+  // to fund day one. In edit mode, also require an actual change.
   const canSubmit =
     headline.trim().length > 0 &&
     clickUrl.trim().length > 0 &&
     creatives.length > 0 &&
     hasReach &&
     !overFreeBreakCap &&
+    !insufficientCredits &&
     isDirty &&
     !submitting;
 
@@ -866,10 +873,17 @@ export default function CampaignUpload({
                 </View>
               )}
 
-              {dailyCost > 0 && balance.total < dailyCost && (
-                <Text style={{ color: isDark ? '#fcd34d' : '#92400e', fontSize: 11, marginTop: 10, lineHeight: 16 }}>
-                  You're low on credits — campaigns pause when your balance runs out. Top up to keep running.
-                </Text>
+              {insufficientCredits && (
+                <View style={{
+                  marginTop: 12, padding: 10, borderRadius: 9,
+                  borderWidth: 1,
+                  borderColor: isDark ? 'rgba(239,68,68,0.35)' : '#fecaca',
+                  backgroundColor: isDark ? 'rgba(239,68,68,0.12)' : '#fef2f2',
+                }}>
+                  <Text style={{ color: isDark ? '#fca5a5' : '#991b1b', fontSize: 11, lineHeight: 16, fontWeight: '500' }}>
+                    Can't launch — this campaign needs <Text style={{ fontWeight: '800' }}>{dailyCost} credit{dailyCost === 1 ? '' : 's'}/day</Text>, but your balance is <Text style={{ fontWeight: '800' }}>{balance.total}</Text>. Buy credits or subscribe below.
+                  </Text>
+                </View>
               )}
 
               {/* Billing handoff — web checkout (no in-app payment, per billing strategy) */}
