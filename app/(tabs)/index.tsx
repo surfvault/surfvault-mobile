@@ -402,7 +402,9 @@ export default function HomeScreen() {
     feed: true,
     lat: hasCoords && userLat != null ? userLat : undefined,
     lon: hasCoords && userLon != null ? userLon : undefined,
-    limit: 10,
+    // Pull the server cap (30) so the interleave has enough inventory to
+    // cover deep scrolls at AD_EVERY_N_ITEMS cadence before exhausting.
+    limit: 30,
   });
   // Discover: latest shapers (anyone, sorted by latest featured-board
   // activity — the freshest upload bubbles to the top).
@@ -411,11 +413,11 @@ export default function HomeScreen() {
   // No lat/lon plumbing — shaper location comes from `users.surf_break_id`
   // server-side now, not from device GPS.
   const { data: nearbyShapersData } = useGetLatestShapersQuery(
-    { limit: 10 },
+    { limit: 100 },
     { skip: feedType !== 'discover' }
   );
   const { data: followedShapersData } = useGetShapersFromFollowingQuery(
-    { limit: 10 },
+    { limit: 100 },
     { skip: !user?.id || feedType !== 'following' }
   );
 
@@ -447,6 +449,10 @@ export default function HomeScreen() {
   // shared cadence — matches web so both platforms place promos identically.
   // Custom itemKey handles the grouped feed shape (groups have group_key,
   // not session_id) so React keys stay unique across both shapes.
+  // `hasMoreSessions` gates the tail-dump: while more pages can be fetched,
+  // hold back leftover promos so they don't pile up consecutively at the end
+  // of every partial page.
+  const hasMoreSessions = Boolean(sessionsCurrentData?.results?.continuationToken);
   const feedRows = useMemo(
     () =>
       interleavePromoGroups(
@@ -456,9 +462,10 @@ export default function HomeScreen() {
         (t: any, i: number) =>
           t?.group_key && t?.session_date
             ? `g-${t.session_date}-${t.group_key}`
-            : t?.session_id ?? t?.id ?? `item-${i}`
+            : t?.session_id ?? t?.id ?? `item-${i}`,
+        hasMoreSessions
       ) as FeedRow<any, any>[],
-    [sessions, feedAds]
+    [sessions, feedAds, hasMoreSessions]
   );
 
   // Parse search results — API returns searchContent array, dedupe by composite key

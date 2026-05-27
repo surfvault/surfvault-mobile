@@ -43,9 +43,10 @@ export function interleaveAds<T extends { id?: string; session_id?: string }, A 
     items: T[],
     ads: A[],
     every: number = AD_EVERY_N_ITEMS,
-    itemKey: (t: T, idx: number) => string = (t, i) => t.id ?? (t as any).session_id ?? `item-${i}`
+    itemKey: (t: T, idx: number) => string = (t, i) => t.id ?? (t as any).session_id ?? `item-${i}`,
+    hasMoreItems: boolean = false
 ): Array<FeedRow<T, A>> {
-    return interleavePromoGroups(items, groupAdsByPartner(ads), every, itemKey);
+    return interleavePromoGroups(items, groupAdsByPartner(ads), every, itemKey, hasMoreItems);
 }
 
 /**
@@ -59,7 +60,8 @@ export function interleavePromoGroups<T extends { id?: string; session_id?: stri
     items: T[],
     groups: A[][],
     every: number = AD_EVERY_N_ITEMS,
-    itemKey: (t: T, idx: number) => string = (t, i) => t.id ?? (t as any).session_id ?? `item-${i}`
+    itemKey: (t: T, idx: number) => string = (t, i) => t.id ?? (t as any).session_id ?? `item-${i}`,
+    hasMoreItems: boolean = false
 ): Array<FeedRow<T, A>> {
     if (!items?.length) return [];
     const out: Array<FeedRow<T, A>> = [];
@@ -86,17 +88,19 @@ export function interleavePromoGroups<T extends { id?: string; session_id?: stri
 
     // Tail: dump any remaining promo groups so partners with leftover
     // inventory still get exposure when the feed runs out of sessions.
-    while (adCursor < groups.length) {
-        const group = groups[adCursor];
-        if (group.length) {
-            // Key by the row id (unique per ad/shaper). Partner grouping is
-            // retired, so two ads from the same advertiser are separate slots —
-            // keying by ad_partner_id would collide and trigger React's
-            // duplicate-key warning.
-            const keyBase = group[0].id ?? group[0].ad_partner_id;
-            out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
+    // Gated on `hasMoreItems` — otherwise this fires on every partial page
+    // load, causing a consecutive promo clump at the end of the rendered
+    // list while more sessions are still pending. Only drain when the item
+    // feed is truly exhausted.
+    if (!hasMoreItems) {
+        while (adCursor < groups.length) {
+            const group = groups[adCursor];
+            if (group.length) {
+                const keyBase = group[0].id ?? group[0].ad_partner_id;
+                out.push({ type: 'ad', key: `a-${keyBase}`, data: group });
+            }
+            adCursor += 1;
         }
-        adCursor += 1;
     }
 
     return out;

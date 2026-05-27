@@ -109,7 +109,9 @@ export default function SurfBreakDetailScreen() {
   // partners within range of the break's coords. No placement filter on mobile:
   // sidebar inventory would otherwise be wasted since there is no sidebar rail.
   const { data: adsData } = useGetAdsQuery(
-    { surfBreakId: breakData?.id, feed: true, limit: 6 },
+    // Pull the server cap (30) so the interleave has enough inventory to
+    // cover deep scrolls at AD_EVERY_N_ITEMS cadence before exhausting.
+    { surfBreakId: breakData?.id, feed: true, limit: 30 },
     { skip: !breakData?.id }
   );
   const breakAds = useMemo(
@@ -123,7 +125,7 @@ export default function SurfBreakDetailScreen() {
   // without crowding either out. Each promo entry is its own slot — partner-
   // level grouping is retired (Phase B).
   const { data: shapersData } = useGetShapersForSurfBreakQuery(
-    { breakId: breakData?.id ?? '', limit: 6 },
+    { breakId: breakData?.id ?? '', limit: 50 },
     { skip: !breakData?.id }
   );
   const breakShapers = useMemo(
@@ -144,12 +146,6 @@ export default function SurfBreakDetailScreen() {
   const promoGroups = useMemo(
     () => zipPromoGroups(feedAds, feedShapers),
     [feedAds, feedShapers]
-  );
-
-  // Interleave sessions + ad/shaper groups at the shared cadence.
-  const feedRows = useMemo(
-    () => interleavePromoGroups(sessions, promoGroups) as FeedRow<any, any>[],
-    [sessions, promoGroups]
   );
 
   // First page comes from the break query. Guard against metadata-only refetches
@@ -176,6 +172,26 @@ export default function SurfBreakDetailScreen() {
   const { data: moreData, isFetching: loadingMore } = useGetSurfBreakSessionsQuery(
     { surfBreakId: breakData?.id ?? '', limit: 10, continuationToken, viewerId: user?.id },
     { skip: !continuationToken || !breakData?.id }
+  );
+
+  // Interleave sessions + ad/shaper groups at the shared cadence.
+  // `hasMoreSessions` gates the tail-dump: while more pages can be fetched,
+  // hold back leftover promos so they don't pile up consecutively at the end
+  // of every partial page. Source of truth flips from initialData → moreData
+  // once a second-page fetch lands.
+  const hasMoreSessions = Boolean(
+    moreData ? moreData?.results?.continuationToken : initialData?.results?.continuationToken
+  );
+  const feedRows = useMemo(
+    () =>
+      interleavePromoGroups(
+        sessions,
+        promoGroups,
+        undefined,
+        undefined,
+        hasMoreSessions
+      ) as FeedRow<any, any>[],
+    [sessions, promoGroups, hasMoreSessions]
   );
 
   useEffect(() => {
