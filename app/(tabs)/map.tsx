@@ -17,9 +17,13 @@ import {
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useTrackedPush } from '../../src/context/NavigationContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Callout, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Region, PROVIDER_DEFAULT, PROVIDER_GOOGLE } from 'react-native-maps';
 import ClusteredMapView from 'react-native-map-clustering';
 import { Ionicons } from '@expo/vector-icons';
+import BottomSheet from '@gorhom/bottom-sheet';
+import { Dimensions } from 'react-native';
+import MapNearbySheet, { SheetMode } from '../../src/components/MapNearbySheet';
+import { MapNearbyItem } from '../../src/components/MapNearbyCard';
 import { useSelector, useDispatch } from 'react-redux';
 import * as Location from 'expo-location';
 import { setCoordinates } from '../../src/store/slices/location';
@@ -239,6 +243,28 @@ export default function MapScreen() {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [selectedBreak, setSelectedBreak] = useState<any>(null);
+  // Bottom-sheet state. `sheetMode` decides which type of carousel + which
+  // section is pinned to top. `selectedAd` lives next to `selectedBreak` so we
+  // know which marker the user tapped most recently (drives the carousel's
+  // initial centered card). Auto-opens to half-snap on marker tap or when the
+  // map is zoomed past the threshold below.
+  const [selectedAd, setSelectedAd] = useState<any>(null);
+  const [sheetMode, setSheetMode] = useState<SheetMode>('break');
+  const sheetRef = useRef<BottomSheet>(null);
+  const CARD_WIDTH = Math.round(Dimensions.get('window').width * 0.85);
+  // Capture the initial zoom-range state once at mount so the BottomSheet
+  // mounts at the right snap point (peek if already zoomed-in, else closed).
+  // Subsequent zoom changes are handled by the sheetInZoomRange useEffect
+  // calling snapToIndex on the ref. Captured once to avoid this becoming a
+  // controlled-component pattern that fights with user drag gestures.
+  const initialSheetIndexRef = useRef<number>(
+    initialMapRegion.latitudeDelta <= 2.0 ? 0 : -1,
+  );
+  // Tracks whether the zoom-auto-open effect has already snapped the sheet
+  // open for the current zoom-in band. Seeded from the initial mount state so
+  // the effect doesn't fire a redundant snapToIndex on first render when the
+  // sheet already started at peek via `initialIndex`.
+  const sheetAutoOpenedRef = useRef(initialSheetIndexRef.current === 0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const regionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [regionStable, setRegionStable] = useState(true);
@@ -333,8 +359,17 @@ export default function MapScreen() {
     return () => handle.cancel();
   }, [latestBreaks, regionStable, isZoomedTooFarOut]);
 
-  // Cap markers to prevent clustering library from crashing with too many
-  const surfBreaks = committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks;
+  // Cap markers to prevent clustering library from crashing with too many.
+  // Memoized so the array reference is stable across unrelated re-renders
+  // (e.g. selection changes from carousel swipes). Without this, the slice
+  // ran on every parent render and produced a new array each time, which
+  // made `react-native-map-clustering` re-cluster on every selection change,
+  // unmounting/remounting every marker — the user-visible "pins flash and
+  // disappear" symptom.
+  const surfBreaks = useMemo(
+    () => (committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks),
+    [committedBreaks],
+  );
 
   const { data: searchData, isFetching: searchLoading } = useGetSurfBreaksQuery(
     { search: debouncedTerm, limit: 8, continuationToken: '' },
@@ -379,6 +414,14 @@ export default function MapScreen() {
   );
   const nearbyBreaks = nearbyBreaksData?.results?.nearbyBreaks ?? nearbyBreaksData?.results?.surfBreaks ?? [];
   const nearbyPhotographers = nearbyPhotographersData?.results?.nearbyPhotographers ?? nearbyPhotographersData?.results?.photographers ?? [];
+
+  // Map bottom-sheet visibility threshold. Peek appears when the user is
+  // zoomed in to at least state/coast level (latitudeDelta <= 2 ≈ ~200km
+  // across). That's enough zoom-out that a surfer scanning their coastline
+  // sees the bar early, but tight enough that we're not listing breaks across
+  // a whole hemisphere. Zooming further out auto-closes.
+  const SHEET_ZOOM_THRESHOLD = 2.0;
+  const sheetInZoomRange = region.latitudeDelta <= SHEET_ZOOM_THRESHOLD;
 
   // Nearby break picker search
   const { data: nearbyPickerData, isFetching: nearbyPickerLoading } = useGetSurfBreaksQuery(
@@ -463,9 +506,154 @@ export default function MapScreen() {
     }, [])
   );
 
+  // Marker tap → set selection, switch sheet mode, snap to half. Zoom effect
+  // controls peek visibility independently. Tap lifts the sheet from peek (or
+  // wherever) up to half-snap so the carousel becomes visible for the tapped
+  // item. Map is NOT animated — selection only changes the marker style.
   const handleMarkerPress = useCallback((sb: any) => {
     setSelectedBreak(sb);
+    setSelectedAd(null);
+    setSheetMode('break');
+    sheetRef.current?.snapToIndex(1); // half (carousel)
   }, []);
+
+  const handleAdMarkerPress = useCallback((ad: any) => {
+    setSelectedAd(ad);
+    setSelectedBreak(null);
+    setSheetMode('ad');
+    sheetRef.current?.snapToIndex(1);
+    // Per-marker impression (the sheet also fires when an ad becomes the
+    // carousel-centered item, but a direct tap is the strongest signal).
+    recordImpression({ adId: ad.id, placement: 'map', device: currentDevice() }).catch(() => { /* best-effort */ });
+  }, [recordImpression]);
+
+  const handleSheetClose = useCallback(() => {
+    setSelectedBreak(null);
+    setSelectedAd(null);
+  }, []);
+
+  // Convert a raw break record to the sheet item shape. Shared between the
+  // nearby list and the "ensure selected is included" fallback below.
+  const breakToItem = useCallback((b: any): MapNearbyItem => ({
+    kind: 'break' as const,
+    id: String(b.id),
+    name: b.name,
+    subtitle:
+      (b.region ? `${String(b.region).replaceAll('_', ' ')} · ` : '') +
+      (b.country_code ?? ''),
+    distanceLabel:
+      typeof b.distance === 'number' && b.distance > 0
+        ? formatDistance(b.distance, units)
+        : null,
+    lat: parseFloat(b.coordinates?.lat ?? b.lat ?? 0),
+    lon: parseFloat(b.coordinates?.lon ?? b.lon ?? 0),
+    thumbnailUrl: b.thumbnailUrl ?? b.thumbnail_url ?? null,
+  }), [units]);
+
+  const adToItem = useCallback((a: any): MapNearbyItem => ({
+    kind: 'ad' as const,
+    id: String(a.id),
+    company: a.company_name ?? 'Sponsored',
+    title: a.headline || a.company_name || 'Sponsored',
+    placeName: a.place_name ?? null,
+    venueCount: a.venue_count ? Number(a.venue_count) : undefined,
+    ctaLabel: a.cta_label || (a.cta_type === 'tel' ? 'Call' : 'Learn more'),
+    thumbnailUrl: a.thumbnail_url ?? a.image_url ?? null,
+    lat: parseFloat(a.place_lat ?? a.lat ?? 0),
+    lon: parseFloat(a.place_lon ?? a.lon ?? 0),
+  }), []);
+
+  // Sheet lists are VIEWPORT-anchored: only breaks/ads currently visible on
+  // the map appear. Sorted by distance from map center so the closest items
+  // come first in the carousel — feels like "what's right in front of me."
+  // Re-shuffling on pan is naturally debounced by the existing region update
+  // pipeline. Because the list is keyed on viewport rather than selection,
+  // swiping the carousel can safely change the selected pin without causing
+  // any list-reorder loop.
+  const inViewportBreaks = useMemo(() => {
+    const { latitude, longitude, latitudeDelta, longitudeDelta } = region;
+    const minLat = latitude - latitudeDelta / 2;
+    const maxLat = latitude + latitudeDelta / 2;
+    const minLon = longitude - longitudeDelta / 2;
+    const maxLon = longitude + longitudeDelta / 2;
+    return (committedBreaks as any[]).filter((b: any) => {
+      const lat = parseFloat(b.coordinates?.lat ?? b.lat ?? 0);
+      const lon = parseFloat(b.coordinates?.lon ?? b.lon ?? 0);
+      return !isNaN(lat) && !isNaN(lon) && lat >= minLat && lat <= maxLat && lon >= minLon && lon <= maxLon;
+    });
+  }, [committedBreaks, region]);
+
+  const sortByDistanceFromCenter = useCallback(<T extends { lat: number; lon: number }>(items: T[]) => {
+    const cLat = region.latitude;
+    const cLon = region.longitude;
+    return [...items].sort((a, b) => {
+      const dA = (a.lat - cLat) ** 2 + (a.lon - cLon) ** 2;
+      const dB = (b.lat - cLat) ** 2 + (b.lon - cLon) ** 2;
+      return dA - dB;
+    });
+  }, [region.latitude, region.longitude]);
+
+  const sheetBreaks = useMemo<MapNearbyItem[]>(() => {
+    const items = inViewportBreaks.map(breakToItem);
+    return sortByDistanceFromCenter(items);
+  }, [inViewportBreaks, breakToItem, sortByDistanceFromCenter]);
+
+  const sheetAds = useMemo<MapNearbyItem[]>(() => {
+    // mapAds is already viewport-bounded server-side; no extra filtering needed.
+    const items = (mapAds as any[]).map(adToItem);
+    return sortByDistanceFromCenter(items);
+  }, [mapAds, adToItem, sortByDistanceFromCenter]);
+
+  // Carousel swipe → change which pin is selected on the map (visual
+  // reference between list position and map position). Map is NOT animated —
+  // that caused jarring camera moves and conflicted with manual map panning.
+  // Safe from the previous loop because the list is viewport-anchored, not
+  // selection-anchored: changing selection no longer reshuffles the list.
+  const handleSheetCenterItem = useCallback(
+    (item: MapNearbyItem) => {
+      if (item.kind === 'ad') {
+        const currentId = selectedAd?.id;
+        if (String(currentId ?? '') === item.id) return;
+        setSelectedAd(mapAds.find((a: any) => String(a.id) === item.id) ?? null);
+      } else {
+        const currentId = selectedBreak?.id;
+        if (String(currentId ?? '') === item.id) return;
+        setSelectedBreak(committedBreaks.find((b: any) => String(b.id) === item.id) ?? null);
+      }
+    },
+    [selectedBreak, selectedAd, mapAds, committedBreaks],
+  );
+
+  // Tap a card in the sheet → navigate (breaks) or open click URL (ads).
+  const handleSheetPressItem = useCallback(
+    (item: MapNearbyItem) => {
+      if (item.kind === 'break') {
+        const sb = nearbyBreaks.find((b: any) => String(b.id) === item.id);
+        if (sb) navigateToBreakPage(sb);
+      } else {
+        const ad = mapAds.find((a: any) => String(a.id) === item.id);
+        if (ad) openAdClick(ad);
+      }
+    },
+    [nearbyBreaks, mapAds, navigateToBreakPage, openAdClick],
+  );
+
+  // Zoom-driven sheet visibility. When the user zooms in past the regional
+  // threshold, the sheet auto-shows at the PEEK snap (just the handle bar
+  // above the tab bar — never auto-half-snap). Zoom back out → fully closed.
+  // To open the sheet to half-snap the user must either swipe up from peek
+  // OR tap a marker. `sheetAutoOpenedRef` debounces each transition to one
+  // snap call so we don't fight a user who's manually dragged the sheet.
+  useEffect(() => {
+    if (sheetInZoomRange && !sheetAutoOpenedRef.current) {
+      sheetAutoOpenedRef.current = true;
+      sheetRef.current?.snapToIndex(0); // peek
+    }
+    if (!sheetInZoomRange && sheetAutoOpenedRef.current) {
+      sheetAutoOpenedRef.current = false;
+      sheetRef.current?.close();
+    }
+  }, [sheetInZoomRange]);
 
   const handleSearchInput = useCallback((text: string) => {
     setSearchTerm(text);
@@ -532,6 +720,7 @@ export default function MapScreen() {
     const lat = Number(ad.place_lat);
     const lon = Number(ad.place_lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const isSelected = String(selectedAd?.id ?? '') === String(ad.id);
     return (
       <Marker
         key={`ad-${ad.id}`}
@@ -539,33 +728,15 @@ export default function MapScreen() {
         // react-native-maps Marker prop types — spread it untyped.
         {...({ cluster: false } as any)}
         coordinate={{ latitude: lat, longitude: lon }}
-        pinColor="#f59e0b"
-        onPress={() => {
-          recordImpression({ adId: ad.id, placement: 'map', device: currentDevice() }).catch(() => { /* best-effort */ });
-        }}
-      >
-        <Callout onPress={() => openAdClick(ad)}>
-          <View style={styles.adCallout}>
-            <View style={styles.adCalloutBadge}>
-              <Text style={styles.adCalloutBadgeText}>SPONSORED</Text>
-            </View>
-            <Text style={styles.adCalloutTitle} numberOfLines={1}>
-              {ad.headline || ad.company_name || 'Sponsored'}
-            </Text>
-            {ad.place_name ? (
-              <Text style={styles.adCalloutSub} numberOfLines={1}>{ad.place_name}</Text>
-            ) : null}
-            {Number(ad.venue_count) > 1 ? (
-              <Text style={styles.adCalloutSub} numberOfLines={1}>+{Number(ad.venue_count) - 1} more here</Text>
-            ) : null}
-            <Text style={styles.adCalloutCta} numberOfLines={1}>
-              {ad.cta_label || (ad.cta_type === 'tel' ? 'Call' : 'Learn more')} ›
-            </Text>
-          </View>
-        </Callout>
-      </Marker>
+        // Selected ad uses red pin (Apple Maps' "selected place" color) to
+        // stand out from the amber default. zIndex raises it above unselected
+        // ad pins so the selection ring isn't covered by neighbors.
+        pinColor={isSelected ? '#ef4444' : '#f59e0b'}
+        zIndex={isSelected ? 999 : undefined}
+        onPress={() => handleAdMarkerPress(ad)}
+      />
     );
-  }), [mapAds, recordImpression, openAdClick]);
+  }), [mapAds, handleAdMarkerPress, selectedAd]);
 
   const renderCluster = useCallback((cluster: any) => {
     const { id, geometry, onPress, properties } = cluster;
@@ -927,36 +1098,37 @@ export default function MapScreen() {
         style={[styles.myLocationBtn, {
           backgroundColor: isDark ? 'rgba(17,24,39,0.85)' : 'rgba(255,255,255,0.9)',
           shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 },
-          bottom: selectedBreak ? 104 : 16,
+          // Lift slightly when the sheet is at peek (zoomed-in default) so the
+          // button doesn't sit right on top of the handle bar. We only know
+          // for sure that the sheet is at peek (not half/full) when the user
+          // hasn't dragged it up. The 60px clearance covers the peek bar +
+          // a little breathing room — when they drag the sheet up, the button
+          // is fine staying put because the sheet content covers it anyway.
+          bottom: sheetInZoomRange ? 80 : 16,
         }]}
       >
         <Ionicons name="navigate-outline" size={18} color={isDark ? '#d1d5db' : '#374151'} />
       </Pressable>
 
-      {/* Selected break info card — replaces the native map Callout, which is
-          unreliable for custom content on Android. Driven purely by state, so
-          it works identically on both platforms. */}
-      {selectedBreak && (
-        <View style={styles.breakCardWrap} pointerEvents="box-none">
-          <Pressable
-            onPress={() => navigateToBreakPage(selectedBreak)}
-            style={[styles.breakCard, { backgroundColor: isDark ? '#1f2937' : '#ffffff' }]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.calloutName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                {selectedBreak.name}
-              </Text>
-              <Text style={[styles.calloutSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-                {selectedBreak.region ? `${selectedBreak.region.replaceAll('_', ' ')} · ` : ''}{selectedBreak.country_code ?? ''}
-              </Text>
-              <Text style={styles.calloutAction}>View Sessions →</Text>
-            </View>
-            <Pressable onPress={dismissSelection} hitSlop={10} style={styles.breakCardClose}>
-              <Ionicons name="close" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
-            </Pressable>
-          </Pressable>
-        </View>
-      )}
+      {/* Nearby content bottom sheet — replaces the old static break card +
+          floating ad Callout. Half-snap = type-locked carousel; full-snap =
+          sectioned horizontal scroll. See MapNearbySheet for full behavior. */}
+      <MapNearbySheet
+        ref={sheetRef}
+        breaks={sheetBreaks}
+        ads={sheetAds}
+        mode={sheetMode}
+        selectedId={sheetMode === 'ad' ? String(selectedAd?.id ?? '') : String(selectedBreak?.id ?? '')}
+        isDark={isDark}
+        onCenterItem={handleSheetCenterItem}
+        onPressItem={handleSheetPressItem}
+        onClose={handleSheetClose}
+        onAdImpression={(adId) => {
+          recordImpression({ adId, placement: 'map', device: currentDevice() }).catch(() => { /* best-effort */ });
+        }}
+        cardWidth={CARD_WIDTH}
+        initialIndex={initialSheetIndexRef.current}
+      />
 
       {isSuperAdmin && (
         <AddSurfBreakSheet
