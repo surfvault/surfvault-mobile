@@ -112,6 +112,10 @@ export default function SponsoredCard({
   const impressionFiredRef = useRef(false);
   const [width, setWidth] = useState(Dimensions.get('window').width);
   const isCarousel = slides.length > 1;
+  // Fall back to a sensible default when the advertiser left cta_label
+  // empty — matches web (SponsoredPost.jsx, RotatingAd.jsx) so an ad
+  // without a custom CTA still shows a pill on both platforms.
+  const ctaLabel = ad?.cta_label || (ad?.cta_type === 'tel' ? 'Call now' : 'Learn more');
 
   // Reset impression tracking when the ad identity changes.
   useEffect(() => {
@@ -238,11 +242,9 @@ export default function SponsoredCard({
                       transition={200}
                     />
                   ) : null}
-                  {ad.cta_label ? (
-                    <View style={styles.ctaPill} pointerEvents="none">
-                      <Text style={styles.ctaPillText} numberOfLines={1}>{ad.cta_label}</Text>
-                    </View>
-                  ) : null}
+                  <View style={styles.ctaPill} pointerEvents="none">
+                    <Text style={styles.ctaPillText} numberOfLines={1}>{ctaLabel}</Text>
+                  </View>
                 </Pressable>
               );
             }}
