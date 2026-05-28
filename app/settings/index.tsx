@@ -25,6 +25,7 @@ import {
   type DistanceUnit,
   type ThemePref,
   type PreferencesPatch,
+  type AutoGrantDownloadDestination,
 } from '../../src/helpers/preferences';
 
 const PRIVACY_URL = 'https://surf-vault.com/privacy-policy';
@@ -378,19 +379,48 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
-        {/* Vault — only applies to surfers (the access-request → auto-save flow) */}
+        {/* Downloads — only applies to surfers. Governs the auto-grant download
+            destination; regular access requests use the explicit buttons. */}
         {user?.user_type === 'surfer' && (
           <>
-            <SectionTitle c={c}>Vault</SectionTitle>
+            <SectionTitle c={c}>Downloads</SectionTitle>
+            <Card c={c}>
+              <View style={styles.stackRow}>
+                <Text style={[styles.rowLabel, { color: c.text }]}>Instant downloads</Text>
+                <Text style={[styles.rowDesc, { color: c.muted }]}>
+                  Where to save photos from photographers who allow instant downloads
+                </Text>
+                <View style={{ marginTop: 10 }}>
+                  <Segmented<AutoGrantDownloadDestination>
+                    c={c}
+                    value={prefs.autoGrantDownloadDestination}
+                    onChange={(autoGrantDownloadDestination) => patch({ autoGrantDownloadDestination })}
+                    options={[
+                      { label: 'Vault', value: 'vault' },
+                      { label: 'Photos', value: 'camera_roll' },
+                      { label: 'Both', value: 'both' },
+                      { label: 'Ask', value: 'ask' },
+                    ]}
+                  />
+                </View>
+              </View>
+            </Card>
+          </>
+        )}
+
+        {/* Photos — photographer-owned download policy */}
+        {user?.user_type === 'photographer' && (
+          <>
+            <SectionTitle c={c}>Photos</SectionTitle>
             <Card c={c}>
               <ToggleRow
                 c={c}
                 isDark={isDark}
                 first
-                label="Auto-save approved photos"
-                description="When a photographer grants your access request, save those photos to your vault automatically"
-                value={prefs.autoSaveApprovedToVault}
-                onValueChange={(v) => patch({ autoSaveApprovedToVault: v })}
+                label="Auto-grant photo access"
+                description="Let surfers download your photos instantly without sending an access request. You'll still be notified when someone downloads."
+                value={prefs.autoGrantMediaAccess}
+                onValueChange={(v) => patch({ autoGrantMediaAccess: v })}
               />
             </Card>
           </>

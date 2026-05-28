@@ -96,8 +96,11 @@ const mediaApi = rootApi.injectEndpoints({
       invalidatesTags: [ApiTag.AccessRequest],
     }),
     downloadSurfMediaAccessRequestPhotos: builder.mutation({
-      query: ({ requestId }: { requestId: string }) => ({
-        url: `/media/access/${requestId}/download`,
+      // `photos` (optional) scopes the zip to a subset of the granted
+      // request — used by the auto-grant download so the surfer gets just
+      // the photos they selected, not the whole accumulating request.
+      query: ({ requestId, photos }: { requestId: string; photos?: string[] }) => ({
+        url: `/media/access/${requestId}/download${photos?.length ? `?photos=${photos.join(',')}` : ''}`,
         method: 'GET',
       }),
     }),

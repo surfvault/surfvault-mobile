@@ -67,6 +67,7 @@ const getNotifIcon = (type: string): { name: string; color: string } => {
     case 'newFollower': return { name: 'person-add-outline', color: '#f59e0b' };
     case 'userAccessRequest': return { name: 'lock-open-outline', color: '#ef4444' };
     case 'userAccessRequestApproval': return { name: 'checkmark-circle-outline', color: '#22c55e' };
+    case 'photoDownloaded': return { name: 'download-outline', color: '#0ea5e9' };
     case 'adApproved': return { name: 'megaphone-outline', color: '#22c55e' };
     case 'adRejected': return { name: 'megaphone-outline', color: '#ef4444' };
     case 'creditPackPurchased': return { name: 'cash-outline', color: '#fbbf24' };
@@ -199,6 +200,7 @@ const getNotifTitle = (n: any): string => {
     case 'newFollower': return 'New Follower';
     case 'userAccessRequest': return 'Access Request';
     case 'userAccessRequestApproval': return 'Access Approved';
+    case 'photoDownloaded': return n.metadata_user?.handle ?? 'Photos Downloaded';
     case 'adApproved': return 'Campaign Approved';
     case 'adRejected': return 'Campaign Rejected';
     case 'newCampaignSubmission': return 'Ad Request';
@@ -448,6 +450,14 @@ export default function NotificationsScreen() {
       case 'userAccessRequestApproval': {
         const handle = n.metadata_user?.handle;
         if (handle) trackedPush(`/user/${handle}` as any);
+        break;
+      }
+      case 'photoDownloaded': {
+        // Open the (auto-granted) access request so the photographer sees who
+        // downloaded which photos. Fall back to the session (resource_id).
+        const requestId = n.body_metadata?.accessRequestId;
+        if (requestId) trackedPush(`/access/${requestId}` as any);
+        else if (n.resource_id) trackedPush(`/session/${n.resource_id}` as any);
         break;
       }
       case 'newCampaignSubmission': {

@@ -3,6 +3,24 @@ import { useUser } from '../context/UserProvider';
 
 export type DistanceUnit = 'mi' | 'km';
 export type ThemePref = 'system' | 'light' | 'dark';
+// Where auto-granted downloads go when a surfer taps "Download" on a
+// photographer's auto-grant session. 'ask' shows the destination picker.
+// Only applies to the auto-grant flow — regular access requests have explicit
+// Save-to-Vault / Save-to-Photos buttons instead.
+export type AutoGrantDownloadDestination = 'vault' | 'camera_roll' | 'both' | 'ask';
+const DOWNLOAD_DESTINATIONS: AutoGrantDownloadDestination[] = ['vault', 'camera_roll', 'both', 'ask'];
+
+/**
+ * Coerce a stored destination value, migrating the legacy boolean
+ * `autoSaveApprovedToVault` (true → 'vault') and defaulting to 'ask'.
+ */
+function coerceDownloadDestination(raw: any): AutoGrantDownloadDestination {
+  if (DOWNLOAD_DESTINATIONS.includes(raw?.autoGrantDownloadDestination)) {
+    return raw.autoGrantDownloadDestination;
+  }
+  if (raw?.autoSaveApprovedToVault === true) return 'vault';
+  return 'ask';
+}
 
 export interface NotificationPreferences {
   followers: boolean;
@@ -15,7 +33,11 @@ export interface UserPreferences {
   units: DistanceUnit;
   theme: ThemePref;
   language: string;
-  autoSaveApprovedToVault: boolean;
+  // Surfer-owned: default destination for auto-granted downloads.
+  autoGrantDownloadDestination: AutoGrantDownloadDestination;
+  // Photographer-owned: when true, surfers download originals from this
+  // photographer's sessions without a manual access-request approval step.
+  autoGrantMediaAccess: boolean;
   nearby: { breaksKm: number; photographersKm: number };
   notifications: NotificationPreferences;
 }
@@ -24,7 +46,8 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   units: 'mi',
   theme: 'system',
   language: 'en',
-  autoSaveApprovedToVault: false,
+  autoGrantDownloadDestination: 'ask',
+  autoGrantMediaAccess: false,
   // Stored in km but chosen to be round in the default unit (miles):
   // 161 km ≈ 100 mi, 80 km ≈ 50 mi — so the default lands on a preset chip.
   nearby: { breaksKm: 161, photographersKm: 80 },
@@ -52,7 +75,8 @@ export function normalizePreferences(raw: any): UserPreferences {
     units: r.units === 'km' ? 'km' : 'mi',
     theme: r.theme === 'light' || r.theme === 'dark' ? r.theme : 'system',
     language: typeof r.language === 'string' ? r.language : 'en',
-    autoSaveApprovedToVault: r.autoSaveApprovedToVault === true,
+    autoGrantDownloadDestination: coerceDownloadDestination(r),
+    autoGrantMediaAccess: r.autoGrantMediaAccess === true,
     nearby: {
       breaksKm: Number.isFinite(nearby.breaksKm) ? nearby.breaksKm : DEFAULT_PREFERENCES.nearby.breaksKm,
       photographersKm: Number.isFinite(nearby.photographersKm)
@@ -72,7 +96,8 @@ export type PreferencesPatch = {
   units?: DistanceUnit;
   theme?: ThemePref;
   language?: string;
-  autoSaveApprovedToVault?: boolean;
+  autoGrantDownloadDestination?: AutoGrantDownloadDestination;
+  autoGrantMediaAccess?: boolean;
   nearby?: Partial<UserPreferences['nearby']>;
   notifications?: Partial<NotificationPreferences>;
 };
@@ -88,8 +113,12 @@ export function mergePreferences(current: any, patch: PreferencesPatch): UserPre
     units: p.units ?? base.units,
     theme: p.theme ?? base.theme,
     language: p.language ?? base.language,
-    autoSaveApprovedToVault:
-      typeof p.autoSaveApprovedToVault === 'boolean' ? p.autoSaveApprovedToVault : base.autoSaveApprovedToVault,
+    autoGrantDownloadDestination:
+      p.autoGrantDownloadDestination && DOWNLOAD_DESTINATIONS.includes(p.autoGrantDownloadDestination)
+        ? p.autoGrantDownloadDestination
+        : base.autoGrantDownloadDestination,
+    autoGrantMediaAccess:
+      typeof p.autoGrantMediaAccess === 'boolean' ? p.autoGrantMediaAccess : base.autoGrantMediaAccess,
     nearby: { ...base.nearby, ...(p.nearby ?? {}) },
     notifications: { ...base.notifications, ...(p.notifications ?? {}) },
   };

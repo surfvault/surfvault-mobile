@@ -40,6 +40,7 @@ import {
   useGetSessionPhotosQuery,
   useGetSessionGroupsQuery,
   useRequestAccessToSurfMediaMutation,
+  useSaveSurfMediaAccessRequestToVaultMutation,
   useDownloadSurfMediaMutation,
   useDeleteSurfMediaMutation,
   useUpdateUserFavoritesMutation,
@@ -67,6 +68,7 @@ import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ReportSessionSheet from '../../src/components/ReportSessionSheet';
 import { toOriginalKey, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl';
 import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
+import { useUserPreferences } from '../../src/helpers/preferences';
 import { useUpload } from '../../src/context/UploadContext';
 import { generateUUID } from '../../src/helpers/uuid';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
@@ -111,6 +113,7 @@ const formatDate = (dateStr?: string) => {
 export default function SessionDetailScreen() {
   const { sessionId, group: groupNameFromUrl } = useLocalSearchParams<{ sessionId: string; group?: string }>();
   const { user } = useUser();
+  const { autoGrantDownloadDestination } = useUserPreferences();
   const router = useRouter();
   const smartBack = useSmartBack();
   const trackedPush = useTrackedPush();
@@ -208,6 +211,7 @@ export default function SessionDetailScreen() {
   const [sessionAction, setSessionAction] = useState<string | null>(null);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [downloadSheetVisible, setDownloadSheetVisible] = useState(false);
   const [reportSheetVisible, setReportSheetVisible] = useState(false);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
   const [isStartingUpload, setIsStartingUpload] = useState(false);
@@ -258,6 +262,7 @@ export default function SessionDetailScreen() {
 
   // Mutations
   const [requestAccessToPhotos] = useRequestAccessToSurfMediaMutation();
+  const [saveToVault] = useSaveSurfMediaAccessRequestToVaultMutation();
   const [followUser] = useFollowUserMutation();
   const [registerDevice] = useRegisterDeviceMutation();
   const [downloadSurfMedia] = useDownloadSurfMediaMutation();
@@ -291,6 +296,10 @@ export default function SessionDetailScreen() {
   const sessionHandle = session?.handle ?? session?.user_handle;
   const isOwner = !!user?.handle && user.handle === sessionHandle;
   const isFavorited = session?.surf_break_is_favorited;
+  // When the photographer has auto-grant on, surfers skip the request
+  // handshake: the floating CTA becomes "Download Photos" and confirming
+  // auto-grants then saves the selection straight to the camera roll.
+  const autoGrantDownload = !isOwner && session?.auto_grant_media_access === true;
 
   // Private-profile access gating. Same fresh-read strategy as the user page.
   const isPrivate = session?.user_access === 'private' && !isOwner;
@@ -798,6 +807,23 @@ export default function SessionDetailScreen() {
       return;
     }
 
+    // Auto-grant surfers: honor their saved download destination. 'ask' opens
+    // the picker (camera roll vs vault vs both); the other values run directly.
+    // The owner's "Save Photos" path is unambiguous (camera roll only) and falls
+    // through to the switch below.
+    if (sessionAction === 'download' && autoGrantDownload) {
+      if (autoGrantDownloadDestination === 'ask') {
+        setDownloadSheetVisible(true);
+      } else {
+        // Preference path: the server auto-vaults for 'vault'/'both', so the
+        // client must NOT also vault (clientVault: false) — it only saves to the
+        // camera roll. The picker path below uses clientVault: true.
+        const dest = autoGrantDownloadDestination === 'camera_roll' ? 'photos' : autoGrantDownloadDestination;
+        void runAutoGrantDownload(dest, { clientVault: false });
+      }
+      return;
+    }
+
     setIsProcessingAction(true);
     try {
       switch (sessionAction) {
@@ -818,6 +844,8 @@ export default function SessionDetailScreen() {
           );
           break;
         case 'download': {
+          // Owner saving their own photos to the camera roll (the auto-grant
+          // surfer path is handled by runAutoGrantDownload via the picker).
           const total = selectedPhotoIds.length;
           const result = await savePhotosToCameraRoll(selectedPhotoIds);
           if (result.saved === total) {
@@ -836,7 +864,62 @@ export default function SessionDetailScreen() {
     } finally {
       setIsProcessingAction(false);
     }
-  }, [sessionAction, selectedPhotoIds, session, sessionHandle, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction, isProcessingAction, promptAfterRequest]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runAutoGrantDownload is defined below and shares these deps
+  }, [sessionAction, selectedPhotoIds, session, sessionHandle, autoGrantDownload, autoGrantDownloadDestination, requestAccessToPhotos, downloadSurfMedia, deleteSurfMedia, cancelAction, isProcessingAction, promptAfterRequest]);
+
+  // Auto-grant download. The commit (requestAccessToPhotos) is required for
+  // every choice — it auto-approves the request server-side (authorizing the
+  // per-photo download URLs) and hands back the requestId we need to save the
+  // request into the surfer's vault. `clientVault` is true only on the 'ask'
+  // picker path (where the server skips the vault save); on the preference path
+  // the server already auto-vaulted, so the client must not double-save.
+  // Vault-save mirrors the access-request screen: it saves the whole
+  // (accumulating) granted request, not just this selection.
+  const runAutoGrantDownload = useCallback(
+    async (dest: 'photos' | 'vault' | 'both', opts: { clientVault: boolean }) => {
+      setDownloadSheetVisible(false);
+      if (!selectedPhotoIds.length || !session?.id || isProcessingAction) return;
+      const ids = [...selectedPhotoIds];
+
+      setIsProcessingAction(true);
+      try {
+        const res: any = await requestAccessToPhotos({
+          handle: sessionHandle!,
+          photos: ids,
+          sessionId: session.id,
+          surfBreakId: session.surf_break_id,
+        }).unwrap();
+        const requestId: string | undefined = res?.results?.requestId;
+
+        if ((dest === 'vault' || dest === 'both') && opts.clientVault) {
+          if (!requestId) throw new Error('No request id returned');
+          await saveToVault({ requestId }).unwrap();
+        }
+
+        if (dest === 'photos' || dest === 'both') {
+          const total = ids.length;
+          const result = await savePhotosToCameraRoll(ids);
+          if (dest === 'both' && result.saved === total) {
+            Alert.alert('Done', `Saved to your vault and ${result.saved} photo${result.saved > 1 ? 's' : ''} to your camera roll.`);
+          } else if (result.saved === total) {
+            Alert.alert('Saved', `${result.saved} photo${result.saved > 1 ? 's' : ''} saved to your camera roll.`);
+          } else if (result.saved > 0) {
+            Alert.alert('Partially Saved', `${result.saved}/${total} photos saved to camera roll. ${result.failed} failed.${dest === 'both' ? ' Vault save succeeded.' : ''}`);
+          } else {
+            Alert.alert(dest === 'both' ? 'Vault Only' : 'Error', dest === 'both' ? 'Saved to your vault, but camera roll save failed.' : (result.errors[0] ?? 'Failed to save photos.'));
+          }
+        } else {
+          Alert.alert('Saved to Vault', `${ids.length} photo${ids.length > 1 ? 's' : ''} saved to your vault.`);
+        }
+        cancelAction();
+      } catch {
+        Alert.alert('Error', 'Download failed. Please try again.');
+      } finally {
+        setIsProcessingAction(false);
+      }
+    },
+    [selectedPhotoIds, session, sessionHandle, isProcessingAction, requestAccessToPhotos, saveToVault, cancelAction],
+  );
 
   // Group photo assignment
   const handleGroupPhotoAction = useCallback(async (groupId: string) => {
@@ -1405,11 +1488,15 @@ export default function SessionDetailScreen() {
           </Pressable>
         </View>
 
-        {/* Floating "Request Photos" — non-owners, no active action, not gated */}
+        {/* Floating CTA — non-owners, no active action, not gated. Auto-grant
+            photographers let surfers skip straight to "Download Photos". */}
         {!isOwner && session && !sessionAction && !isLocked && (
-          <Pressable onPress={() => handleStartAction('request')} style={[styles.requestFab, { bottom: insets.bottom + 16 }]}>
-            <Ionicons name="camera-outline" size={18} color="#ffffff" />
-            <Text style={styles.requestFabText}>Request Photos</Text>
+          <Pressable
+            onPress={() => handleStartAction(autoGrantDownload ? 'download' : 'request')}
+            style={[styles.requestFab, { bottom: insets.bottom + 16 }]}
+          >
+            <Ionicons name={autoGrantDownload ? 'download-outline' : 'camera-outline'} size={18} color="#ffffff" />
+            <Text style={styles.requestFabText}>{autoGrantDownload ? 'Download Photos' : 'Request Photos'}</Text>
           </Pressable>
         )}
 
@@ -1512,6 +1599,25 @@ export default function SessionDetailScreen() {
         visible={sheetVisible}
         sections={ellipsisSections}
         onClose={() => setSheetVisible(false)}
+      />
+
+      {/* Auto-grant download destination picker */}
+      <ActionSheet
+        visible={downloadSheetVisible}
+        onClose={() => setDownloadSheetVisible(false)}
+        header={{
+          title: 'Download Photos',
+          subtitle: `Where should ${selectedPhotoIds.length} photo${selectedPhotoIds.length !== 1 ? 's' : ''} go?`,
+        }}
+        sections={[
+          {
+            options: [
+              { label: 'Save to Photos', icon: 'image-outline', onPress: () => runAutoGrantDownload('photos', { clientVault: true }) },
+              { label: 'Save to Vault', icon: 'cloud-upload-outline', onPress: () => runAutoGrantDownload('vault', { clientVault: true }) },
+              { label: 'Save to Both', icon: 'checkmark-done-outline', onPress: () => runAutoGrantDownload('both', { clientVault: true }) },
+            ],
+          },
+        ]}
       />
 
       <ReportSessionSheet
