@@ -707,15 +707,12 @@ export default function ProfileScreen() {
         profile={profileWithCounts}
         isDark={isDark}
         isSelf
-        showStorage={user?.user_type !== 'advertiser'}
         showActiveToggle
         onEditProfile={() => trackedPush('/edit-profile')}
         onToggleActive={handleToggleActive}
         onSelectBreak={handleOpenBreakSearch}
         onEditStatusNote={handleOpenNoteEditor}
         currentBreakName={currentBreakName}
-        storageUsed={storageUsed}
-        storageLimit={storageLimit}
         adMonthlyCredits={(user as any)?.adPartner?.monthlyCredits ?? 0}
         adPackCredits={(user as any)?.adPartner?.packCredits ?? 0}
         adPackCreditsUsed={(user as any)?.adPartner?.packCreditsUsed ?? 0}
@@ -1172,6 +1169,28 @@ export default function ProfileScreen() {
       <ActionSheet
         visible={menuVisible}
         sections={menuSections}
+        topNode={user?.user_type !== 'advertiser' ? (
+          <Pressable
+            onPress={() => {
+              setMenuVisible(false);
+              setTimeout(() => router.push('/account'), 250);
+            }}
+            style={[s.menuStorageWrap, {
+              backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
+              borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+            }]}
+          >
+            <Text style={[s.menuStorageLabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+              {storageUsed < 1 ? `${(storageUsed * 1024).toFixed(0)} MB` : `${storageUsed.toFixed(1)} GB`} of {storageLimit < 1 ? `${(storageLimit * 1024).toFixed(0)} MB` : `${storageLimit.toFixed(1)} GB`}
+            </Text>
+            <View style={[s.menuStorageBar, { backgroundColor: isDark ? 'rgba(255,255,255,0.2)' : '#cbd5e1' }]}>
+              <View style={[s.menuStorageBarFill, {
+                width: `${storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0}%`,
+                backgroundColor: (storageLimit > 0 && (storageUsed / storageLimit) * 100 > 90) ? '#f59e0b' : '#0ea5e9',
+              }]} />
+            </View>
+          </Pressable>
+        ) : undefined}
         onClose={() => setMenuVisible(false)}
       />
 
@@ -1277,6 +1296,10 @@ export default function ProfileScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
+  menuStorageWrap: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 12 },
+  menuStorageLabel: { fontSize: 13, fontWeight: '500', marginBottom: 8 },
+  menuStorageBar: { height: 4, borderRadius: 2 },
+  menuStorageBarFill: { height: 4, borderRadius: 2 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 10,

@@ -64,11 +64,13 @@ interface ActionSheetProps {
   sections?: ActionSheetSection[];
   title?: string;
   header?: ActionSheetHeader;
+  /** Custom node rendered above all sections (e.g. a storage bar). */
+  topNode?: ReactNode;
 }
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export default function ActionSheet({ visible, options, sections, title, header, onClose }: ActionSheetProps) {
+export default function ActionSheet({ visible, options, sections, title, header, topNode, onClose }: ActionSheetProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
@@ -245,6 +247,9 @@ export default function ActionSheet({ visible, options, sections, title, header,
               {title}
             </Text>
           ) : null}
+
+          {/* Custom top node (e.g. storage bar) — sits above all sections. */}
+          {topNode ? <View style={styles.topNode}>{topNode}</View> : null}
 
           {/* Sections */}
           {resolvedSections.map((section, sIdx) => (
@@ -426,6 +431,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingHorizontal: 16,
     letterSpacing: -0.1,
+  },
+  topNode: {
+    marginHorizontal: 12,
+    marginBottom: 8,
   },
   card: {
     marginHorizontal: 12,

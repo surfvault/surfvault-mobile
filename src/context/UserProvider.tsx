@@ -22,6 +22,9 @@ interface User {
   instagram?: string;
   youtube?: string;
   website?: string;
+  user_type?: string;
+  payment_channels?: Array<{ type: string; handle: string; label?: string }>;
+  accepts_donations?: boolean;
   favorites?: Array<{ id: string; name: string }>;
   my_spots?: Array<{ id: string; name: string }>;
   following_count?: number;
