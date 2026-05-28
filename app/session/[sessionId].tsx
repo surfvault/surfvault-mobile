@@ -1216,11 +1216,17 @@ export default function SessionDetailScreen() {
   // back to an ocean color.
   const heroImageUri = useMemo(() => {
     if (isLocked) return null;
-    const heroPhoto =
-      (thumbnailPhotoId && sessionMedia.find((m: any) => m.id === thumbnailPhotoId)) ||
-      sessionMedia[0];
-    return heroPhoto?.url ?? heroPhoto?.thumbnail ?? null;
-  }, [isLocked, thumbnailPhotoId, sessionMedia]);
+    if (thumbnailPhotoId) {
+      // Prefer the loaded photo so a freshly-picked thumbnail updates instantly,
+      // else use the server-provided cover URL (the selected thumbnail may live in
+      // a later, not-yet-fetched batch).
+      const found = sessionMedia.find((m: any) => m.id === thumbnailPhotoId);
+      if (found) return found.url ?? found.thumbnail ?? null;
+      if (session?.thumbnail_url) return session.thumbnail_url;
+    }
+    const first = sessionMedia[0];
+    return first?.url ?? first?.thumbnail ?? null;
+  }, [isLocked, thumbnailPhotoId, sessionMedia, session?.thumbnail_url]);
 
   const goToPhotographer = useCallback(() => {
     if (sessionHandle) trackedPush(`/user/${sessionHandle}`);

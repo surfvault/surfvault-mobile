@@ -378,19 +378,23 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
-        {/* Vault */}
-        <SectionTitle c={c}>Vault</SectionTitle>
-        <Card c={c}>
-          <ToggleRow
-            c={c}
-            isDark={isDark}
-            first
-            label="Auto-save approved photos"
-            description="When a photographer grants your access request, save those photos to your vault automatically"
-            value={prefs.autoSaveApprovedToVault}
-            onValueChange={(v) => patch({ autoSaveApprovedToVault: v })}
-          />
-        </Card>
+        {/* Vault — only applies to surfers (the access-request → auto-save flow) */}
+        {user?.user_type === 'surfer' && (
+          <>
+            <SectionTitle c={c}>Vault</SectionTitle>
+            <Card c={c}>
+              <ToggleRow
+                c={c}
+                isDark={isDark}
+                first
+                label="Auto-save approved photos"
+                description="When a photographer grants your access request, save those photos to your vault automatically"
+                value={prefs.autoSaveApprovedToVault}
+                onValueChange={(v) => patch({ autoSaveApprovedToVault: v })}
+              />
+            </Card>
+          </>
+        )}
 
         {/* Appearance */}
         <SectionTitle c={c}>Appearance</SectionTitle>
