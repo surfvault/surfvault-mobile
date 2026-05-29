@@ -43,11 +43,8 @@ SHELL := /bin/bash
 PROJECT_ID  := f0f75cbd-8e64-43a6-b251-438dcd684772
 NODE_VERSION := 22
 
-update-prod:
+update:
 	@$(MAKE) --no-print-directory _ota ENVFILE=.env.production BRANCH=production APP_ENV=production MSG="$(MSG)"
-
-update-dev:
-	@$(MAKE) --no-print-directory _ota ENVFILE=.env.development.local BRANCH=development APP_ENV=development MSG="$(MSG)"
 
 ios:
 	@$(MAKE) --no-print-directory _run PLATFORM=ios RUNFLAGS="--device"
