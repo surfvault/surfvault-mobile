@@ -36,7 +36,10 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
     const channel = pusher.subscribe(`user-${userId}`);
 
     channel.bind('notification', () => {
-      dispatch(notificationApi.util.invalidateTags([ApiTag.Notification]));
+      // AdPartners keeps any admin ad-moderation surface (e.g. the per-ad
+      // review screen) live when a new campaign submission arrives. All
+      // endpoints share rootApi, so one invalidate covers both tags.
+      dispatch(notificationApi.util.invalidateTags([ApiTag.Notification, ApiTag.AdPartners]));
     });
 
     channel.bind('message', () => {
