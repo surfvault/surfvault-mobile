@@ -41,6 +41,7 @@ const styles = StyleSheet.create({
   },
   side: {
     minWidth: 60,
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
   },

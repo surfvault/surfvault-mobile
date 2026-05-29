@@ -90,7 +90,7 @@ export default function UserAvatar({
         <InitialPlaceholder initial={initial} size={size} />
       )}
       {(userType === 'surfer' || userType === 'photographer' || userType === 'shaper') && (() => {
-        const badgeSize = Math.max(16, size * 0.4);
+        const badgeSize = Math.max(15, size * 0.36);
         const cutoutSize = badgeSize + 0.5;
         // Position so the cutout overlaps the avatar edge by ~40% of its
         // diameter — enough that the surrounding-color ring eats into the
