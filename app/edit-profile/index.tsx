@@ -31,8 +31,15 @@ import {
   useDoesHandleExistQuery,
   useGetPopularTagsQuery,
   useUpdateMyAdPartnerMutation,
+  useGetSelfQuery,
 } from '../../src/store';
 import UserAvatar from '../../src/components/UserAvatar';
+import {
+  MAX_PAYMENT_CHANNELS,
+  PAYMENT_CHANNEL_META,
+  PAYMENT_CHANNEL_TYPES,
+  type PaymentChannel,
+} from '../../src/helpers/paymentChannels';
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -41,6 +48,11 @@ export default function EditProfileScreen() {
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
   const { user } = useUser();
+  // Pull a fresh self record when the editor opens. The context `user` can be a
+  // stale getSelf cache (e.g. edits made on web don't invalidate this client),
+  // which would seed the form with out-of-date payment channels / fields. This
+  // refetch updates the shared getSelf cache → the init effect reseeds.
+  useGetSelfQuery(undefined, { refetchOnMountOrArgChange: true });
 
   const [updateMeta, { isLoading: saving }] = useUpdateUserMetaDataMutation();
   const [updateHandle] = useUpdateUserHandleMutation();
@@ -56,6 +68,10 @@ export default function EditProfileScreen() {
   const [isPrivate, setIsPrivate] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
+  // Payment channels (photographer/shaper only). Off-platform payment handles
+  // shown on the profile; SurfVault processes no money.
+  const [paymentChannels, setPaymentChannels] = useState<PaymentChannel[]>([]);
+  const [acceptsDonations, setAcceptsDonations] = useState(false);
   const [profilePicUri, setProfilePicUri] = useState<string | null>(null);
   const [profilePicFile, setProfilePicFile] = useState<any>(null);
 
@@ -112,6 +128,8 @@ export default function EditProfileScreen() {
       setWebsite((user.website as string) ?? '');
       setIsPrivate(user.access === 'private');
       setTags((user.tags as string[]) ?? []);
+      setPaymentChannels(Array.isArray((user as any)?.payment_channels) ? (user as any).payment_channels : []);
+      setAcceptsDonations(Boolean((user as any)?.accepts_donations));
       setProfilePicUri(user.picture ?? null);
 
       const ap = (user as any)?.adPartner;
@@ -181,6 +199,25 @@ export default function EditProfileScreen() {
     const currentTags = (user.tags as string[]) ?? [];
     if (JSON.stringify(tags.sort()) !== JSON.stringify(currentTags.sort())) {
       metaData.tags = tags;
+    }
+
+    // Payment channels — only diffed for eligible types (the section is hidden
+    // otherwise, and the server 403s payment_channels for other user types).
+    if (isPhotographer || isShaper) {
+      // Drop empty-handle rows before comparing/sending; the server also drops
+      // them, so this keeps the diff from looking changed on a no-op.
+      const cleanedChannels = paymentChannels
+        .map((c) => ({ ...c, handle: (c.handle ?? '').trim() }))
+        .filter((c) => c.handle.length > 0);
+      const currentChannels = Array.isArray((user as any)?.payment_channels)
+        ? (user as any).payment_channels
+        : [];
+      if (JSON.stringify(cleanedChannels) !== JSON.stringify(currentChannels)) {
+        metaData.payment_channels = cleanedChannels;
+      }
+      if (acceptsDonations !== Boolean((user as any)?.accepts_donations)) {
+        metaData.accepts_donations = acceptsDonations;
+      }
     }
 
     // Handle change
@@ -265,7 +302,7 @@ export default function EditProfileScreen() {
     }
 
     smartBack();
-  }, [user, name, bio, instagram, youtube, website, isPrivate, tags, handle, handleChanged, isHandleValid, handleExists, profilePicFile, isAdvertiser, companyName, contactName, phoneNumber, lat, lon, radiusKm, updateMeta, updateHandle, updateMyAdPartner, smartBack]);
+  }, [user, name, bio, instagram, youtube, website, isPrivate, tags, paymentChannels, acceptsDonations, isPhotographer, isShaper, handle, handleChanged, isHandleValid, handleExists, profilePicFile, isAdvertiser, companyName, contactName, phoneNumber, lat, lon, radiusKm, updateMeta, updateHandle, updateMyAdPartner, smartBack]);
 
   const inputStyle = (isDark: boolean) => [
     s.input,
@@ -319,6 +356,50 @@ export default function EditProfileScreen() {
                 <Text style={{ color: '#0ea5e9', fontSize: 14, fontWeight: '600', marginTop: 8 }}>Change Photo</Text>
               </Pressable>
             </View>
+
+            {/* Profile visibility — Public/Private segment. Only surfers/photographers
+                can toggle; shapers are always public, advertisers hidden. */}
+            {canEditAccess && (
+              <View style={s.field}>
+                <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>Profile visibility</Text>
+                <View style={[s.segment, {
+                  backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f1f5f9',
+                  borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+                }]}>
+                  {([
+                    { val: false, label: 'Public', icon: 'earth' as const },
+                    { val: true, label: 'Private', icon: 'lock-closed' as const },
+                  ]).map((opt) => {
+                    const active = isPrivate === opt.val;
+                    return (
+                      <Pressable
+                        key={String(opt.val)}
+                        onPress={() => setIsPrivate(opt.val)}
+                        style={[s.segmentItem, active && { backgroundColor: '#0ea5e9' }]}
+                      >
+                        <Ionicons name={opt.icon} size={14} color={active ? '#fff' : (isDark ? '#9ca3af' : '#6b7280')} />
+                        <Text style={[s.segmentText, { color: active ? '#fff' : (isDark ? '#9ca3af' : '#6b7280') }]}>
+                          {opt.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af', marginTop: 6 }}>
+                  {isPrivate ? 'Only approved users can view your sessions.' : 'Anyone can view your sessions.'}
+                </Text>
+                {isPrivate !== (user?.access === 'private') && (
+                  <View style={[s.warningBox, { backgroundColor: isDark ? 'rgba(245,158,11,0.15)' : '#fffbeb', borderColor: '#f59e0b' }]}>
+                    <Ionicons name="warning" size={18} color="#f59e0b" />
+                    <Text style={{ fontSize: 13, fontWeight: '600', lineHeight: 18, color: isDark ? '#fcd34d' : '#92400e', flex: 1, marginLeft: 8 }}>
+                      {isPrivate
+                        ? 'Going private hides your sessions from Discover and surf break feeds. Only approved users will see them.'
+                        : 'Going public surfaces your sessions on Discover and surf break feeds for anyone to see.'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            )}
 
             {/* Handle */}
             <View style={s.field}>
@@ -566,30 +647,122 @@ export default function EditProfileScreen() {
               </View>
             </View>
 
-            {/* Privacy — only surfers/photographers can toggle. Shapers always public; other types (e.g. advertisers) hidden. */}
-            {canEditAccess && (
+            {/* Payments & tips — photographer/shaper only. Off-platform payment
+                handles shown on the profile; SurfVault processes no money. */}
+            {(isPhotographer || isShaper) && (
               <View style={s.field}>
-                <View style={s.switchRow}>
+                <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151' }]}>Payments & tips</Text>
+                <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af', marginTop: -2, marginBottom: 8 }}>
+                  Surfers see these on your profile and pay you directly. SurfVault doesn&apos;t process payments or take a cut.
+                </Text>
+
+                <View
+                  style={{
+                    borderWidth: 1,
+                    borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
+                    borderRadius: 12,
+                    backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : '#fafafa',
+                    padding: 12,
+                  }}
+                >
+                {paymentChannels.map((channel, idx) => {
+                  const updateChannel = (patch: Partial<PaymentChannel>) =>
+                    setPaymentChannels((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+                  const removeChannel = () =>
+                    setPaymentChannels((prev) => prev.filter((_, i) => i !== idx));
+                  const meta = PAYMENT_CHANNEL_META[channel.type] ?? PAYMENT_CHANNEL_META.other;
+
+                  return (
+                    <View
+                      key={idx}
+                      style={{
+                        borderWidth: 1,
+                        borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e5e7eb',
+                        borderRadius: 10,
+                        padding: 10,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                        {PAYMENT_CHANNEL_TYPES.map((t) => {
+                          const selected = channel.type === t;
+                          return (
+                            <Pressable
+                              key={t}
+                              onPress={() => updateChannel({ type: t })}
+                              style={{
+                                paddingHorizontal: 10,
+                                paddingVertical: 5,
+                                borderRadius: 999,
+                                backgroundColor: selected ? '#0ea5e9' : (isDark ? '#1f2937' : '#f3f4f6'),
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: selected ? '#fff' : (isDark ? '#d1d5db' : '#374151') }}>
+                                {PAYMENT_CHANNEL_META[t].label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                      <View style={[s.socialRow, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                        <Ionicons name={meta.icon as any} size={18} color={meta.color} />
+                        <TextInput
+                          value={channel.handle}
+                          onChangeText={(handle) => updateChannel({ handle })}
+                          placeholder={meta.placeholder}
+                          placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          style={[s.socialInput, { color: isDark ? '#fff' : '#111827' }]}
+                        />
+                        <Pressable onPress={removeChannel} hitSlop={8}>
+                          <Ionicons name="trash-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                        </Pressable>
+                      </View>
+                      {channel.type === 'other' && (
+                        <View style={[s.socialRow, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6', marginTop: 8 }]}>
+                          <Ionicons name="pricetag-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                          <TextInput
+                            value={channel.label ?? ''}
+                            onChangeText={(label) => updateChannel({ label })}
+                            placeholder="Label (e.g. Buy Me a Coffee)"
+                            placeholderTextColor={isDark ? '#4b5563' : '#9ca3af'}
+                            style={[s.socialInput, { color: isDark ? '#fff' : '#111827' }]}
+                          />
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+
+                {paymentChannels.length < MAX_PAYMENT_CHANNELS ? (
+                  <Pressable
+                    onPress={() => setPaymentChannels((prev) => [...prev, { type: 'venmo', handle: '' }])}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 }}
+                  >
+                    <Ionicons name="add-circle-outline" size={18} color="#0ea5e9" />
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#0ea5e9' }}>Add payment method</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                    Up to {MAX_PAYMENT_CHANNELS} payment methods.
+                  </Text>
+                )}
+
+                <View style={[s.switchRow, { marginTop: 10 }]}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151', marginBottom: 0 }]}>Private Account</Text>
+                    <Text style={[s.label, { color: isDark ? '#d1d5db' : '#374151', marginBottom: 0 }]}>Accept donations</Text>
                     <Text style={{ fontSize: 12, color: isDark ? '#6b7280' : '#9ca3af', marginTop: 2 }}>
-                      Only approved users can view your sessions
+                      Reframes your payment block as “Buy Me a Coffee” for surfers who want to tip.
                     </Text>
                   </View>
                   <Switch
-                    value={isPrivate}
-                    onValueChange={setIsPrivate}
+                    value={acceptsDonations}
+                    onValueChange={setAcceptsDonations}
                     trackColor={{ false: isDark ? '#374151' : '#d1d5db', true: '#0ea5e9' }}
                   />
                 </View>
-                {isPrivate !== (user?.access === 'private') && (
-                  <View style={[s.warningBox, { backgroundColor: isDark ? 'rgba(245,158,11,0.1)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.2)' : '#fde68a' }]}>
-                    <Ionicons name="warning-outline" size={16} color="#f59e0b" />
-                    <Text style={{ fontSize: 12, color: '#92400e', flex: 1, marginLeft: 6 }}>
-                      Changing access triggers a migration of your photos. This can take several minutes.
-                    </Text>
-                  </View>
-                )}
+                </View>
               </View>
             )}
 
@@ -706,6 +879,9 @@ const s = StyleSheet.create({
     borderRadius: 10, borderWidth: 1, paddingVertical: 12, paddingHorizontal: 12,
   },
   switchRow: { flexDirection: 'row', alignItems: 'center' },
+  segment: { flexDirection: 'row', borderRadius: 10, borderWidth: 1, padding: 3, gap: 3 },
+  segmentItem: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 9, borderRadius: 8 },
+  segmentText: { fontSize: 14, fontWeight: '600' },
   warningBox: {
     flexDirection: 'row', alignItems: 'flex-start',
     borderRadius: 10, borderWidth: 1, paddingHorizontal: 10, paddingVertical: 8,

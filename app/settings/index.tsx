@@ -426,6 +426,12 @@ export default function SettingsScreen() {
           </>
         )}
 
+        {/* Privacy & safety */}
+        <SectionTitle c={c}>Privacy &amp; safety</SectionTitle>
+        <Card c={c}>
+          <LinkRow c={c} first label="Blocked Users" icon="shield-outline" onPress={() => trackedPush('/blocked-users')} />
+        </Card>
+
         {/* Appearance */}
         <SectionTitle c={c}>Appearance</SectionTitle>
         <Card c={c}>

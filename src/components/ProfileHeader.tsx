@@ -1,9 +1,7 @@
-import { View, Text, Pressable, StyleSheet, Linking, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import { useGetShaperBoardsQuery, useGetAdvertiserAdsQuery, useGetMyCampaignsQuery } from '../store';
-import { TIER_MONTHLY_GRANT, adPlansUrl, type AdTier } from '../helpers/adTiers';
 
 const isNoteActive = (setAt?: string): boolean => {
   if (!setAt) return false;
@@ -14,7 +12,6 @@ interface ProfileHeaderProps {
   profile: any;
   isDark: boolean;
   isSelf?: boolean;
-  showStorage?: boolean;
   showActiveToggle?: boolean;
   // Self actions
   onEditProfile?: () => void;
@@ -22,13 +19,6 @@ interface ProfileHeaderProps {
   onSelectBreak?: () => void;
   onEditStatusNote?: () => void;
   currentBreakName?: string;
-  storageUsed?: number;
-  storageLimit?: number;
-  // Advertiser credit wallet (self-view; mirrors storage for other types).
-  adMonthlyCredits?: number; // remaining in the current monthly grant
-  adPackCredits?: number; // persistent "extra" credits purchased à la carte
-  adPackCreditsUsed?: number; // pack credits debited this cycle (resets each cycle)
-  adTier?: string;
   // Other user actions
   isFollowing?: boolean;
   isFollowLoading?: boolean;
@@ -56,12 +46,6 @@ export default function ProfileHeader({
   onSelectBreak,
   onEditStatusNote,
   currentBreakName,
-  storageUsed = 0,
-  storageLimit = 15,
-  adMonthlyCredits = 0,
-  adPackCredits = 0,
-  adPackCreditsUsed = 0,
-  adTier = 'free',
   isFollowing,
   isFollowLoading = false,
   isMessageLoading = false,
@@ -72,10 +56,8 @@ export default function ProfileHeader({
   onViewStats,
   onViewSpots,
   spotsFilterActive = false,
-  showStorage = false,
   showActiveToggle = false,
 }: ProfileHeaderProps) {
-  const router = useRouter();
   const hasActiveNote = !!profile?.status_note && isNoteActive(profile?.status_note_set_at);
   const userType = profile?.user_type ?? profile?.type;
   const isShaper = userType === 'shaper';
@@ -102,12 +84,6 @@ export default function ProfileHeader({
   const adsCount = isSelf
     ? (myCampaignsData?.results?.ads?.length ?? 0)
     : (advertiserAdsData?.results?.ads?.length ?? 0);
-  const storagePct = storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0;
-
-  const formatStorage = (gb: number): string => {
-    if (gb < 1) return `${(gb * 1024).toFixed(0)} MB`;
-    return `${gb.toFixed(1)} GB`;
-  };
 
   return (
     <View style={s.wrap}>
@@ -135,10 +111,11 @@ export default function ProfileHeader({
             size={80}
             active={false}
             verified={profile?.verified}
+            userType={userType}
           />
         </Pressable>
         <View style={s.rightColumn}>
-          {/* Name + social */}
+          {/* Name (social links live in the profile "..." sheet now) */}
           <View style={s.nameRowOuter}>
             <View style={s.nameAndDot}>
               <Text style={[s.nameText, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
@@ -165,25 +142,6 @@ export default function ProfileHeader({
                 </View>
               )}
             </View>
-            {(profile?.instagram || profile?.youtube || profile?.website) && (
-              <View style={s.socialIcons}>
-                {profile?.instagram && (
-                  <Pressable onPress={() => Linking.openURL(`https://instagram.com/${profile.instagram.replace(/^@/, '')}`)} hitSlop={6}>
-                    <Ionicons name="logo-instagram" size={16} color="#ec4899" />
-                  </Pressable>
-                )}
-                {profile?.youtube && (
-                  <Pressable onPress={() => Linking.openURL(`https://youtube.com/@${profile.youtube}`)} hitSlop={6}>
-                    <Ionicons name="logo-youtube" size={16} color="#ef4444" />
-                  </Pressable>
-                )}
-                {profile?.website && (
-                  <Pressable onPress={() => Linking.openURL(profile.website?.startsWith('http') ? profile.website : `https://${profile.website}`)} hitSlop={6}>
-                    <Ionicons name="link-outline" size={16} color="#3b82f6" />
-                  </Pressable>
-                )}
-              </View>
-            )}
           </View>
 
           {/* Stats */}
@@ -392,70 +350,6 @@ export default function ProfileHeader({
         </>
       )}
 
-      {/* Storage (profile tab only) — tappable; opens /account for plan + usage
-          breakdown (mirrors the advertiser credit bar behavior right below). */}
-      {showStorage && (
-        <Pressable
-          onPress={() => router.push('/account')}
-          style={[s.storageWrap, {
-            backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
-            borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-          }]}
-        >
-          <Text style={[s.storageLabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-            {formatStorage(storageUsed)} of {formatStorage(storageLimit)}
-          </Text>
-          <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb' }]}>
-            <View style={[s.storageBarFill, { width: `${storagePct}%`, backgroundColor: storagePct > 90 ? '#f59e0b' : '#0ea5e9' }]} />
-          </View>
-        </Pressable>
-      )}
-
-      {/* Ad credits (advertiser self-view) — simple X-of-Y used + bar, matching
-          the consumer "storage used" pattern. Tap → /account for the full
-          breakdown (monthly cycle, extra credits, runway forecast). Pack
-          credits don't show here; they live on the breakdown page. */}
-      {isSelf && isAdvertiser && (() => {
-        const grant = TIER_MONTHLY_GRANT[adTier as AdTier] ?? 0;
-        const monthlyUsed = Math.max(0, grant - adMonthlyCredits);
-        // Slot = original capacity this cycle. Pack-used is added back so "Y"
-        // is stable across the cycle (doesn't shrink as pack gets spent).
-        const totalSlot = grant + adPackCredits + adPackCreditsUsed;
-        const totalUsed = monthlyUsed + adPackCreditsUsed;
-        const total = adMonthlyCredits + adPackCredits;
-        const low = grant > 0 && total <= grant * 0.1;
-        return (
-          <Pressable
-            onPress={() => router.push('/account')}
-            style={[s.storageWrap, {
-              backgroundColor: isDark ? 'rgba(255,255,255,0.05)' : '#f8fafc',
-              borderColor: isDark ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-            }]}
-          >
-            <Text style={[s.storageLabel, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-              <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{totalUsed}</Text>
-              {' '}of{' '}
-              <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{totalSlot.toLocaleString()}</Text>
-              {' '}credits used
-            </Text>
-            {/* USED portion split by source — sky (monthly burn), amber (extra
-                burn). Everything unused stays slate (the bar background). */}
-            <View style={[s.storageBar, { backgroundColor: isDark ? '#1f2937' : '#e5e7eb', flexDirection: 'row', overflow: 'hidden' }]}>
-              <View style={{
-                height: '100%',
-                width: `${totalSlot > 0 ? (monthlyUsed / totalSlot) * 100 : 0}%`,
-                backgroundColor: low ? '#f59e0b' : '#0ea5e9',
-              }} />
-              <View style={{
-                height: '100%',
-                width: `${totalSlot > 0 ? (adPackCreditsUsed / totalSlot) * 100 : 0}%`,
-                backgroundColor: '#fbbf24',
-              }} />
-            </View>
-          </Pressable>
-        );
-      })()}
-
     </View>
   );
 }
@@ -495,7 +389,6 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  socialIcons: { flexDirection: 'row', alignItems: 'center', gap: 14 },
 
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10, paddingRight: 16 },
   statItem: { alignItems: 'flex-start' },
@@ -511,7 +404,7 @@ const s = StyleSheet.create({
 
   currentBreakRow: {
     flexDirection: 'row', alignItems: 'center', borderRadius: 8,
-    paddingHorizontal: 10, paddingVertical: 6, marginBottom: 8, alignSelf: 'flex-start',
+    paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8, alignSelf: 'flex-start',
   },
   actionRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   breakBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12 },
@@ -523,8 +416,4 @@ const s = StyleSheet.create({
   actionBtnText: { fontSize: 13, fontWeight: '600' },
   iconBtn: { width: 38, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
 
-  storageWrap: { borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 4 },
-  storageLabel: { fontSize: 12 },
-  storageBar: { height: 4, borderRadius: 2, marginTop: 6 },
-  storageBarFill: { height: 4, borderRadius: 2 },
 });

@@ -12,11 +12,12 @@ import {
   Dimensions,
   RefreshControl,
   Alert,
+  Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
@@ -34,7 +35,7 @@ import {
   useGetUserBlocksQuery,
 } from '../../src/store';
 import ReportUserSheet from '../../src/components/ReportUserSheet';
-import ActionSheet from '../../src/components/ActionSheet';
+import ActionSheet, { type ActionSheetOption } from '../../src/components/ActionSheet';
 import SessionCard from '../../src/components/SessionCard';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import SponsoredCard from '../../src/components/SponsoredCard';
@@ -44,7 +45,7 @@ import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
-import UserTypeBadge from '../../src/components/UserTypeBadge';
+import PaymentSheet, { hasPaymentChannels, acceptsDonations } from '../../src/components/PaymentSheet';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 
 export default function UserProfileScreen() {
@@ -73,6 +74,8 @@ export default function UserProfileScreen() {
   // conversations server-side.
   const [reportVisible, setReportVisible] = useState(false);
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
+  // Off-platform pay/tip sheet, opened from the nav-bar pay icon (read-only view).
+  const [payOpen, setPayOpen] = useState(false);
   const [blockUser, { isLoading: isBlocking }] = useBlockUserMutation();
   const [unblockUser, { isLoading: isUnblocking }] = useUnblockUserMutation();
   const { data: blocksData } = useGetUserBlocksQuery(undefined, { skip: isSelf });
@@ -349,26 +352,55 @@ export default function UserProfileScreen() {
     />
   );
 
+  // Social links — surfaced as rows in the more-options sheet (no longer
+  // shown top-right in the header). Brand-colored glyphs; each opens the URL.
+  const socialOptions = [
+    profile?.instagram && {
+      label: 'Instagram',
+      icon: 'logo-instagram' as const,
+      iconColor: '#ec4899',
+      onPress: () => Linking.openURL(`https://instagram.com/${String(profile.instagram).replace(/^@/, '')}`),
+    },
+    profile?.youtube && {
+      label: 'YouTube',
+      icon: 'logo-youtube' as const,
+      iconColor: '#ef4444',
+      onPress: () => Linking.openURL(`https://youtube.com/@${profile.youtube}`),
+    },
+    profile?.website && {
+      label: 'Website',
+      icon: 'link-outline' as const,
+      iconColor: '#3b82f6',
+      onPress: () =>
+        Linking.openURL(String(profile.website).startsWith('http') ? profile.website : `https://${profile.website}`),
+    },
+  ].filter(Boolean) as ActionSheetOption[];
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <ScreenHeader
         left={
-          <Pressable onPress={smartBack} style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Pressable onPress={smartBack} style={{ flexDirection: 'row', alignItems: 'center', flexShrink: 1 }}>
             <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
-            <Text style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#fff' : '#111827' }}>
+            <Text
+              numberOfLines={1}
+              style={{ fontSize: 20, fontWeight: '700', color: isDark ? '#fff' : '#111827', flexShrink: 1 }}
+            >
               {profile?.handle ?? handle}
             </Text>
-            {(profile?.user_type === 'surfer' || profile?.user_type === 'photographer' || profile?.user_type === 'shaper') && (
-              <View style={{ marginLeft: 6 }}>
-                <UserTypeBadge
-                  userType={profile.user_type}
-                  isVerified={!!profile?.verified}
-                  size={28}
-                />
-              </View>
-            )}
           </Pressable>
+        }
+        right={
+          !isSelf && hasPaymentChannels(profile) ? (
+            <Pressable onPress={() => setPayOpen(true)} hitSlop={10} style={{ padding: 4 }}>
+              {acceptsDonations(profile) ? (
+                <FontAwesome5 name="mug-hot" size={22} color="#f59e0b" />
+              ) : (
+                <Ionicons name="cash-outline" size={24} color={isDark ? '#fff' : '#111827'} />
+              )}
+            </Pressable>
+          ) : undefined
         }
       />
       <SafeAreaView style={[styles.flex, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
@@ -573,6 +605,13 @@ export default function UserProfileScreen() {
         onClose={() => setReportVisible(false)}
       />
 
+      <PaymentSheet
+        profile={profile}
+        isDark={isDark}
+        visible={payOpen}
+        onClose={() => setPayOpen(false)}
+      />
+
       <ActionSheet
         visible={actionSheetVisible}
         onClose={() => setActionSheetVisible(false)}
@@ -589,6 +628,7 @@ export default function UserProfileScreen() {
               onPress: handleShare,
             }],
           },
+          ...(socialOptions.length ? [{ options: socialOptions }] : []),
           ...(isBlocked
             ? [{
                 options: [{

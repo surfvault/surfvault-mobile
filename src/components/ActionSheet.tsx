@@ -9,6 +9,8 @@ import {
   Animated,
   Dimensions,
   PanResponder,
+  type StyleProp,
+  type TextStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -23,6 +25,8 @@ export interface ActionSheetOption {
   onPress: () => void;
   icon?: IoniconsName | MaterialCommunityIconsName;
   iconLibrary?: 'ionicons' | 'material-community';
+  /** Override the icon glyph color (e.g. brand colors for payment channels). */
+  iconColor?: string;
   /**
    * If set, renders the image (typically a profile picture) in place of the
    * icon slot. Falls back to `icon` if the image fails to load.
@@ -55,6 +59,13 @@ export interface ActionSheetHeader {
    * `imageUri` would and takes precedence when both are set.
    */
   imageNode?: ReactNode;
+  /**
+   * Optional full-width node rendered below the avatar/name row, still inside
+   * the header section (e.g. a storage / credits progress bar).
+   */
+  accessory?: ReactNode;
+  /** When set, the entire header section becomes tappable. */
+  onPress?: () => void;
 }
 
 interface ActionSheetProps {
@@ -63,12 +74,18 @@ interface ActionSheetProps {
   options?: ActionSheetOption[];
   sections?: ActionSheetSection[];
   title?: string;
+  /** Optional style override for the title text (e.g. a larger, more spaced title). */
+  titleStyle?: StyleProp<TextStyle>;
   header?: ActionSheetHeader;
+  /** Custom node rendered above all sections (e.g. a storage bar). */
+  topNode?: ReactNode;
+  /** Custom node rendered below all sections (e.g. a disclaimer footnote). */
+  footerNode?: ReactNode;
 }
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export default function ActionSheet({ visible, options, sections, title, header, onClose }: ActionSheetProps) {
+export default function ActionSheet({ visible, options, sections, title, titleStyle, header, topNode, footerNode, onClose }: ActionSheetProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
@@ -176,7 +193,7 @@ export default function ActionSheet({ visible, options, sections, title, header,
         <IconComponent
           name={opt.icon as any}
           size={20}
-          color={color}
+          color={opt.iconColor ?? color}
         />
         {opt.unread ? <View style={[styles.unreadDot, { borderColor: isDark ? '#2c2c2e' : '#fff' }]} /> : null}
       </View>
@@ -209,42 +226,53 @@ export default function ActionSheet({ visible, options, sections, title, header,
           </View>
 
           {/* Header — contextual info about what was selected */}
-          {header ? (
-            <View style={styles.headerSection}>
-              {header.imageNode ? (
-                <View style={styles.headerImageNode}>{header.imageNode}</View>
-              ) : header.imageUri ? (
-                <Image
-                  source={{ uri: header.imageUri }}
-                  style={styles.headerImage}
-                  contentFit="cover"
-                />
-              ) : null}
-              <View style={styles.headerText}>
-                <Text
-                  style={[styles.headerTitle, { color: isDark ? '#f5f5f7' : '#1d1d1f' }]}
-                  numberOfLines={1}
-                >
-                  {header.title}
-                </Text>
-                {header.subtitle ? (
-                  <Text
-                    style={[styles.headerSubtitle, { color: isDark ? '#98989f' : '#86868b' }]}
-                    numberOfLines={1}
-                  >
-                    {header.subtitle}
-                  </Text>
+          {header ? (() => {
+            const HeaderWrapper: any = header.onPress ? Pressable : View;
+            return (
+              <HeaderWrapper style={styles.headerSection} onPress={header.onPress}>
+                <View style={styles.headerRow}>
+                  {header.imageNode ? (
+                    <View style={styles.headerImageNode}>{header.imageNode}</View>
+                  ) : header.imageUri ? (
+                    <Image
+                      source={{ uri: header.imageUri }}
+                      style={styles.headerImage}
+                      contentFit="cover"
+                    />
+                  ) : null}
+                  <View style={styles.headerText}>
+                    <Text
+                      style={[styles.headerTitle, { color: isDark ? '#f5f5f7' : '#1d1d1f' }]}
+                      numberOfLines={1}
+                    >
+                      {header.title}
+                    </Text>
+                    {header.subtitle ? (
+                      <Text
+                        style={[styles.headerSubtitle, { color: isDark ? '#98989f' : '#86868b' }]}
+                        numberOfLines={1}
+                      >
+                        {header.subtitle}
+                      </Text>
+                    ) : null}
+                  </View>
+                </View>
+                {header.accessory ? (
+                  <View style={styles.headerAccessory}>{header.accessory}</View>
                 ) : null}
-              </View>
-            </View>
-          ) : null}
+              </HeaderWrapper>
+            );
+          })() : null}
 
           {/* Title */}
           {title ? (
-            <Text style={[styles.title, { color: isDark ? '#98989f' : '#86868b' }]}>
+            <Text style={[styles.title, { color: isDark ? '#98989f' : '#86868b' }, titleStyle]}>
               {title}
             </Text>
           ) : null}
+
+          {/* Custom top node (e.g. storage bar) — sits above all sections. */}
+          {topNode ? <View style={styles.topNode}>{topNode}</View> : null}
 
           {/* Sections */}
           {resolvedSections.map((section, sIdx) => (
@@ -355,6 +383,7 @@ export default function ActionSheet({ visible, options, sections, title, header,
               })}
             </View>
           ))}
+          {footerNode ? <View style={styles.footerNode}>{footerNode}</View> : null}
         </Animated.View>
       </View>
     </Modal>
@@ -383,17 +412,27 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 6,
   },
+  footerNode: {
+    marginHorizontal: 16,
+    marginTop: 4,
+  },
   handle: {
     width: 36,
     height: 5,
     borderRadius: 2.5,
   },
   headerSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
     paddingHorizontal: 16,
     paddingBottom: 12,
     paddingTop: 2,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerAccessory: {
+    marginTop: 12,
+    paddingBottom: 6,
   },
   headerImage: {
     width: 44,
@@ -426,6 +465,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingHorizontal: 16,
     letterSpacing: -0.1,
+  },
+  topNode: {
+    marginHorizontal: 12,
+    marginBottom: 8,
   },
   card: {
     marginHorizontal: 12,

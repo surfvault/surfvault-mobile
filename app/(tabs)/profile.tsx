@@ -51,6 +51,7 @@ import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 import { fetchAccountBadge, type AccountBadge } from '../../src/helpers/accountBadges';
+import { TIER_MONTHLY_GRANT, type AdTier } from '../../src/helpers/adTiers';
 
 const formatCount = (n: number): string => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(n >= 10000000 ? 0 : 1).replace(/\.0$/, '')}M`;
@@ -576,11 +577,6 @@ export default function ProfileScreen() {
           icon: 'heart-outline',
           onPress: () => trackedPush('/manage-favorites'),
         },
-        {
-          label: 'Blocked Users',
-          icon: 'shield-outline',
-          onPress: () => trackedPush('/blocked-users'),
-        },
       ],
     },
     {
@@ -589,11 +585,6 @@ export default function ProfileScreen() {
           label: 'Manage Accounts',
           icon: 'people-outline',
           onPress: () => trackedPush('/manage-accounts'),
-        },
-        {
-          label: 'Account',
-          icon: 'person-circle-outline',
-          onPress: () => trackedPush('/account'),
         },
         {
           label: 'Settings',
@@ -707,19 +698,12 @@ export default function ProfileScreen() {
         profile={profileWithCounts}
         isDark={isDark}
         isSelf
-        showStorage={user?.user_type !== 'advertiser'}
         showActiveToggle
         onEditProfile={() => trackedPush('/edit-profile')}
         onToggleActive={handleToggleActive}
         onSelectBreak={handleOpenBreakSearch}
         onEditStatusNote={handleOpenNoteEditor}
         currentBreakName={currentBreakName}
-        storageUsed={storageUsed}
-        storageLimit={storageLimit}
-        adMonthlyCredits={(user as any)?.adPartner?.monthlyCredits ?? 0}
-        adPackCredits={(user as any)?.adPartner?.packCredits ?? 0}
-        adPackCreditsUsed={(user as any)?.adPartner?.packCreditsUsed ?? 0}
-        adTier={(user as any)?.adPartner?.adTier ?? 'free'}
         onViewStats={(tab) => {
           if (user?.handle) trackedPush(`/follow-stats/${user.handle}?tab=${tab}` as any);
         }}
@@ -751,32 +735,18 @@ export default function ProfileScreen() {
           <Pressable
             onPress={() => setAccountSwitcherVisible(true)}
             hitSlop={6}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flexShrink: 1 }}
           >
-            <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
+            <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827', flexShrink: 1 }]} numberOfLines={1}>
               {user?.handle ?? ''}
             </Text>
-            {(user?.user_type === 'surfer' || user?.user_type === 'photographer' || user?.user_type === 'shaper') && (
-              <UserTypeBadge
-                userType={user.user_type}
-                isVerified={!!(user as any)?.verified}
-                size={28}
-              />
-            )}
             <Ionicons name="chevron-down" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
           </Pressable>
         ) : (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827' }]}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
+            <Text style={[s.headerHandle, { color: isDark ? '#fff' : '#111827', flexShrink: 1 }]} numberOfLines={1}>
               {user?.handle ?? ''}
             </Text>
-            {(user?.user_type === 'surfer' || user?.user_type === 'photographer' || user?.user_type === 'shaper') && (
-              <UserTypeBadge
-                userType={user.user_type}
-                isVerified={!!(user as any)?.verified}
-                size={28}
-              />
-            )}
           </View>
         )}
         <View style={s.headerRight}>
@@ -1172,6 +1142,79 @@ export default function ProfileScreen() {
       <ActionSheet
         visible={menuVisible}
         sections={menuSections}
+        header={{
+          title: user?.name ?? user?.handle ?? '',
+          subtitle: user?.handle ? `@${user.handle}` : undefined,
+          imageUri: user?.picture || undefined,
+          // Tapping anywhere in the identity header goes to the account page.
+          onPress: () => {
+            setMenuVisible(false);
+            setTimeout(() => router.push('/account'), 250);
+          },
+          accessory: (() => {
+            // Unified resource bar — full-width, lives in the sheet's identity
+            // header. Advertisers see ad-credit burn; everyone else sees storage.
+            const labelColor = isDark ? '#9ca3af' : '#6b7280';
+            const trackColor = isDark ? 'rgba(255,255,255,0.2)' : '#cbd5e1';
+
+            if (user?.user_type === 'advertiser') {
+              const adTier = (user as any)?.adPartner?.adTier ?? 'free';
+              const monthlyCredits = (user as any)?.adPartner?.monthlyCredits ?? 0;
+              const packCredits = (user as any)?.adPartner?.packCredits ?? 0;
+              const packCreditsUsed = (user as any)?.adPartner?.packCreditsUsed ?? 0;
+              const grant = TIER_MONTHLY_GRANT[adTier as AdTier] ?? 0;
+              const monthlyUsed = Math.max(0, grant - monthlyCredits);
+              // Slot = original capacity this cycle; pack-used added back so the
+              // "of Y" total stays stable as pack credits get spent.
+              const totalSlot = grant + packCredits + packCreditsUsed;
+              const totalUsed = monthlyUsed + packCreditsUsed;
+              const total = monthlyCredits + packCredits;
+              const low = grant > 0 && total <= grant * 0.1;
+              return (
+                <View>
+                  <View style={s.menuStorageLabelRow}>
+                    <Text style={[s.menuStorageLabel, { color: labelColor }]}>
+                      <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{totalUsed}</Text>
+                      {' '}of{' '}
+                      <Text style={{ fontWeight: '700', color: isDark ? '#e5e7eb' : '#111827' }}>{totalSlot.toLocaleString()}</Text>
+                      {' '}credits used
+                    </Text>
+                    <View style={s.menuStorageManageWrap}>
+                      <Text style={[s.menuStorageManage, { color: labelColor }]}>Manage</Text>
+                      <Ionicons name="chevron-forward" size={12} color={labelColor} />
+                    </View>
+                  </View>
+                  {/* Used portion split by source — sky (monthly burn) + amber
+                      (pack burn); the unused remainder stays the track color. */}
+                  <View style={[s.menuStorageBar, { backgroundColor: trackColor, flexDirection: 'row', overflow: 'hidden' }]}>
+                    <View style={{ height: '100%', width: `${totalSlot > 0 ? (monthlyUsed / totalSlot) * 100 : 0}%`, backgroundColor: low ? '#f59e0b' : '#0ea5e9' }} />
+                    <View style={{ height: '100%', width: `${totalSlot > 0 ? (packCreditsUsed / totalSlot) * 100 : 0}%`, backgroundColor: '#fbbf24' }} />
+                  </View>
+                </View>
+              );
+            }
+
+            return (
+              <View>
+                <View style={s.menuStorageLabelRow}>
+                  <Text style={[s.menuStorageLabel, { color: labelColor }]}>
+                    {storageUsed < 1 ? `${(storageUsed * 1024).toFixed(0)} MB` : `${storageUsed.toFixed(1)} GB`} of {storageLimit < 1 ? `${(storageLimit * 1024).toFixed(0)} MB` : `${storageLimit.toFixed(1)} GB`}
+                  </Text>
+                  <View style={s.menuStorageManageWrap}>
+                    <Text style={[s.menuStorageManage, { color: labelColor }]}>Manage</Text>
+                    <Ionicons name="chevron-forward" size={12} color={labelColor} />
+                  </View>
+                </View>
+                <View style={[s.menuStorageBar, { backgroundColor: trackColor }]}>
+                  <View style={[s.menuStorageBarFill, {
+                    width: `${storageLimit > 0 ? Math.min((storageUsed / storageLimit) * 100, 100) : 0}%`,
+                    backgroundColor: (storageLimit > 0 && (storageUsed / storageLimit) * 100 > 90) ? '#f59e0b' : '#0ea5e9',
+                  }]} />
+                </View>
+              </View>
+            );
+          })(),
+        }}
         onClose={() => setMenuVisible(false)}
       />
 
@@ -1277,12 +1320,18 @@ export default function ProfileScreen() {
 
 const s = StyleSheet.create({
   container: { flex: 1 },
+  menuStorageLabel: { fontSize: 13, fontWeight: '500' },
+  menuStorageLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  menuStorageManageWrap: { flexDirection: 'row', alignItems: 'center', gap: 1 },
+  menuStorageManage: { fontSize: 12, fontWeight: '600' },
+  menuStorageBar: { height: 4, borderRadius: 2 },
+  menuStorageBarFill: { height: 4, borderRadius: 2 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 10,
   },
   headerHandle: { fontSize: 20, fontWeight: '700' },
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 18 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 18, flexShrink: 0, marginLeft: 12 },
   notifBadge: {
     position: 'absolute', top: -4, right: -6,
     backgroundColor: '#ef4444', borderRadius: 8,
