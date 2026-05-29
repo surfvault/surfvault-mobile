@@ -9,6 +9,67 @@ export type FeedRow<T, A> =
  */
 export const AD_EVERY_N_ITEMS = 4;
 
+// Small seeded PRNG (mulberry32). A given seed always yields the same shuffle,
+// so the ad order stays stable across re-renders within one mount and only
+// changes when the caller passes a new seed (new mount / filter change).
+function mulberry32(seed: number): () => number {
+    let t = seed >>> 0;
+    return function () {
+        t += 0x6d2b79f5;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+/**
+ * Re-order ads for display so (a) no advertiser's creatives ever sit
+ * back-to-back and (b) the order is fresh each time `seed` changes. Groups by
+ * `ad_partner_id`, shuffles within each advertiser and across advertisers,
+ * then round-robins one ad per advertiser per pass.
+ *
+ * Mirrors shuffleAdsByPartner in surfvault-web/src/helpers/adFeedInterleave.js.
+ * Fixes a fresh batch of ads from one advertiser clustering at the top of the
+ * feed: the backend weighted-randomizes once per fetch and RTK Query caches
+ * that draw, so passing a per-mount/per-filter seed gives a fresh order each
+ * time plus a hard no-clustering guarantee.
+ */
+export function shuffleAdsByPartner<A extends { id: string; ad_partner_id?: string }>(
+    ads: A[] = [],
+    seed: number = Math.floor(Math.random() * 1e9)
+): A[] {
+    if (!Array.isArray(ads) || ads.length <= 1) return ads ? [...ads] : [];
+    const rand = mulberry32(seed);
+    const shuffle = <X>(arr: X[]): X[] => {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(rand() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    };
+    const byPartner = new Map<string, A[]>();
+    for (const ad of ads) {
+        if (!ad) continue;
+        const key = ad.ad_partner_id || ad.id;
+        if (!byPartner.has(key)) byPartner.set(key, []);
+        byPartner.get(key)!.push(ad);
+    }
+    const groups = shuffle(Array.from(byPartner.values()).map((g) => shuffle(g)));
+    const out: A[] = [];
+    let added = true;
+    for (let i = 0; added; i++) {
+        added = false;
+        for (const g of groups) {
+            if (i < g.length) {
+                out.push(g[i]);
+                added = true;
+            }
+        }
+    }
+    return out;
+}
+
 /**
  * @deprecated Phase B (2026-05-19) — each ad now carries its own media[]
  * carousel inside SponsoredCard, so partner-level grouping is no longer

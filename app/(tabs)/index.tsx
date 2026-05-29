@@ -49,6 +49,7 @@ import {
   // partner-level ad grouping in favor of per-ad media[] carousels.
   interleavePromoGroups,
   zipPromoGroups,
+  shuffleAdsByPartner,
   type FeedRow,
 } from '../../src/helpers/interleaveAds';
 import { useUserCoords } from '../../src/hooks/useUserCoords';
@@ -426,8 +427,15 @@ export default function HomeScreen() {
   // the card) so a prolific shaper can't dominate. Sessions still drive the
   // cadence (one promo per AD_EVERY_N_ITEMS items). Ads and shapers
   // alternate (ad-first) so neither side crowds the other out of the cadence.
+  // Re-seeded on each filter change (and per mount) so the ad order is freshly
+  // shuffled rather than serving RTK Query's one cached weighted-random draw.
+  const adShuffleSeed = useMemo(() => Math.floor(Math.random() * 1e9), [feedType]);
   const feedAds = useMemo(() => {
-    const ads = (adsData?.results?.ads || []).map((a: any) => ({ ...a, _kind: 'ad' as const }));
+    // Round-robin by advertiser + fresh per-filter shuffle so a fresh batch
+    // from one advertiser can't clump at the top of the feed.
+    const ads = shuffleAdsByPartner(adsData?.results?.ads || [], adShuffleSeed).map(
+      (a: any) => ({ ...a, _kind: 'ad' as const })
+    );
     const activeShapersData =
       feedType === 'following' ? followedShapersData : nearbyShapersData;
     const shapers = (activeShapersData?.results?.shapers || []).map((s: any) => ({
@@ -443,7 +451,7 @@ export default function HomeScreen() {
     // TEMP: shaper-first so the first promo slot in Discover is a shaper.
     // Revert to `zipPromoGroups(adGroups, shaperGroups)` to restore ad-first.
     return zipPromoGroups(shaperGroups, adGroups);
-  }, [adsData, nearbyShapersData, followedShapersData, feedType]);
+  }, [adsData, nearbyShapersData, followedShapersData, feedType, adShuffleSeed]);
 
   // Interleave alternating ad/shaper groups into the session feed at the
   // shared cadence — matches web so both platforms place promos identically.
