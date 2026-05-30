@@ -14,6 +14,7 @@ import {
   type ViewToken,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { useRecordAdImpressionMutation } from '../store';
 import { buildAdClickUrl, currentDevice } from '../helpers/adTracking';
@@ -49,6 +50,7 @@ interface Ad {
     type: 'photo' | 'video';
     s3_key: string;
     landscape_s3_key?: string | null;
+    poster_s3_key?: string | null;
     sort_order?: number;
   }>;
   thumbnail_ad_media_id?: string | null;
@@ -62,6 +64,80 @@ interface SponsoredCardProps {
   surfBreakId?: string;
   /** True when the card is currently visible in the parent feed. */
   isViewable?: boolean;
+}
+
+/**
+ * One in-feed video slide. Autoplays muted+looped when it's the active slide
+ * AND the card is on-screen (advertiser content — autoplay is wanted); pauses
+ * otherwise. While inactive it shows the poster still + a ▶ badge so paused
+ * slides read as video. A corner button toggles sound. Tapping click-throughs.
+ */
+function SponsoredVideoSlide({
+  uri,
+  poster,
+  width,
+  active,
+  muted,
+  onToggleMute,
+  onPress,
+  ctaLabel,
+}: {
+  uri: string;
+  poster?: string | null;
+  width?: number;
+  active: boolean;
+  muted: boolean;
+  onToggleMute: () => void;
+  onPress: () => void;
+  ctaLabel?: string;
+}) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+  });
+
+  useEffect(() => {
+    if (active) {
+      player.muted = muted;
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [active, muted, player]);
+
+  return (
+    <Pressable onPress={onPress} style={width ? { width } : undefined}>
+      <VideoView
+        player={player}
+        style={styles.thumb}
+        contentFit="cover"
+        nativeControls={false}
+      />
+      {!active && poster ? (
+        <Image
+          source={{ uri: poster }}
+          style={[styles.thumb, StyleSheet.absoluteFillObject]}
+          contentFit="cover"
+        />
+      ) : null}
+      {!active ? (
+        <View style={[StyleSheet.absoluteFill, styles.playBadgeWrap]} pointerEvents="none">
+          <View style={styles.playBadge}>
+            <Ionicons name="play" size={18} color="#fff" />
+          </View>
+        </View>
+      ) : (
+        <Pressable onPress={onToggleMute} hitSlop={8} style={styles.muteBtn}>
+          <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#fff" />
+        </Pressable>
+      )}
+      {ctaLabel ? (
+        <View style={styles.ctaPill} pointerEvents="none">
+          <Text style={styles.ctaPillText} numberOfLines={1}>{ctaLabel}</Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
 }
 
 /**
@@ -82,12 +158,17 @@ export default function SponsoredCard({
   const requireAuth = useRequireAuth();
   const [sheetVisible, setSheetVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
+  // In-feed video autoplay sound toggle (muted by default).
+  const [muted, setMuted] = useState(true);
 
   // Carousel slides come from ad.media[] (Phase B). Thumbnail slide is
   // floated to the front so the first visible slide matches the sidebar /
   // profile-card representation. Legacy fallback: synthesize a 1-element
   // array from media_url for ads predating the backfill.
-  type Slide = { id: string | null; s3_key: string; landscape_s3_key?: string | null };
+  // Video slides carry type + poster: their s3_key is the transcoded MP4 (no
+  // inline player on mobile yet), so we display the poster_s3_key still + a ▶
+  // badge and the whole card stays tap-through to the click_url.
+  type Slide = { id: string | null; type: 'photo' | 'video'; s3_key: string; landscape_s3_key?: string | null; poster_s3_key?: string | null };
   const slides = useMemo<Slide[]>(() => {
     if (!ad) return [];
     const media = Array.isArray(ad.media) ? [...ad.media] : [];
@@ -100,13 +181,24 @@ export default function SponsoredCard({
       }
     }
     if (media.length) {
-      return media.map((m) => ({ id: m.id, s3_key: m.s3_key, landscape_s3_key: m.landscape_s3_key ?? null }));
+      return media.map((m) => ({ id: m.id, type: m.type, s3_key: m.s3_key, landscape_s3_key: m.landscape_s3_key ?? null, poster_s3_key: m.poster_s3_key ?? null }));
     }
     if (ad.media_url) {
-      return [{ id: null, s3_key: ad.media_url, landscape_s3_key: ad.hero_media_url ?? null }];
+      // Legacy inline-media ads predate video → always a photo.
+      return [{ id: null, type: 'photo', s3_key: ad.media_url, landscape_s3_key: ad.hero_media_url ?? null, poster_s3_key: null }];
     }
     return [];
   }, [ad]);
+
+  // Resolve a slide's display image: photo → landscape/main; video → poster
+  // (NEVER the mp4 s3_key — expo-image can't render it). Returns processing/▶
+  // flags so the render can show a placeholder or the play badge.
+  const slideDisplay = (s: Slide) => {
+    if (s.type === 'video') {
+      return { uri: s.poster_s3_key ?? null, isVideo: true, processing: !s.poster_s3_key };
+    }
+    return { uri: s.landscape_s3_key || s.s3_key, isVideo: false, processing: false };
+  };
 
   const [activeIdx, setActiveIdx] = useState(0);
   const impressionFiredRef = useRef(false);
@@ -172,10 +264,13 @@ export default function SponsoredCard({
   if (!ad || !slides.length) return null;
 
   // Avatar: the advertiser's profile picture (their brand identity), falling
-  // back to a partner logo, then the first slide so ads always render one.
-  const avatarSource = ad.advertiser_picture || ad.partner_logo_url || slides[0]?.s3_key;
-  // Hero for the single-slide path. Prefer landscape variant when present.
-  const singleHero = slides[0]?.landscape_s3_key || slides[0]?.s3_key;
+  // back to a partner logo, then the first slide's display image (poster for a
+  // video — never the mp4 s3_key) so ads always render one.
+  const slide0Display = slides[0] ? slideDisplay(slides[0]) : null;
+  const avatarSource = ad.advertiser_picture || ad.partner_logo_url || slide0Display?.uri || undefined;
+  // Hero for the single-slide path.
+  const singleDisplay = slide0Display;
+  const singleHero = singleDisplay?.uri ?? null;
 
   return (
     <View style={styles.card} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -227,20 +322,47 @@ export default function SponsoredCard({
             showsHorizontalScrollIndicator={false}
             data={slides}
             keyExtractor={(s, i) => s.id ?? `slide-${i}`}
-            renderItem={({ item }) => {
-              const img = item.landscape_s3_key || item.s3_key;
+            renderItem={({ item, index }) => {
+              // Ready clip (transcoded mp4 + poster) → autoplaying video slide.
+              if (item.type === 'video' && item.poster_s3_key) {
+                return (
+                  <SponsoredVideoSlide
+                    uri={item.s3_key}
+                    poster={item.poster_s3_key}
+                    width={width}
+                    active={index === activeIdx && isViewable}
+                    muted={muted}
+                    onToggleMute={() => setMuted((m) => !m)}
+                    onPress={openClick}
+                    ctaLabel={ctaLabel}
+                  />
+                );
+              }
+              const d = slideDisplay(item);
               return (
                 <Pressable onPress={openClick} style={{ width }}>
                   <View style={[styles.thumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
                     <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
                   </View>
-                  {img ? (
+                  {d.uri ? (
                     <Image
-                      source={{ uri: img }}
+                      source={{ uri: d.uri }}
                       style={[styles.thumb, { position: 'absolute', top: 0, left: 0, width }]}
                       contentFit="cover"
                       transition={200}
                     />
+                  ) : d.processing ? (
+                    <View style={[styles.thumb, { position: 'absolute', top: 0, left: 0, width, alignItems: 'center', justifyContent: 'center' }]}>
+                      <Ionicons name="hourglass-outline" size={24} color={isDark ? '#6b7280' : '#9ca3af'} />
+                      <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 11, marginTop: 4 }}>Processing video…</Text>
+                    </View>
+                  ) : null}
+                  {d.isVideo && d.uri ? (
+                    <View style={[StyleSheet.absoluteFill, styles.playBadgeWrap]} pointerEvents="none">
+                      <View style={styles.playBadge}>
+                        <Ionicons name="play" size={18} color="#fff" />
+                      </View>
+                    </View>
                   ) : null}
                   <View style={styles.ctaPill} pointerEvents="none">
                     <Text style={styles.ctaPillText} numberOfLines={1}>{ctaLabel}</Text>
@@ -274,6 +396,16 @@ export default function SponsoredCard({
             })}
           </View>
         </View>
+      ) : (slides[0]?.type === 'video' && slides[0]?.poster_s3_key) ? (
+        <SponsoredVideoSlide
+          uri={slides[0].s3_key}
+          poster={slides[0].poster_s3_key}
+          active={isViewable}
+          muted={muted}
+          onToggleMute={() => setMuted((m) => !m)}
+          onPress={openClick}
+          ctaLabel={ad.cta_label || undefined}
+        />
       ) : (
         <Pressable onPress={openClick}>
           <View style={[styles.thumb, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
@@ -286,6 +418,18 @@ export default function SponsoredCard({
               contentFit="cover"
               transition={200}
             />
+          ) : singleDisplay?.processing ? (
+            <View style={[styles.thumb, { position: 'absolute', top: 0, left: 0, alignItems: 'center', justifyContent: 'center' }]}>
+              <Ionicons name="hourglass-outline" size={24} color={isDark ? '#6b7280' : '#9ca3af'} />
+              <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 11, marginTop: 4 }}>Processing video…</Text>
+            </View>
+          ) : null}
+          {singleDisplay?.isVideo && singleHero ? (
+            <View style={[StyleSheet.absoluteFill, styles.playBadgeWrap]} pointerEvents="none">
+              <View style={styles.playBadge}>
+                <Ionicons name="play" size={18} color="#fff" />
+              </View>
+            </View>
           ) : null}
           {ad.cta_label ? (
             <View style={styles.ctaPill} pointerEvents="none">
@@ -437,6 +581,30 @@ const styles = StyleSheet.create({
   thumb: {
     width: '100%',
     aspectRatio: 5 / 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playBadgeWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 3,
+  },
+  muteBtn: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
   },

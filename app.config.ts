@@ -85,6 +85,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   scheme: 'surfvault',
   plugins: [
     'expo-router',
+    'expo-video',
     [
       'expo-splash-screen',
       {

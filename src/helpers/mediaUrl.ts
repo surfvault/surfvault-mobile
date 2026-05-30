@@ -48,3 +48,33 @@ export function getBoardPhotoUrl(s3KeyOrUrl: string | null | undefined): string 
   const encoded = encodeURIComponent(s3KeyOrUrl).replace(/%2F/g, '/');
   return `https://${BOARDS_BUCKET}.s3.amazonaws.com/${encoded}`;
 }
+
+export interface BoardPhotoLike {
+  media_type?: 'photo' | 'video' | null;
+  s3_key?: string | null;
+  poster_s3_key?: string | null;
+  preview_video_s3_key?: string | null;
+}
+
+export interface BoardPhotoDisplay {
+  isVideo: boolean;
+  posterUrl: string | null;   // still to show (poster for video, image for photo)
+  videoUrl: string | null;    // playable preview mp4 (video only)
+  processing: boolean;        // clip whose transcode hasn't produced poster/preview yet
+}
+
+/**
+ * Resolve a board photo to render-ready URLs + flags. Board video keeps
+ * `s3_key` as the CLEAN (non-web-playable) original — so the still comes from
+ * `poster_s3_key` and the playable clip from `preview_video_s3_key` (NOT s3_key,
+ * unlike ad_media which repoints). Mirrors web boardPhotoDisplay.
+ */
+export function boardPhotoDisplay(photo: BoardPhotoLike | null | undefined): BoardPhotoDisplay {
+  if (!photo) return { isVideo: false, posterUrl: null, videoUrl: null, processing: false };
+  if (photo.media_type !== 'video') {
+    return { isVideo: false, posterUrl: getBoardPhotoUrl(photo.s3_key), videoUrl: null, processing: false };
+  }
+  const posterUrl = getBoardPhotoUrl(photo.poster_s3_key);
+  const videoUrl = getBoardPhotoUrl(photo.preview_video_s3_key);
+  return { isVideo: true, posterUrl, videoUrl, processing: !posterUrl || !videoUrl };
+}

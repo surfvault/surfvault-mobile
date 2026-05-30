@@ -39,9 +39,27 @@ import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ReportBoardSheet from '../../src/components/ReportBoardSheet';
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import BoardEditSheet from '../../src/components/shaper/BoardEditSheet';
-import { getBoardPhotoUrl } from '../../src/helpers/mediaUrl';
+import { getBoardPhotoUrl, boardPhotoDisplay } from '../../src/helpers/mediaUrl';
+import { MAX_CLIP_SECONDS, MAX_CLIP_BYTES, MAX_CLIP_GB } from '../../src/helpers/clipMedia';
 import { getViewerHash } from '../../src/helpers/viewerHash';
 import { generateUUID } from '../../src/helpers/uuid';
+import { VideoView, useVideoPlayer } from 'expo-video';
+
+/** Fullscreen board clip player (ImageViewing is image-only). */
+function BoardVideoPlayer({ url, onClose }: { url: string; onClose: () => void }) {
+  const player = useVideoPlayer(url, (p) => {
+    p.loop = true;
+    p.play();
+  });
+  return (
+    <View style={s.videoOverlay}>
+      <VideoView player={player} style={s.videoOverlayPlayer} contentFit="contain" nativeControls />
+      <Pressable onPress={onClose} hitSlop={10} style={s.videoOverlayClose}>
+        <Ionicons name="close" size={26} color="#ffffff" />
+      </Pressable>
+    </View>
+  );
+}
 
 // 2-column grid mirrors the mobile session detail page (NUM_COLUMNS=2 +
 // PHOTO_WIDTH math + 1.2× height ratio) so a user moving between session
@@ -135,14 +153,24 @@ export default function BoardDetailScreen() {
 
   // ---- Lightbox ----
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  // ImageViewing is image-only; a clip opens this fullscreen video overlay.
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
   const photos = board?.photos ?? [];
-  const lightboxImages = useMemo(
-    () => photos
-      .map((p) => getBoardPhotoUrl(p.s3_key))
-      .filter((u): u is string => !!u)
-      .map((uri) => ({ uri })),
-    [photos]
-  );
+  // Lightbox = image (non-video) items only. Videos open the video overlay, so
+  // they're excluded here. We map a photo's grid index → its lightbox index so
+  // tapping the Nth grid tile opens the right image (video tiles shift indices).
+  const { lightboxImages, lightboxIndexByPhotoId } = useMemo(() => {
+    const images: { uri: string }[] = [];
+    const indexById: Record<string, number> = {};
+    for (const p of photos) {
+      if (p.media_type === 'video') continue;
+      const uri = getBoardPhotoUrl(p.s3_key);
+      if (!uri) continue;
+      indexById[p.id] = images.length;
+      images.push({ uri });
+    }
+    return { lightboxImages: images, lightboxIndexByPhotoId: indexById };
+  }, [photos]);
 
   // ---- Action mode (multi-select for delete). Mirrors session's
   // (sessionAction, selectedPhotoIds, isProcessingAction) trio. ----
@@ -197,34 +225,52 @@ export default function BoardDetailScreen() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,
       quality: 0.85,
     });
     if (result.canceled) return;
+
+    // Clip caps (primary gate; backend is the net). ImagePicker reports video
+    // duration in ms. Drop over-cap clips with a message, keep the rest.
+    const accepted = result.assets.filter((a) => {
+      if (a.type !== 'video') return true;
+      const durSec = a.duration != null ? a.duration / 1000 : null;
+      const bytes = Number(a.fileSize ?? 0);
+      if ((durSec != null && durSec > MAX_CLIP_SECONDS) || (bytes > 0 && bytes > MAX_CLIP_BYTES)) {
+        return false;
+      }
+      return true;
+    });
+    if (accepted.length < result.assets.length) {
+      Alert.alert('Clip too large', `Videos must be ${MAX_CLIP_SECONDS}s and ${MAX_CLIP_GB}GB or less.`);
+    }
+    if (!accepted.length) return;
+
     try {
       const presigned = await createMyBoardPhotos({
         boardId: board.id,
         payload: {
-          files: result.assets.map((a) => ({
+          files: accepted.map((a) => ({
             file_uuid: generateUUID(),
-            file_type: a.mimeType ?? 'image/jpeg',
+            file_type: a.mimeType ?? (a.type === 'video' ? 'video/mp4' : 'image/jpeg'),
             // Backend uses this to update users.current_storage atomically
-            // with the photo INSERT. ImagePicker reports `fileSize` in
-            // bytes; falls back to 0 (unknown) → backend treats as
-            // contributing nothing, which the reconcile cron will surface.
+            // with the INSERT. ImagePicker reports `fileSize` in bytes; falls
+            // back to 0 (unknown) → reconcile cron surfaces drift.
             file_size_bytes: Number(a.fileSize ?? 0) || 0,
+            // Video-only; backend classifies media_type from MIME + gates.
+            duration_seconds: a.type === 'video' && a.duration != null ? a.duration / 1000 : null,
           })),
         },
       }).unwrap();
       const out = presigned?.results?.photos ?? [];
       await Promise.all(
         out.map(async (p: any, i: number) => {
-          const asset = result.assets[i];
+          const asset = accepted[i];
           const blob = await (await fetch(asset.uri)).blob();
           await fetch(p.url, {
             method: 'PUT',
-            headers: { 'Content-Type': asset.mimeType ?? 'image/jpeg' },
+            headers: { 'Content-Type': asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg') },
             body: blob,
           });
         })
@@ -627,7 +673,8 @@ export default function BoardDetailScreen() {
                     : idx === 0
                 );
                 const isSelected = selectedPhotoIds.includes(p.id);
-                const photoUri = getBoardPhotoUrl(p.s3_key) ?? undefined;
+                const disp = boardPhotoDisplay(p);
+                const photoUri = disp.posterUrl ?? undefined;
 
                 return (
                   <Pressable
@@ -635,8 +682,11 @@ export default function BoardDetailScreen() {
                     onPress={() => {
                       if (inActionMode) {
                         togglePhotoSelection(p.id);
+                      } else if (disp.isVideo) {
+                        if (disp.videoUrl) setActiveVideoUrl(disp.videoUrl);
                       } else {
-                        setViewerIndex(idx);
+                        const lbIdx = lightboxIndexByPhotoId[p.id];
+                        if (lbIdx != null) setViewerIndex(lbIdx);
                       }
                     }}
                     onLongPress={() => handlePhotoLongPress(p)}
@@ -673,6 +723,16 @@ export default function BoardDetailScreen() {
                         transition={150}
                         recyclingKey={p.id}
                       />
+
+                      {/* Video affordance: ▶ when ready, spinner-ish hourglass
+                          while the clip is still transcoding (no poster yet). */}
+                      {disp.isVideo ? (
+                        <View style={s.videoBadgeWrap} pointerEvents="none">
+                          <View style={s.videoBadge}>
+                            <Ionicons name={disp.processing ? 'hourglass-outline' : 'play'} size={16} color="#ffffff" />
+                          </View>
+                        </View>
+                      ) : null}
 
                       {/* Selection checkbox (action mode) — same chrome as session */}
                       {inActionMode ? (
@@ -783,6 +843,18 @@ export default function BoardDetailScreen() {
             visible
             onRequestClose={() => setViewerIndex(null)}
           />
+        ) : null}
+      </Modal>
+
+      {/* Clip player overlay — ImageViewing can't show video. */}
+      <Modal
+        visible={activeVideoUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveVideoUrl(null)}
+      >
+        {activeVideoUrl ? (
+          <BoardVideoPlayer url={activeVideoUrl} onClose={() => setActiveVideoUrl(null)} />
         ) : null}
       </Modal>
 
@@ -956,6 +1028,41 @@ const s = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 2,
+  },
+  videoOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoOverlayPlayer: {
+    width: '100%',
+    height: '80%',
+  },
+  videoOverlayClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },

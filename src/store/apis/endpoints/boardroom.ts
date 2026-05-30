@@ -4,6 +4,12 @@ export interface BoardPhoto {
   id: string;
   s3_key: string;
   sort_order: number;
+  // Video support: a clip keeps s3_key as the clean original; the worker fills
+  // poster + preview (NULL during the brief processing window).
+  media_type?: 'photo' | 'video';
+  poster_s3_key?: string | null;
+  preview_video_s3_key?: string | null;
+  duration_seconds?: number | null;
 }
 
 export interface Board {
@@ -222,7 +228,7 @@ const boardroomApi = rootApi.injectEndpoints({
     // reconcile cron will surface drift in that case).
     createMyBoardPhotos: builder.mutation<
       { results: { photos: Array<{ id: string; file_uuid: string; s3_key: string; url: string; media_url: string; sort_order: number; size_in_gb: number | null }> } },
-      { boardId: string; payload: { files: Array<{ file_uuid: string; file_type: string; file_size_bytes?: number }> } }
+      { boardId: string; payload: { files: Array<{ file_uuid: string; file_type: string; file_size_bytes?: number; duration_seconds?: number | null }> } }
     >({
       query: ({ boardId, payload }) => ({ url: `/boards/${boardId}/photos`, method: 'POST', body: payload }),
     }),

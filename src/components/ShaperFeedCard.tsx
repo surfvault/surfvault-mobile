@@ -15,7 +15,7 @@ import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTrackedPush } from '../context/NavigationContext';
 import type { BoardroomShaper, Board } from '../store';
-import { getBoardPhotoUrl } from '../helpers/mediaUrl';
+import { boardPhotoDisplay } from '../helpers/mediaUrl';
 import { pickThumbnailPhoto } from './ShaperBoardsGrid';
 import UserAvatar from './UserAvatar';
 import { useRequireAuth } from '../hooks/useRequireAuth';
@@ -308,7 +308,9 @@ function CtaSlide({ width, isDark }: { width: number; isDark: boolean }) {
 }
 
 function BoardSlide({ board, width, isDark }: { board: Board; width: number; isDark: boolean }) {
-  const heroUri = getBoardPhotoUrl(pickThumbnailPhoto(board)?.s3_key);
+  // Feed = poster + ▶ (card taps through to the shaper profile where it plays).
+  const disp = boardPhotoDisplay(pickThumbnailPhoto(board));
+  const heroUri = disp.posterUrl;
   return (
     <View style={[styles.thumb, { width, backgroundColor: isDark ? '#0b0b0b' : '#f3f4f6' }]}>
       {heroUri ? (
@@ -332,6 +334,13 @@ function BoardSlide({ board, width, isDark }: { board: Board; width: number; isD
             contentFit="contain"
             transition={200}
           />
+          {disp.isVideo ? (
+            <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
+              <View style={styles.boardPlayBadge}>
+                <Ionicons name="play" size={18} color="#fff" />
+              </View>
+            </View>
+          ) : null}
         </>
       ) : (
         <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
@@ -409,6 +418,15 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 5,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  boardPlayBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 3,
   },
   boardPill: {
     position: 'absolute',

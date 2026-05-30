@@ -22,7 +22,7 @@ import {
   type Board,
   type BoardPhoto,
 } from '../store';
-import { getBoardPhotoUrl } from '../helpers/mediaUrl';
+import { getBoardPhotoUrl, boardPhotoDisplay } from '../helpers/mediaUrl';
 import { useTrackedPush } from '../context/NavigationContext';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import ActionSheet from './ActionSheet';
@@ -245,11 +245,18 @@ export default function ShaperBoardsGrid({
                   style={StyleSheet.absoluteFillObject}
                 >
                   <Image
-                    source={{ uri: getBoardPhotoUrl(t.photo.s3_key) ?? undefined }}
+                    source={{ uri: boardPhotoDisplay(t.photo).posterUrl ?? undefined }}
                     style={styles.tileImg}
                     contentFit="cover"
                     transition={150}
                   />
+                  {boardPhotoDisplay(t.photo).isVideo ? (
+                    <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
+                      <View style={styles.tilePlayBadge}>
+                        <Ionicons name="play" size={14} color="#fff" />
+                      </View>
+                    </View>
+                  ) : null}
                 </Pressable>
 
                 {/* Top-left: name + dimensions (star icon when featured). */}
@@ -454,6 +461,7 @@ function BoardListCard({
             style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
             renderItem={({ item, index }) => {
               const slideStyle = { width: slideWidth, aspectRatio: thumbAspect };
+              const disp = boardPhotoDisplay(item);
               return (
                 <Pressable
                   onPress={() => onPhotoPress(index)}
@@ -462,11 +470,18 @@ function BoardListCard({
                   style={slideStyle}
                 >
                   <Image
-                    source={{ uri: getBoardPhotoUrl(item.s3_key) ?? undefined }}
+                    source={{ uri: disp.posterUrl ?? undefined }}
                     style={slideStyle}
                     contentFit="cover"
                     transition={200}
                   />
+                  {disp.isVideo ? (
+                    <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
+                      <View style={styles.tilePlayBadge}>
+                        <Ionicons name="play" size={14} color="#fff" />
+                      </View>
+                    </View>
+                  ) : null}
                 </Pressable>
               );
             }}
@@ -479,11 +494,18 @@ function BoardListCard({
             style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}
           >
             <Image
-              source={{ uri: getBoardPhotoUrl(photos[0].s3_key) ?? undefined }}
+              source={{ uri: boardPhotoDisplay(photos[0]).posterUrl ?? undefined }}
               style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
               contentFit="cover"
               transition={200}
             />
+            {boardPhotoDisplay(photos[0]).isVideo ? (
+              <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
+                <View style={styles.tilePlayBadge}>
+                  <Ionicons name="play" size={14} color="#fff" />
+                </View>
+              </View>
+            ) : null}
           </Pressable>
         ) : null}
       </View>
@@ -568,6 +590,20 @@ const styles = StyleSheet.create({
   tileImg: {
     width: '100%',
     height: '100%',
+  },
+  tilePlayBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tilePlayBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 2,
   },
   // ---- Tile overlays (top-left name, bottom-left stats, bottom-right ellipsis) ----
   topLeftLabel: {
