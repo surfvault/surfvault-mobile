@@ -24,6 +24,7 @@ import {
   useGetBoardQuery,
   useUpdateBoardThumbnailMutation,
   useCreateMyBoardPhotosMutation,
+  useFinalizeMyBoardPhotosMutation,
   useDeleteMyBoardPhotoMutation,
   useCreateBoardViewReportMutation,
   rootApi,
@@ -130,6 +131,7 @@ export default function BoardDetailScreen() {
   const [reportBoardView] = useCreateBoardViewReportMutation();
   const [updateThumbnail] = useUpdateBoardThumbnailMutation();
   const [createMyBoardPhotos] = useCreateMyBoardPhotosMutation();
+  const [finalizeMyBoardPhotos] = useFinalizeMyBoardPhotosMutation();
   const [deleteMyBoardPhoto] = useDeleteMyBoardPhotoMutation();
 
   const isSelf = !!(user && board && user.id === board.shaper_user_id);
@@ -275,11 +277,22 @@ export default function BoardDetailScreen() {
           });
         })
       );
+      // Trigger transcode for video rows now that their S3 objects exist
+      // (boards have no per-file finalize → create couldn't enqueue without
+      // racing the upload). Best-effort.
+      const videoPhotoIds = out.filter((p: any) => p.media_type === 'video').map((p: any) => p.id);
+      if (videoPhotoIds.length) {
+        try {
+          await finalizeMyBoardPhotos({ boardId: board.id, photoIds: videoPhotoIds }).unwrap();
+        } catch (e) {
+          console.warn('board finalize (transcode enqueue) failed:', e);
+        }
+      }
       refetch();
     } catch (err: any) {
       Alert.alert('Upload failed', err?.data?.message || err?.message || 'Try again');
     }
-  }, [board, createMyBoardPhotos, refetch]);
+  }, [board, createMyBoardPhotos, finalizeMyBoardPhotos, refetch]);
 
   // Set the board's thumbnail. Mirrors session's `handleSetThumbnail` —
   // single-action that applies immediately when invoked from the photo
@@ -342,7 +355,7 @@ export default function BoardDetailScreen() {
 
     const count = selectedPhotoIds.length;
     Alert.alert(
-      `Remove ${count} photo${count === 1 ? '' : 's'}?`,
+      `Remove ${count} item${count === 1 ? '' : 's'}?`,
       "This can't be undone.",
       [
         { text: 'Cancel', style: 'cancel' },
@@ -384,7 +397,7 @@ export default function BoardDetailScreen() {
               refetch();
               Alert.alert(
                 'Delete failed',
-                err?.data?.message || err?.message || 'Some photos could not be removed.'
+                err?.data?.message || err?.message || 'Some items could not be removed.'
               );
             } finally {
               setIsProcessingAction(false);
@@ -437,7 +450,7 @@ export default function BoardDetailScreen() {
       sections.push({
         options: [
           {
-            label: 'Add Photos',
+            label: 'Add Media',
             icon: 'images-outline',
             iconLibrary: 'ionicons',
             onPress: () => {
@@ -446,7 +459,7 @@ export default function BoardDetailScreen() {
             },
           },
           {
-            label: 'Delete Photos',
+            label: 'Delete Media',
             icon: 'trash-outline',
             iconLibrary: 'ionicons',
             destructive: true,
@@ -654,11 +667,11 @@ export default function BoardDetailScreen() {
             <View style={s.emptyWrap}>
               <Ionicons name="images-outline" size={40} color={isDark ? '#374151' : '#d1d5db'} />
               <Text style={{ marginTop: 8, color: isDark ? '#6b7280' : '#9ca3af' }}>
-                No photos yet.
+                No media yet.
               </Text>
               {isSelf ? (
                 <Pressable onPress={handleAddPhotos} style={s.emptyAddBtn}>
-                  <Text style={s.emptyAddText}>Add photos</Text>
+                  <Text style={s.emptyAddText}>Add media</Text>
                 </Pressable>
               ) : null}
             </View>

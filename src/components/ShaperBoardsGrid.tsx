@@ -253,7 +253,7 @@ export default function ShaperBoardsGrid({
                   {boardPhotoDisplay(t.photo).isVideo ? (
                     <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
                       <View style={styles.tilePlayBadge}>
-                        <Ionicons name="play" size={14} color="#fff" />
+                        <Ionicons name="videocam" size={12} color="#fff" />
                       </View>
                     </View>
                   ) : null}
@@ -478,7 +478,7 @@ function BoardListCard({
                   {disp.isVideo ? (
                     <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
                       <View style={styles.tilePlayBadge}>
-                        <Ionicons name="play" size={14} color="#fff" />
+                        <Ionicons name="videocam" size={12} color="#fff" />
                       </View>
                     </View>
                   ) : null}
@@ -502,7 +502,7 @@ function BoardListCard({
             {boardPhotoDisplay(photos[0]).isVideo ? (
               <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
                 <View style={styles.tilePlayBadge}>
-                  <Ionicons name="play" size={14} color="#fff" />
+                  <Ionicons name="videocam" size={12} color="#fff" />
                 </View>
               </View>
             ) : null}
@@ -591,19 +591,21 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  // Clip indicator — a bottom-right corner badge, NOT a center play button:
+  // these tiles tap to NAVIGATE (not play), so a ▶ would mislead. Bottom-right
+  // is the only free corner (name spans top, stats sit bottom-left).
   tilePlayBadgeWrap: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
   },
   tilePlayBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingLeft: 2,
   },
   // ---- Tile overlays (top-left name, bottom-left stats, bottom-right ellipsis) ----
   topLeftLabel: {

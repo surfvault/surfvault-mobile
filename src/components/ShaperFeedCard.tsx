@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   type ViewToken,
 } from 'react-native';
 import { Image } from 'expo-image';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTrackedPush } from '../context/NavigationContext';
 import type { BoardroomShaper, Board } from '../store';
@@ -136,12 +137,12 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
           showsHorizontalScrollIndicator={false}
           viewabilityConfig={viewabilityConfig}
           onViewableItemsChanged={onViewableItemsChanged}
-          renderItem={({ item }) => (
+          renderItem={({ item, index }) => (
             <Pressable onPress={openShaperProfile}>
               {item.kind === 'cta' ? (
                 <CtaSlide width={width} isDark={isDark} />
               ) : (
-                <BoardSlide board={item.board} width={width} isDark={isDark} />
+                <BoardSlide board={item.board} width={width} isDark={isDark} active={index === activeIdx} />
               )}
             </Pressable>
           )}
@@ -307,10 +308,37 @@ function CtaSlide({ width, isDark }: { width: number; isDark: boolean }) {
   );
 }
 
-function BoardSlide({ board, width, isDark }: { board: Board; width: number; isDark: boolean }) {
-  // Feed = poster + ▶ (card taps through to the shaper profile where it plays).
+// Autoplaying contained video layer (active slide only). Mirrors the ad
+// SponsoredVideoSlide: muted + looped, plays when `active`, pauses otherwise.
+// pointerEvents none so the slide Pressable still taps through to the profile.
+function BoardVideoLayer({ uri, active }: { uri: string; active: boolean }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+  });
+  useEffect(() => {
+    if (active) player.play();
+    else player.pause();
+  }, [active, player]);
+  return (
+    <VideoView
+      player={player}
+      style={StyleSheet.absoluteFillObject}
+      contentFit="contain"
+      nativeControls={false}
+      pointerEvents="none"
+    />
+  );
+}
+
+function BoardSlide({ board, width, isDark, active }: { board: Board; width: number; isDark: boolean; active: boolean }) {
+  // A ready clip autoplays (muted, looped) on the active slide; the card still
+  // taps through to the profile. Transcoding clips show the poster; photos the
+  // image. No ▶ badge — autoplay makes it self-evident, and a dead button on a
+  // tap-through card was misleading.
   const disp = boardPhotoDisplay(pickThumbnailPhoto(board));
   const heroUri = disp.posterUrl;
+  const playable = disp.isVideo && disp.videoUrl;
   return (
     <View style={[styles.thumb, { width, backgroundColor: isDark ? '#0b0b0b' : '#f3f4f6' }]}>
       {heroUri ? (
@@ -328,19 +356,16 @@ function BoardSlide({ board, width, isDark }: { board: Board; width: number; isD
               { backgroundColor: isDark ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.25)' },
             ]}
           />
-          <Image
-            source={{ uri: heroUri }}
-            style={StyleSheet.absoluteFillObject}
-            contentFit="contain"
-            transition={200}
-          />
-          {disp.isVideo ? (
-            <View style={[StyleSheet.absoluteFillObject, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
-              <View style={styles.boardPlayBadge}>
-                <Ionicons name="play" size={18} color="#fff" />
-              </View>
-            </View>
-          ) : null}
+          {playable ? (
+            <BoardVideoLayer uri={disp.videoUrl!} active={active} />
+          ) : (
+            <Image
+              source={{ uri: heroUri }}
+              style={StyleSheet.absoluteFillObject}
+              contentFit="contain"
+              transition={200}
+            />
+          )}
         </>
       ) : (
         <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
@@ -418,15 +443,6 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 5,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  boardPlayBadge: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingLeft: 3,
   },
   boardPill: {
     position: 'absolute',

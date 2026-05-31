@@ -19,8 +19,10 @@
 #   make update-dev  MSG="testing new feed layout"
 #
 # Local dev runs (USE THESE instead of `npm run ios|android`):
-#   make ios       # native debug build on a connected device, dev env
-#   make android   # native debug build, dev env
+#   make ios          # native debug build on a connected device, dev env
+#   make android      # native debug build, dev env
+#   make ios-clean    # prebuild --clean first — after adding a native module
+#   make android-clean#   (e.g. expo-video) or changing app.config.ts plugins
 #
 # Why: `npx expo run:*` lets REAL shell env vars override .env files. If you've
 # ever sourced .env.production into your terminal (the old manual OTA workaround),
@@ -38,7 +40,7 @@
 # kept as a harmless no-op that also makes this correct on Make 3.82+.
 SHELL := /bin/bash
 .ONESHELL:
-.PHONY: update-prod update-dev _ota ios android _run
+.PHONY: update-prod update-dev _ota ios android ios-clean android-clean _run
 
 PROJECT_ID  := f0f75cbd-8e64-43a6-b251-438dcd684772
 NODE_VERSION := 22
@@ -52,6 +54,18 @@ ios:
 android:
 	@$(MAKE) --no-print-directory _run PLATFORM=android RUNFLAGS=""
 
+# Clean variants: regenerate native projects (expo prebuild --clean) before the
+# run. USE THESE after adding/removing a native module (e.g. expo-video) or
+# changing app.config.ts native fields/plugins — a plain `make ios` reuses the
+# existing ios/ + Pods and may not link the new native code (runtime crash /
+# "module not found"). WARNING: prebuild --clean regenerates ios/ + android/, so
+# any hand edits there are overwritten — check `git status ios android` after.
+ios-clean:
+	@$(MAKE) --no-print-directory _run PLATFORM=ios RUNFLAGS="--device" PREBUILD=1
+
+android-clean:
+	@$(MAKE) --no-print-directory _run PLATFORM=android RUNFLAGS="" PREBUILD=1
+
 _run:
 	@if [ ! -f ".env.development.local" ]; then echo "ERROR: missing .env.development.local"; exit 1; fi
 	@export NVM_DIR="$$HOME/.nvm"; \
@@ -60,6 +74,10 @@ _run:
 	set -a && . ./.env.development.local && set +a; \
 	export NODE_ENV=development; \
 	set -eo pipefail; \
+	if [ "$(PREBUILD)" = "1" ]; then \
+	  echo "▶ Clean prebuild for $(PLATFORM) (regenerating native project + Pods)…"; \
+	  npx expo prebuild --clean --platform $(PLATFORM); \
+	fi; \
 	echo "▶ Running $(PLATFORM) (dev env: API_BASE_URL=$$API_BASE_URL, node=$$(node -v))"; \
 	npx expo run:$(PLATFORM) $(RUNFLAGS)
 

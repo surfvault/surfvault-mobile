@@ -227,10 +227,22 @@ const boardroomApi = rootApi.injectEndpoints({
     // INSERT. Pass 0 only when the size is genuinely unknown (the daily
     // reconcile cron will surface drift in that case).
     createMyBoardPhotos: builder.mutation<
-      { results: { photos: Array<{ id: string; file_uuid: string; s3_key: string; url: string; media_url: string; sort_order: number; size_in_gb: number | null }> } },
+      { results: { photos: Array<{ id: string; file_uuid: string; s3_key: string; url: string; media_url: string; sort_order: number; size_in_gb: number | null; media_type?: 'photo' | 'video' }> } },
       { boardId: string; payload: { files: Array<{ file_uuid: string; file_type: string; file_size_bytes?: number; duration_seconds?: number | null }> } }
     >({
       query: ({ boardId, payload }) => ({ url: `/boards/${boardId}/photos`, method: 'POST', body: payload }),
+    }),
+    // Called after S3 PUTs land — triggers video transcode (boards have no
+    // per-file finalize, so create can't enqueue without racing the upload).
+    finalizeMyBoardPhotos: builder.mutation<
+      { results: { enqueued: number } },
+      { boardId: string; photoIds?: string[] }
+    >({
+      query: ({ boardId, photoIds }) => ({
+        url: `/boards/${boardId}/photos/finalize`,
+        method: 'POST',
+        body: photoIds ? { photoIds } : {},
+      }),
     }),
     // Intentionally NO invalidatesTags. The board detail page deletes photos
     // optimistically (patches the getBoard cache up front) and may delete
@@ -284,6 +296,7 @@ export const {
   useUpdateMyBoardMutation,
   useDeleteMyBoardMutation,
   useCreateMyBoardPhotosMutation,
+  useFinalizeMyBoardPhotosMutation,
   useDeleteMyBoardPhotoMutation,
   useUpdateBoardThumbnailMutation,
   useReportBoardMutation,

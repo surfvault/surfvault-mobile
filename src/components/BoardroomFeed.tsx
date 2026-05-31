@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -22,7 +22,8 @@ import {
 import { useUser } from '../context/UserProvider';
 import { useUserPreferences, formatDistance as formatDistanceUnit } from '../helpers/preferences';
 import { useTrackedPush } from '../context/NavigationContext';
-import { getBoardPhotoUrl } from '../helpers/mediaUrl';
+import { boardPhotoDisplay } from '../helpers/mediaUrl';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import ActionSheet from './ActionSheet';
 import UserAvatar from './UserAvatar';
 import type { ActionSheetSection } from './ActionSheet';
@@ -318,7 +319,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
             showsHorizontalScrollIndicator={false}
             data={slides}
             keyExtractor={(s, i) => s.kind === 'board' ? s.board.id : `cta-${i}`}
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
               if (item.kind === 'cta') {
                 return (
                   <Pressable onPress={openShaperProfile} style={{ width }}>
@@ -326,14 +327,13 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
                   </Pressable>
                 );
               }
-              const photoUri = getBoardPhotoUrl(pickThumbnailPhoto(item.board)?.s3_key);
               return (
                 <Pressable onPress={openShaperProfile} style={{ width }}>
                   <SlideHero
-                    uri={photoUri}
-                    boardName={item.board.name}
+                    board={item.board}
                     isDark={isDark}
                     width={width}
+                    active={index === activeIdx}
                   />
                 </Pressable>
               );
@@ -370,10 +370,10 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
       ) : activeBoard ? (
         <Pressable onPress={openShaperProfile}>
           <SlideHero
-            uri={getBoardPhotoUrl(pickThumbnailPhoto(activeBoard)?.s3_key)}
-            boardName={activeBoard.name}
+            board={activeBoard}
             isDark={isDark}
             width={width}
+            active
           />
         </Pressable>
       ) : null}
@@ -392,17 +392,46 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
   );
 }
 
+// Autoplaying contained video layer (active slide only). Mirrors ShaperFeedCard
+// / ad SponsoredVideoSlide: muted + looped, plays only when `active`.
+function BoardVideoLayer({ uri, active }: { uri: string; active: boolean }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = true;
+  });
+  useEffect(() => {
+    if (active) player.play();
+    else player.pause();
+  }, [active, player]);
+  return (
+    <VideoView
+      player={player}
+      style={StyleSheet.absoluteFillObject}
+      contentFit="contain"
+      nativeControls={false}
+      pointerEvents="none"
+    />
+  );
+}
+
 function SlideHero({
-  uri,
-  boardName,
+  board,
   isDark,
   width,
+  active,
 }: {
-  uri: string | null;
-  boardName: string | null;
+  board: Board;
   isDark: boolean;
   width: number;
+  active: boolean;
 }) {
+  // Video board keeps s3_key as the clean original (non-playable) → use the
+  // poster still + autoplay the preview on the active slide. A ▶ would mislead
+  // (card taps through to the profile).
+  const disp = boardPhotoDisplay(pickThumbnailPhoto(board));
+  const uri = disp.posterUrl;
+  const boardName = board.name;
+  const playable = disp.isVideo && disp.videoUrl;
   return (
     <View style={[styles.thumb, { width, backgroundColor: isDark ? '#0b0b0b' : '#f3f4f6' }]}>
       {uri ? (
@@ -420,12 +449,16 @@ function SlideHero({
               { backgroundColor: isDark ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.25)' },
             ]}
           />
-          <Image
-            source={{ uri }}
-            style={StyleSheet.absoluteFillObject}
-            contentFit="contain"
-            transition={200}
-          />
+          {playable ? (
+            <BoardVideoLayer uri={disp.videoUrl!} active={active} />
+          ) : (
+            <Image
+              source={{ uri }}
+              style={StyleSheet.absoluteFillObject}
+              contentFit="contain"
+              transition={200}
+            />
+          )}
         </>
       ) : (
         <Ionicons name="image-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
