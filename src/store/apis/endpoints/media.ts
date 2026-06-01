@@ -31,7 +31,7 @@ const mediaApi = rootApi.injectEndpoints({
         totalSizeInGB,
       }: {
         sessionId: string;
-        mediaFiles: Array<{ uuid: string; name: string; size: number; type: string; lastModified: number; source?: string; sourceId?: string }>;
+        mediaFiles: Array<{ uuid: string; name: string; size: number; type: string; lastModified: number; source?: string; sourceId?: string; durationSeconds?: number | null }>;
         totalSizeInGB: number;
       }) => ({
         url: `/media/upload/surf-session/${sessionId}`,

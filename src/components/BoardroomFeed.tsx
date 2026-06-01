@@ -21,6 +21,7 @@ import {
 } from '../store';
 import { useUser } from '../context/UserProvider';
 import { useUserPreferences, formatDistance as formatDistanceUnit } from '../helpers/preferences';
+import { useViewableItems } from '../hooks/useViewableItems';
 import { useTrackedPush } from '../context/NavigationContext';
 import { boardPhotoDisplay } from '../helpers/mediaUrl';
 import { VideoView, useVideoPlayer } from 'expo-video';
@@ -51,6 +52,7 @@ const BoardroomFeed = forwardRef<BoardroomFeedHandle, Props>(function BoardroomF
   const { user } = useUser();
   const listRef = useRef<FlatList<BoardroomShaper>>(null);
   const emptyScrollRef = useRef<ScrollView>(null);
+  const { viewabilityConfig, onViewableItemsChanged, isItemViewable } = useViewableItems();
 
   useImperativeHandle(ref, () => ({
     scrollToTop: () => {
@@ -150,7 +152,9 @@ const BoardroomFeed = forwardRef<BoardroomFeedHandle, Props>(function BoardroomF
       ref={listRef}
       data={shapers}
       keyExtractor={(s) => s.id}
-      renderItem={({ item }) => <ShaperCard shaper={item} isDark={isDark} />}
+      onViewableItemsChanged={onViewableItemsChanged}
+      viewabilityConfig={viewabilityConfig}
+      renderItem={({ item }) => <ShaperCard shaper={item} isDark={isDark} isViewable={isItemViewable(item.id)} />}
       contentContainerStyle={{ paddingTop: 4, paddingBottom: 4 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       showsVerticalScrollIndicator={false}
@@ -171,7 +175,7 @@ type Slide =
   | { kind: 'board'; board: Board }
   | { kind: 'cta' };
 
-function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boolean }) {
+function ShaperCard({ shaper, isDark, isViewable = true }: { shaper: BoardroomShaper; isDark: boolean; isViewable?: boolean }) {
   const trackedPush = useTrackedPush();
   const { units } = useUserPreferences();
   const [width, setWidth] = useState(Dimensions.get('window').width);
@@ -333,7 +337,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
                     board={item.board}
                     isDark={isDark}
                     width={width}
-                    active={index === activeIdx}
+                    active={index === activeIdx && isViewable}
                   />
                 </Pressable>
               );
@@ -373,7 +377,7 @@ function ShaperCard({ shaper, isDark }: { shaper: BoardroomShaper; isDark: boole
             board={activeBoard}
             isDark={isDark}
             width={width}
-            active
+            active={isViewable}
           />
         </Pressable>
       ) : null}

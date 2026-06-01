@@ -61,6 +61,7 @@ import {
 } from '../../src/store';
 import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ImageViewing from 'react-native-image-viewing';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
 import ActionSheet from '../../src/components/ActionSheet';
@@ -71,6 +72,7 @@ import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermiss
 import { useUserPreferences } from '../../src/helpers/preferences';
 import { useUpload } from '../../src/context/UploadContext';
 import { generateUUID } from '../../src/helpers/uuid';
+import { MAX_CLIP_SECONDS, MAX_CLIP_BYTES, MAX_CLIP_GB } from '../../src/helpers/clipMedia';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
 import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photoTimestamps';
 import { getViewerHash } from '../../src/helpers/viewerHash';
@@ -109,6 +111,31 @@ const formatDate = (dateStr?: string) => {
   const d = new Date(dateStr.split('T')[0] + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
+
+/** Fullscreen session-clip player (ImageViewing is image-only). */
+function SessionVideoPlayer({ url, onClose }: { url: string; onClose: () => void }) {
+  const player = useVideoPlayer(url, (p) => {
+    p.loop = true;
+    p.play();
+  });
+  return (
+    <View style={sessionVideoStyles.overlay}>
+      <VideoView player={player} style={sessionVideoStyles.player} contentFit="contain" nativeControls />
+      <Pressable onPress={onClose} hitSlop={10} style={sessionVideoStyles.close}>
+        <Ionicons name="close" size={26} color="#ffffff" />
+      </Pressable>
+    </View>
+  );
+}
+
+const sessionVideoStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
+  player: { width: '100%', height: '80%' },
+  close: {
+    position: 'absolute', top: 50, right: 20, width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center',
+  },
+});
 
 export default function SessionDetailScreen() {
   const { sessionId, group: groupNameFromUrl } = useLocalSearchParams<{ sessionId: string; group?: string }>();
@@ -199,6 +226,8 @@ export default function SessionDetailScreen() {
 
   // Photo viewer (lightbox) — windowed to avoid slow FlatList layout for large sessions
   const [viewerVisible, setViewerVisible] = useState(false);
+  // Clip player overlay (ImageViewing is image-only) — the watermarked preview.
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerWindowStart, setViewerWindowStart] = useState(0);
 
@@ -980,7 +1009,7 @@ export default function SessionDetailScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,
       quality: 0.95,
       exif: true,
@@ -988,8 +1017,23 @@ export default function SessionDetailScreen() {
 
     if (result.canceled || result.assets.length === 0) return;
 
+    // Clip caps (primary gate; backend is the net).
+    let clipRejected: string | null = null;
+    const assets = result.assets.filter((a) => {
+      if (a.type !== 'video') return true;
+      const durSec = a.duration != null ? a.duration / 1000 : null;
+      const bytes = Number(a.fileSize ?? 0);
+      if ((durSec != null && durSec > MAX_CLIP_SECONDS) || (bytes > 0 && bytes > MAX_CLIP_BYTES)) {
+        clipRejected = `Videos must be ${MAX_CLIP_SECONDS}s and ${MAX_CLIP_GB}GB or less.`;
+        return false;
+      }
+      return true;
+    });
+    if (clipRejected) Alert.alert('Clip too large', clipRejected);
+    if (assets.length === 0) return;
+
     // Storage check
-    const totalBytes = result.assets.reduce((sum, a) => sum + (a.fileSize ?? 0), 0);
+    const totalBytes = assets.reduce((sum, a) => sum + (a.fileSize ?? 0), 0);
     const storageCheck = checkStorageCapacity(user, totalBytes);
     if (!storageCheck.hasSpace) {
       showStorageLimitAlert(storageCheck, { email: (user as any)?.email });
@@ -998,14 +1042,18 @@ export default function SessionDetailScreen() {
 
     setIsStartingUpload(true);
     try {
-      const picked = result.assets.map((asset) => ({
-        uuid: generateUUID(),
-        uri: asset.uri,
-        name: asset.fileName ?? `photo_${Date.now()}.jpg`,
-        size: asset.fileSize ?? 0,
-        type: asset.mimeType ?? 'image/jpeg',
-        takenAt: parseExifTakenAt(asset),
-      }));
+      const picked = assets.map((asset) => {
+        const isVideo = asset.type === 'video';
+        return {
+          uuid: generateUUID(),
+          uri: asset.uri,
+          name: asset.fileName ?? (isVideo ? `clip_${Date.now()}.mp4` : `photo_${Date.now()}.jpg`),
+          size: asset.fileSize ?? 0,
+          type: asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
+          takenAt: parseExifTakenAt(asset),
+          durationSeconds: isVideo && asset.duration != null ? asset.duration / 1000 : null,
+        };
+      });
       // Bake capture-ordered timestamps so the gallery (sorted by
       // photo_taken_at, file_name, id) shows photos in shot order.
       const orderedTimestamps = bakeOrderedTimestamps(picked);
@@ -1018,7 +1066,7 @@ export default function SessionDetailScreen() {
 
       const uploadResult = await saveSurfMedia({
         sessionId: session.id,
-        mediaFiles: filesMapped.map((f) => ({ uuid: f.uuid, name: f.name, size: f.size, type: f.type, lastModified: f.lastModified, source: 'device' })),
+        mediaFiles: filesMapped.map((f) => ({ uuid: f.uuid, name: f.name, size: f.size, type: f.type, lastModified: f.lastModified, source: 'device', durationSeconds: f.durationSeconds ?? null })),
         totalSizeInGB,
       }).unwrap();
 
@@ -1233,12 +1281,16 @@ export default function SessionDetailScreen() {
       const isSelected = selectedPhotoIds.includes(item.id);
       const inActionMode = !!sessionAction;
       const isThumbnail = isOwner && item.id === thumbnailPhotoId;
+      const isVideo = item.media_type === 'video';
 
       return (
         <Pressable
           onPress={async () => {
             if (inActionMode) {
               togglePhotoSelection(item.id);
+            } else if (isVideo) {
+              // ImageViewing is image-only — clips open the video overlay.
+              if (item.preview_video_url) setActiveVideoUrl(item.preview_video_url);
             } else {
               const WINDOW = 20;
               const start = Math.max(0, index - WINDOW);
@@ -1265,6 +1317,13 @@ export default function SessionDetailScreen() {
               transition={200}
               recyclingKey={item.id}
             />
+            {isVideo && (
+              <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
+                <View style={styles.videoPlayBadge}>
+                  <Ionicons name={item.preview_video_url ? 'play' : 'hourglass-outline'} size={16} color="#fff" />
+                </View>
+              </View>
+            )}
             {inActionMode && (
               <View style={[styles.checkbox, isSelected && { backgroundColor: ac.btn, borderColor: ac.btn }]}>
                 {isSelected && <Ionicons name="checkmark" size={12} color="#ffffff" />}
@@ -1959,6 +2018,10 @@ export default function SessionDetailScreen() {
           images={sessionMedia
             .slice(viewerWindowStart)
             .map((m) => {
+              // Video slots show their poster in the image viewer (the viewer is
+              // only OPENED from photo taps, but a swipe could land on a video
+              // index — show the still, not a broken full-res key).
+              if (m.media_type === 'video') return { uri: m.poster_url ?? m.thumbnail ?? '' };
               const key = getPhotoKey(m);
               return { uri: getDirectWatermarkUrl(key) };
             })}
@@ -1971,6 +2034,18 @@ export default function SessionDetailScreen() {
           doubleTapToZoomEnabled
         />
       )}
+
+      {/* Clip player overlay — the watermarked full-length preview. */}
+      <Modal
+        visible={activeVideoUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveVideoUrl(null)}
+      >
+        {activeVideoUrl ? (
+          <SessionVideoPlayer url={activeVideoUrl} onClose={() => setActiveVideoUrl(null)} />
+        ) : null}
+      </Modal>
     </>
   );
 }
@@ -2028,6 +2103,10 @@ const styles = StyleSheet.create({
   thumbnailBadge: {
     position: 'absolute', top: 6, left: 6, width: 24, height: 24, borderRadius: 12,
     backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center',
+  },
+  videoPlayBadge: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center', paddingLeft: 2,
   },
   requestFab: {
     position: 'absolute', bottom: 24, right: 16,

@@ -48,6 +48,8 @@ interface SelectedFile {
   // Real capture time from EXIF (epoch ms), or null when the photo has none.
   // Drives upload ordering — see bakeOrderedTimestamps.
   takenAt?: number | null;
+  // Video only — measured from the picker asset, for the cap + backend stamp.
+  durationSeconds?: number | null;
 }
 
 // Build the YYYY-MM-DD string from LOCAL date components, not UTC.
@@ -60,6 +62,7 @@ const formatDateParam = (date: Date): string =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 import { generateUUID } from '../../src/helpers/uuid';
+import { MAX_CLIP_SECONDS, MAX_CLIP_BYTES, MAX_CLIP_GB } from '../../src/helpers/clipMedia';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
 import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photoTimestamps';
 const formatDateLabel = (date: Date): string =>
@@ -177,21 +180,42 @@ function SessionOrBoardCreate() {
     // show it. Bump this if the flash returns on a slower device.
     const loaderTimer = setTimeout(() => setIsImporting(true), 1100);
     try {
+      // Boards stay photo-only (no session video gallery there); sessions accept
+      // clips. Same shared picker, so gate by user type.
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: isShaper ? ['images'] : ['images', 'videos'],
         allowsMultipleSelection: true,
         quality: 0.95,
         exif: true,
       });
 
       if (!result.canceled && result.assets.length > 0) {
-        const newFiles: SelectedFile[] = result.assets.map((asset) => ({
-          uri: asset.uri,
-          name: asset.fileName ?? `photo_${Date.now()}.jpg`,
-          size: asset.fileSize ?? 0,
-          type: asset.mimeType ?? 'image/jpeg',
-          takenAt: parseExifTakenAt(asset),
-        }));
+        // Clip caps (primary gate; backend is the net). ImagePicker reports
+        // video duration in ms.
+        let rejected: string | null = null;
+        const accepted = result.assets.filter((a) => {
+          if (a.type !== 'video') return true;
+          const durSec = a.duration != null ? a.duration / 1000 : null;
+          const bytes = Number(a.fileSize ?? 0);
+          if ((durSec != null && durSec > MAX_CLIP_SECONDS) || (bytes > 0 && bytes > MAX_CLIP_BYTES)) {
+            rejected = `Videos must be ${MAX_CLIP_SECONDS}s and ${MAX_CLIP_GB}GB or less.`;
+            return false;
+          }
+          return true;
+        });
+        if (rejected) Alert.alert('Clip too large', rejected);
+
+        const newFiles: SelectedFile[] = accepted.map((asset) => {
+          const isVideo = asset.type === 'video';
+          return {
+            uri: asset.uri,
+            name: asset.fileName ?? (isVideo ? `clip_${Date.now()}.mp4` : `photo_${Date.now()}.jpg`),
+            size: asset.fileSize ?? 0,
+            type: asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
+            takenAt: parseExifTakenAt(asset),
+            durationSeconds: isVideo && asset.duration != null ? asset.duration / 1000 : null,
+          };
+        });
 
         // Dedupe by name + size
         setFiles((prev) => {
@@ -204,7 +228,7 @@ function SessionOrBoardCreate() {
       clearTimeout(loaderTimer);
       setIsImporting(false);
     }
-  }, []);
+  }, [isShaper]);
 
   const removeFile = useCallback((index: number) => {
     setFiles((prev) => prev.filter((_, i) => i !== index));
@@ -312,6 +336,8 @@ function SessionOrBoardCreate() {
         type: f.type,
         lastModified: orderedTimestamps[idx],
         source: 'device',
+        // Video only; backend classifies media_type from MIME + gates duration.
+        durationSeconds: f.durationSeconds ?? null,
       }));
 
       const sessionResult = await createSession({
@@ -615,10 +641,10 @@ function SessionOrBoardCreate() {
           >
             <Ionicons name="images-outline" size={28} color={isDark ? '#6b7280' : '#9ca3af'} />
             <Text style={[styles.addPhotosText, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-              Tap to select photos
+              {isShaper ? 'Tap to select photos' : 'Tap to select photos or clips'}
             </Text>
             <Text style={{ color: isDark ? '#4b5563' : '#9ca3af', fontSize: 12 }}>
-              JPG, PNG, HEIC, RAW supported
+              {isShaper ? 'JPG, PNG, HEIC, RAW supported' : 'Photos (JPG, PNG, HEIC, RAW) + video clips'}
             </Text>
           </Pressable>
 

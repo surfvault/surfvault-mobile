@@ -18,6 +18,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
+import { useViewableItems } from '../../src/hooks/useViewableItems';
 import { useSmartBack } from '../../src/context/NavigationContext';
 import {
   useGetSurfBreakWithLatestSessionsQuery,
@@ -63,6 +64,7 @@ export default function SurfBreakDetailScreen() {
   const { isAuthenticated } = useAuth();
   const requireAuth = useRequireAuth();
   const colorScheme = useColorScheme();
+  const { viewabilityConfig, onViewableItemsChanged, isItemViewable, screenFocused } = useViewableItems();
   const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
 
@@ -298,23 +300,26 @@ export default function SurfBreakDetailScreen() {
           <FlatList
             data={feedRows}
             keyExtractor={(row) => row.key}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
             renderItem={({ item: row }) => {
               if (row.type === 'ad') {
                 const promo = row.data[0] as any;
                 // Promo rows carry _kind to distinguish ad vs shaper since they
                 // share the same FeedRow type ('ad' here is a generic "promo").
                 if (promo?._kind === 'shaper') {
-                  return <ShaperFeedCard shaper={promo} />;
+                  return <ShaperFeedCard shaper={promo} isViewable={isItemViewable(row.key)} />;
                 }
                 return (
                   <SponsoredCard
                     ad={promo}
                     placement="content"
                     surfBreakId={breakData?.id}
+                    isViewable={isItemViewable(row.key)}
                   />
                 );
               }
-              return <SessionCard session={row.data} enableCarousel />;
+              return <SessionCard session={row.data} enableCarousel isViewable={isItemViewable(row.key)} />;
             }}
             ListHeaderComponent={
               <View>
@@ -362,6 +367,7 @@ export default function SurfBreakDetailScreen() {
                         ad={ad}
                         placement="content"
                         surfBreakId={breakData?.id}
+                        isViewable={screenFocused}
                       />
                     ))}
                   </View>

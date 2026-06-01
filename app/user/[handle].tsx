@@ -20,6 +20,7 @@ import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-rou
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
 import { useUser } from '../../src/context/UserProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
+import { useViewableItems } from '../../src/hooks/useViewableItems';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import ProfileHeader from '../../src/components/ProfileHeader';
 import {
@@ -56,6 +57,7 @@ export default function UserProfileScreen() {
   const smartBack = useSmartBack();
   const trackedPush = useTrackedPush();
   const colorScheme = useColorScheme();
+  const { viewabilityConfig, onViewableItemsChanged, isItemViewable, screenFocused } = useViewableItems();
   const isDark = colorScheme === 'dark';
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list'>('grid');
@@ -471,6 +473,8 @@ export default function UserProfileScreen() {
           <FlatList
             data={isBlocked || isLocked ? [] : sessions}
             keyExtractor={(item) => item.session_id ?? item.id}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
             numColumns={isBlocked || isLocked ? 1 : (activeTab === 'grid' ? 3 : 1)}
             key={isBlocked ? 'blocked' : (isLocked ? 'locked' : (activeTab === 'grid' ? 'grid' : 'list'))}
             renderItem={({ item }) => {
@@ -505,12 +509,40 @@ export default function UserProfileScreen() {
                         )}
                       </View>
                     )}
-                    {item.photo_count > 0 && (
-                      <View style={styles.gridPhotoBadge} pointerEvents="none">
-                        <Ionicons name="images-outline" size={10} color="#fff" />
-                        <Text style={styles.gridPhotoBadgeText}>{item.photo_count}</Text>
+                    {/* Video thumbnail indicator — tile navigates, so a center
+                        videocam badge (not a ▶). */}
+                    {item.thumbnail_media_type === 'video' && (
+                      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                        <View style={styles.gridVideoBadgeWrap}>
+                          <View style={styles.gridVideoBadge}>
+                            <Ionicons name="videocam" size={14} color="#fff" />
+                          </View>
+                        </View>
                       </View>
                     )}
+                    {(() => {
+                      const videoCount = item.video_count ?? 0;
+                      // photo_count is TOTAL media; subtract videos to avoid double-counting.
+                      const photoOnly = Math.max(0, (item.photo_count ?? 0) - videoCount);
+                      if (photoOnly === 0 && videoCount === 0) return null;
+                      return (
+                        <View style={styles.gridPhotoBadge} pointerEvents="none">
+                          {photoOnly > 0 && (
+                            <>
+                              <Ionicons name="images-outline" size={10} color="#fff" />
+                              <Text style={styles.gridPhotoBadgeText}>{photoOnly}</Text>
+                            </>
+                          )}
+                          {photoOnly > 0 && videoCount > 0 && <Text style={styles.gridPhotoBadgeText}> </Text>}
+                          {videoCount > 0 && (
+                            <>
+                              <Ionicons name="videocam-outline" size={10} color="#fff" />
+                              <Text style={styles.gridPhotoBadgeText}>{videoCount}</Text>
+                            </>
+                          )}
+                        </View>
+                      );
+                    })()}
                     {isSelf && (
                       <Pressable
                         onPress={(e) => {
@@ -526,7 +558,7 @@ export default function UserProfileScreen() {
                   </Pressable>
                 );
               }
-              return <SessionCard session={item} hidePhotographer compact hideFavoriteBreak />;
+              return <SessionCard session={item} hidePhotographer compact hideFavoriteBreak isViewable={isItemViewable(item.session_id ?? item.id)} />;
             }}
             ListHeaderComponent={
               <>
@@ -573,7 +605,7 @@ export default function UserProfileScreen() {
                         Support the surf community near you
                       </Text>
                       {emptyStateAds.slice(0, 3).map((ad) => (
-                        <SponsoredCard key={ad.id} ad={ad} placement="content" />
+                        <SponsoredCard key={ad.id} ad={ad} placement="content" isViewable={screenFocused} />
                       ))}
                     </>
                   )}
@@ -713,6 +745,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5, paddingVertical: 2,
   },
   gridPhotoBadgeText: { fontSize: 10, fontWeight: '600', color: '#fff' },
+  gridVideoBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  gridVideoBadge: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   // Bottom-right ellipsis (self only). Matches shaper grid ellipsisBtn.
   gridEllipsisBtn: {
     position: 'absolute', bottom: 4, right: 4,

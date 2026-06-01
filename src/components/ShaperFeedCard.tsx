@@ -27,6 +27,9 @@ import ReportBoardSheet from './ReportBoardSheet';
 
 interface ShaperFeedCardProps {
   shaper: BoardroomShaper;
+  // Off-screen feed cards pass false so the board clip pauses instead of
+  // playing under the covers. Defaults true for standalone usage.
+  isViewable?: boolean;
 }
 
 // Cap mirrors backend `MAX_FEATURED_BOARDS_PER_SHAPER` (9). A trailing
@@ -46,7 +49,7 @@ type Slide = { kind: 'board'; board: Board } | { kind: 'cta' };
  * Aggregating per-shaper (vs per-board) keeps a prolific shaper from cramping
  * the feed with multiple slots.
  */
-export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
+export default function ShaperFeedCard({ shaper, isViewable = true }: ShaperFeedCardProps) {
   const isDark = useColorScheme() === 'dark';
   const trackedPush = useTrackedPush();
   const requireAuth = useRequireAuth();
@@ -142,7 +145,7 @@ export default function ShaperFeedCard({ shaper }: ShaperFeedCardProps) {
               {item.kind === 'cta' ? (
                 <CtaSlide width={width} isDark={isDark} />
               ) : (
-                <BoardSlide board={item.board} width={width} isDark={isDark} active={index === activeIdx} />
+                <BoardSlide board={item.board} width={width} isDark={isDark} active={index === activeIdx && isViewable} />
               )}
             </Pressable>
           )}
