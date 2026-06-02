@@ -61,16 +61,19 @@ import {
 } from '../../src/store';
 import { AccessBanner, PrivateGalleryCard } from '../../src/components/PrivateGalleryGate';
 import ImageViewing from 'react-native-image-viewing';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ReportSessionSheet from '../../src/components/ReportSessionSheet';
 import { toOriginalKey, getDirectWatermarkUrl } from '../../src/helpers/mediaUrl';
-import { savePhotoToCameraRoll, savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
+import { checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
+import { useSave } from '../../src/context/SaveContext';
 import { useUserPreferences } from '../../src/helpers/preferences';
 import { useUpload } from '../../src/context/UploadContext';
 import { generateUUID } from '../../src/helpers/uuid';
+import { MAX_CLIP_SECONDS, MAX_CLIP_BYTES, MAX_CLIP_GB } from '../../src/helpers/clipMedia';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
 import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photoTimestamps';
 import { getViewerHash } from '../../src/helpers/viewerHash';
@@ -109,6 +112,31 @@ const formatDate = (dateStr?: string) => {
   const d = new Date(dateStr.split('T')[0] + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 };
+
+/** Fullscreen session-clip player (ImageViewing is image-only). */
+function SessionVideoPlayer({ url, onClose }: { url: string; onClose: () => void }) {
+  const player = useVideoPlayer(url, (p) => {
+    p.loop = true;
+    p.play();
+  });
+  return (
+    <View style={sessionVideoStyles.overlay}>
+      <VideoView player={player} style={sessionVideoStyles.player} contentFit="contain" nativeControls />
+      <Pressable onPress={onClose} hitSlop={10} style={sessionVideoStyles.close}>
+        <Ionicons name="close" size={26} color="#ffffff" />
+      </Pressable>
+    </View>
+  );
+}
+
+const sessionVideoStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', alignItems: 'center', justifyContent: 'center' },
+  player: { width: '100%', height: '80%' },
+  close: {
+    position: 'absolute', top: 50, right: 20, width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center',
+  },
+});
 
 export default function SessionDetailScreen() {
   const { sessionId, group: groupNameFromUrl } = useLocalSearchParams<{ sessionId: string; group?: string }>();
@@ -199,6 +227,8 @@ export default function SessionDetailScreen() {
 
   // Photo viewer (lightbox) — windowed to avoid slow FlatList layout for large sessions
   const [viewerVisible, setViewerVisible] = useState(false);
+  // Clip player overlay (ImageViewing is image-only) — the watermarked preview.
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerWindowStart, setViewerWindowStart] = useState(0);
 
@@ -278,6 +308,7 @@ export default function SessionDetailScreen() {
   const [updateGroupPhotos] = useUpdateGroupPhotosMutation();
   const [updateSession] = useUpdateSessionMutation();
   const { startUpload, upload: activeUpload } = useUpload();
+  const { startSave } = useSave();
 
   // Thumbnail tracking
   const [thumbnailPhotoId, setThumbnailPhotoId] = useState<string | null>(null);
@@ -757,8 +788,8 @@ export default function SessionDetailScreen() {
     if (sessionAction === 'delete') {
       const count = selectedPhotoIds.length;
       Alert.alert(
-        'Delete Photos',
-        `${count} photo${count !== 1 ? 's' : ''} will be permanently deleted from all storage. This cannot be undone.`,
+        'Delete Media',
+        `${count} item${count !== 1 ? 's' : ''} will be permanently deleted from all storage. This cannot be undone.`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -796,7 +827,7 @@ export default function SessionDetailScreen() {
                 seenMediaRef.current = prevSeen;
                 prevInitialFingerprintRef.current = prevFingerprint;
                 setSessionMedia(prevMedia);
-                Alert.alert('Error', 'Failed to delete photos. They have been restored.');
+                Alert.alert('Error', 'Failed to delete media. They have been restored.');
               } finally {
                 setIsProcessingAction(false);
               }
@@ -839,22 +870,15 @@ export default function SessionDetailScreen() {
           // never throw, so a bug in it cannot affect the request.
           Alert.alert(
             'Request Sent',
-            `Photo request sent to @${sessionHandle}. (${selectedPhotoIds.length} photo${selectedPhotoIds.length > 1 ? 's' : ''})`,
+            `Media request sent to @${sessionHandle}. (${selectedPhotoIds.length} item${selectedPhotoIds.length > 1 ? 's' : ''})`,
             [{ text: 'OK', onPress: () => { void promptAfterRequest().catch(() => {}); } }],
           );
           break;
         case 'download': {
-          // Owner saving their own photos to the camera roll (the auto-grant
-          // surfer path is handled by runAutoGrantDownload via the picker).
-          const total = selectedPhotoIds.length;
-          const result = await savePhotosToCameraRoll(selectedPhotoIds);
-          if (result.saved === total) {
-            Alert.alert('Saved', `${result.saved} photo${result.saved > 1 ? 's' : ''} saved to your camera roll.`);
-          } else if (result.saved > 0) {
-            Alert.alert('Partially Saved', `${result.saved}/${total} photos saved. ${result.failed} failed.`);
-          } else {
-            Alert.alert('Error', result.errors[0] ?? 'Failed to save photos.');
-          }
+          // Owner saving their own media to the camera roll. Hand off to the
+          // global save queue (floating pill + completion notification) so the
+          // page is free immediately — no on-page spinner for big clips.
+          startSave([...selectedPhotoIds]);
           break;
         }
       }
@@ -897,19 +921,13 @@ export default function SessionDetailScreen() {
         }
 
         if (dest === 'photos' || dest === 'both') {
-          const total = ids.length;
-          const result = await savePhotosToCameraRoll(ids);
-          if (dest === 'both' && result.saved === total) {
-            Alert.alert('Done', `Saved to your vault and ${result.saved} photo${result.saved > 1 ? 's' : ''} to your camera roll.`);
-          } else if (result.saved === total) {
-            Alert.alert('Saved', `${result.saved} photo${result.saved > 1 ? 's' : ''} saved to your camera roll.`);
-          } else if (result.saved > 0) {
-            Alert.alert('Partially Saved', `${result.saved}/${total} photos saved to camera roll. ${result.failed} failed.${dest === 'both' ? ' Vault save succeeded.' : ''}`);
-          } else {
-            Alert.alert(dest === 'both' ? 'Vault Only' : 'Error', dest === 'both' ? 'Saved to your vault, but camera roll save failed.' : (result.errors[0] ?? 'Failed to save photos.'));
+          // Camera-roll save runs in the global queue (pill + notification).
+          startSave(ids);
+          if (dest === 'both') {
+            Alert.alert('Saved to Vault', 'Saved to your vault — saving to your camera roll…');
           }
         } else {
-          Alert.alert('Saved to Vault', `${ids.length} photo${ids.length > 1 ? 's' : ''} saved to your vault.`);
+          Alert.alert('Saved to Vault', `${ids.length} item${ids.length > 1 ? 's' : ''} saved to your vault.`);
         }
         cancelAction();
       } catch {
@@ -944,7 +962,7 @@ export default function SessionDetailScreen() {
       Alert.alert('Done', `${action === 'add' ? 'Added' : 'Removed'} ${selectedPhotoIds.length} photo${selectedPhotoIds.length !== 1 ? 's' : ''} ${action === 'add' ? 'to' : 'from'} group.`);
       cancelAction();
     } catch {
-      Alert.alert('Error', 'Failed to update group photos.');
+      Alert.alert('Error', 'Failed to update group media.');
     }
   }, [sessionAction, selectedPhotoIds, session?.id, groups, updateGroupPhotos, cancelAction]);
 
@@ -980,7 +998,7 @@ export default function SessionDetailScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: true,
       quality: 0.95,
       exif: true,
@@ -988,8 +1006,23 @@ export default function SessionDetailScreen() {
 
     if (result.canceled || result.assets.length === 0) return;
 
+    // Clip caps (primary gate; backend is the net).
+    let clipRejected: string | null = null;
+    const assets = result.assets.filter((a) => {
+      if (a.type !== 'video') return true;
+      const durSec = a.duration != null ? a.duration / 1000 : null;
+      const bytes = Number(a.fileSize ?? 0);
+      if ((durSec != null && durSec > MAX_CLIP_SECONDS) || (bytes > 0 && bytes > MAX_CLIP_BYTES)) {
+        clipRejected = `Videos must be ${MAX_CLIP_SECONDS}s and ${MAX_CLIP_GB}GB or less.`;
+        return false;
+      }
+      return true;
+    });
+    if (clipRejected) Alert.alert('Clip too large', clipRejected);
+    if (assets.length === 0) return;
+
     // Storage check
-    const totalBytes = result.assets.reduce((sum, a) => sum + (a.fileSize ?? 0), 0);
+    const totalBytes = assets.reduce((sum, a) => sum + (a.fileSize ?? 0), 0);
     const storageCheck = checkStorageCapacity(user, totalBytes);
     if (!storageCheck.hasSpace) {
       showStorageLimitAlert(storageCheck, { email: (user as any)?.email });
@@ -998,14 +1031,18 @@ export default function SessionDetailScreen() {
 
     setIsStartingUpload(true);
     try {
-      const picked = result.assets.map((asset) => ({
-        uuid: generateUUID(),
-        uri: asset.uri,
-        name: asset.fileName ?? `photo_${Date.now()}.jpg`,
-        size: asset.fileSize ?? 0,
-        type: asset.mimeType ?? 'image/jpeg',
-        takenAt: parseExifTakenAt(asset),
-      }));
+      const picked = assets.map((asset) => {
+        const isVideo = asset.type === 'video';
+        return {
+          uuid: generateUUID(),
+          uri: asset.uri,
+          name: asset.fileName ?? (isVideo ? `clip_${Date.now()}.mp4` : `photo_${Date.now()}.jpg`),
+          size: asset.fileSize ?? 0,
+          type: asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
+          takenAt: parseExifTakenAt(asset),
+          durationSeconds: isVideo && asset.duration != null ? asset.duration / 1000 : null,
+        };
+      });
       // Bake capture-ordered timestamps so the gallery (sorted by
       // photo_taken_at, file_name, id) shows photos in shot order.
       const orderedTimestamps = bakeOrderedTimestamps(picked);
@@ -1018,7 +1055,7 @@ export default function SessionDetailScreen() {
 
       const uploadResult = await saveSurfMedia({
         sessionId: session.id,
-        mediaFiles: filesMapped.map((f) => ({ uuid: f.uuid, name: f.name, size: f.size, type: f.type, lastModified: f.lastModified, source: 'device' })),
+        mediaFiles: filesMapped.map((f) => ({ uuid: f.uuid, name: f.name, size: f.size, type: f.type, lastModified: f.lastModified, source: 'device', durationSeconds: f.durationSeconds ?? null })),
         totalSizeInGB,
       }).unwrap();
 
@@ -1130,9 +1167,9 @@ export default function SessionDetailScreen() {
     }] : []),
     ...(isOwner ? [{
       options: [
-        { label: 'Upload Photos', icon: 'cloud-upload-outline' as const, onPress: handleUploadPhotos },
-        { label: 'Save Photos', icon: 'download-outline' as const, onPress: () => handleStartAction('download') },
-        { label: 'Delete Photos', icon: 'trash-outline' as const, destructive: true, onPress: () => handleStartAction('delete') },
+        { label: 'Upload Media', icon: 'cloud-upload-outline' as const, onPress: handleUploadPhotos },
+        { label: 'Save Media', icon: 'download-outline' as const, onPress: () => handleStartAction('download') },
+        { label: 'Delete Media', icon: 'trash-outline' as const, destructive: true, onPress: () => handleStartAction('delete') },
       ],
     }] : []),
     ...(!isOwner ? [{
@@ -1233,12 +1270,16 @@ export default function SessionDetailScreen() {
       const isSelected = selectedPhotoIds.includes(item.id);
       const inActionMode = !!sessionAction;
       const isThumbnail = isOwner && item.id === thumbnailPhotoId;
+      const isVideo = item.media_type === 'video';
 
       return (
         <Pressable
           onPress={async () => {
             if (inActionMode) {
               togglePhotoSelection(item.id);
+            } else if (isVideo) {
+              // ImageViewing is image-only — clips open the video overlay.
+              if (item.preview_video_url) setActiveVideoUrl(item.preview_video_url);
             } else {
               const WINDOW = 20;
               const start = Math.max(0, index - WINDOW);
@@ -1265,6 +1306,13 @@ export default function SessionDetailScreen() {
               transition={200}
               recyclingKey={item.id}
             />
+            {isVideo && (
+              <View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center' }]} pointerEvents="none">
+                <View style={styles.videoPlayBadge}>
+                  <Ionicons name={item.preview_video_url ? 'play' : 'hourglass-outline'} size={16} color="#fff" />
+                </View>
+              </View>
+            )}
             {inActionMode && (
               <View style={[styles.checkbox, isSelected && { backgroundColor: ac.btn, borderColor: ac.btn }]}>
                 {isSelected && <Ionicons name="checkmark" size={12} color="#ffffff" />}
@@ -1462,7 +1510,7 @@ export default function SessionDetailScreen() {
                 <View style={{ alignItems: 'center', paddingVertical: 48 }}>
                   <Ionicons name="images-outline" size={32} color="#9ca3af" style={{ marginBottom: 8 }} />
                   <Text style={{ color: '#9ca3af', fontSize: 15 }}>
-                    {activeGroupId ? 'No photos in this group' : 'No photos'}
+                    {activeGroupId ? 'No media in this group' : 'No media'}
                   </Text>
                 </View>
               ) : null
@@ -1496,7 +1544,7 @@ export default function SessionDetailScreen() {
             style={[styles.requestFab, { bottom: insets.bottom + 16 }]}
           >
             <Ionicons name={autoGrantDownload ? 'download-outline' : 'camera-outline'} size={18} color="#ffffff" />
-            <Text style={styles.requestFabText}>{autoGrantDownload ? 'Download Photos' : 'Request Photos'}</Text>
+            <Text style={styles.requestFabText}>{autoGrantDownload ? 'Download Media' : 'Request Media'}</Text>
           </Pressable>
         )}
 
@@ -1518,7 +1566,7 @@ export default function SessionDetailScreen() {
                   </Text>
                   <Text style={[styles.actionBarHint, { color: isDark ? ac.textDark : ac.text }]}>
                     {selectedPhotoIds.length === 0
-                      ? 'Select photos, then tap a group below'
+                      ? 'Select media, then tap a group below'
                       : `Tap a group to ${sessionAction === 'group' ? 'assign' : 'remove'}`}
                   </Text>
                 </View>
@@ -1606,8 +1654,8 @@ export default function SessionDetailScreen() {
         visible={downloadSheetVisible}
         onClose={() => setDownloadSheetVisible(false)}
         header={{
-          title: 'Download Photos',
-          subtitle: `Where should ${selectedPhotoIds.length} photo${selectedPhotoIds.length !== 1 ? 's' : ''} go?`,
+          title: 'Download Media',
+          subtitle: `Where should ${selectedPhotoIds.length} item${selectedPhotoIds.length !== 1 ? 's' : ''} go?`,
         }}
         sections={[
           {
@@ -1811,7 +1859,7 @@ export default function SessionDetailScreen() {
                           <Ionicons name="pencil" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
                         </Pressable>
                         <Pressable onPress={() => {
-                          Alert.alert('Delete Group', `Delete "${g.name}"? Photos will not be deleted.`, [
+                          Alert.alert('Delete Group', `Delete "${g.name}"? Media will not be deleted.`, [
                             { text: 'Cancel', style: 'cancel' },
                             { text: 'Delete', style: 'destructive', onPress: () => deleteGroup({ sessionId: session!.id, groupId: g.id }) },
                           ]);
@@ -1959,6 +2007,10 @@ export default function SessionDetailScreen() {
           images={sessionMedia
             .slice(viewerWindowStart)
             .map((m) => {
+              // Video slots show their poster in the image viewer (the viewer is
+              // only OPENED from photo taps, but a swipe could land on a video
+              // index — show the still, not a broken full-res key).
+              if (m.media_type === 'video') return { uri: m.poster_url ?? m.thumbnail ?? '' };
               const key = getPhotoKey(m);
               return { uri: getDirectWatermarkUrl(key) };
             })}
@@ -1971,6 +2023,18 @@ export default function SessionDetailScreen() {
           doubleTapToZoomEnabled
         />
       )}
+
+      {/* Clip player overlay — the watermarked full-length preview. */}
+      <Modal
+        visible={activeVideoUrl !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setActiveVideoUrl(null)}
+      >
+        {activeVideoUrl ? (
+          <SessionVideoPlayer url={activeVideoUrl} onClose={() => setActiveVideoUrl(null)} />
+        ) : null}
+      </Modal>
     </>
   );
 }
@@ -2028,6 +2092,10 @@ const styles = StyleSheet.create({
   thumbnailBadge: {
     position: 'absolute', top: 6, left: 6, width: 24, height: 24, borderRadius: 12,
     backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center',
+  },
+  videoPlayBadge: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center', paddingLeft: 2,
   },
   requestFab: {
     position: 'absolute', bottom: 24, right: 16,

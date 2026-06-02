@@ -415,7 +415,15 @@ const surfApi = rootApi.injectEndpoints({
         sessionDate: string;
         hideLocation: boolean;
         notifyFollowers: boolean;
-        files: Array<{ name: string; size: number; type: string }>;
+        files: Array<{
+          name: string;
+          size: number;
+          type: string;
+          uuid?: string;
+          lastModified?: number | string;
+          source?: string;
+          durationSeconds?: number | null;
+        }>;
         totalSizeInGB: number;
       }) => ({
         url: '/surf-session',

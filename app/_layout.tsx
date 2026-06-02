@@ -19,6 +19,8 @@ import { UserProvider } from '../src/context/UserProvider';
 import { usePusher } from '../src/hooks/usePusher';
 import { NavigationProvider } from '../src/context/NavigationContext';
 import { UploadProvider } from '../src/context/UploadContext';
+import { SaveProvider } from '../src/context/SaveContext';
+import SaveProgressPill from '../src/components/SaveProgressPill';
 import { getOrCreateDeviceId, getDevicePlatform } from '../src/helpers/deviceId';
 import UploadProgressPill from '../src/components/UploadProgressPill';
 import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
@@ -241,6 +243,7 @@ function AppShell() {
           <Slot />
         )}
         <UploadProgressPill />
+        <SaveProgressPill />
         <NotificationPrimingModal
           isOnboarded={isOnboarded}
           onPermissionChanged={registerPushToken}
@@ -273,7 +276,9 @@ export default function RootLayout() {
               <AuthProvider>
                 <ActionSheetProvider useCustomActionSheet>
                   <UploadProvider>
-                    <AppShell />
+                    <SaveProvider>
+                      <AppShell />
+                    </SaveProvider>
                   </UploadProvider>
                 </ActionSheetProvider>
               </AuthProvider>

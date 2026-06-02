@@ -110,7 +110,7 @@ export default function NotificationPrimingModal({ isOnboarded, onPermissionChan
           <View style={s.bullets}>
             <BulletRow isDark={isDark} icon="camera-outline" text="Photographers you follow post new sessions" />
             <BulletRow isDark={isDark} icon="chatbubble-outline" text="You receive a new message" />
-            <BulletRow isDark={isDark} icon="key-outline" text="Your photo access request is approved" />
+            <BulletRow isDark={isDark} icon="key-outline" text="Your media access request is approved" />
           </View>
 
           <Pressable

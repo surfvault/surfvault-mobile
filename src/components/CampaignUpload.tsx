@@ -63,9 +63,21 @@ const fmtWindowDate = (d: Date) =>
 type Creative = {
   uuid: string;
   uri: string;        // local file uri (new) OR remote https url (existing)
-  type: string;       // jpg | png | webp
+  type: string;       // jpg | png | webp | mp4 | mov | webm | m4v
   remote?: boolean;   // true = already on S3, skip re-upload
+  mediaType?: 'photo' | 'video';
+  posterUrl?: string | null;      // remote clip poster (display + carry-forward)
+  durationSeconds?: number | null; // measured at pick; gated + carried forward
+  fileSize?: number | null;        // bytes (video) — for the presign size net
 };
+
+// Max clip length (seconds) + original size (bytes). Mirror shared/media.ts.
+// The picker is the primary gate; the API is the backend safety net.
+const MAX_CLIP_SECONDS = 120;
+const MAX_CLIP_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_CLIP_SIZE_LABEL = MAX_CLIP_BYTES >= 1024 ** 3
+  ? `${+(MAX_CLIP_BYTES / 1024 ** 3).toFixed(1)} GB`
+  : `${Math.round(MAX_CLIP_BYTES / 1024 ** 2)} MB`;
 
 /**
  * Advertiser variant of the Session tab + the campaign edit screen. Mobile
@@ -166,12 +178,20 @@ export default function CampaignUpload({
     }
     const media = Array.isArray(editingAd.media) ? [...editingAd.media] : [];
     media.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    const remoteCreatives: Creative[] = media.map((m: any) => ({
-      uuid: m.id ?? generateUUID(),
-      uri: m.s3_key,
-      type: 'jpg',
-      remote: true,
-    }));
+    const remoteCreatives: Creative[] = media.map((m: any) => {
+      const isVideo = m.type === 'video';
+      return {
+        uuid: m.id ?? generateUUID(),
+        // For a clip, display the poster still (s3_key is the transcoded MP4);
+        // null while still processing.
+        uri: isVideo ? (m.poster_s3_key || m.s3_key) : m.s3_key,
+        type: isVideo ? 'mp4' : 'jpg',
+        remote: true,
+        mediaType: isVideo ? 'video' : 'photo',
+        posterUrl: m.poster_s3_key ?? null,
+        durationSeconds: m.duration_seconds ?? null,
+      };
+    });
     setCreatives(remoteCreatives);
     // Thumbnail index = position of thumbnail_ad_media_id in the sorted list.
     if (editingAd.thumbnail_ad_media_id) {
@@ -194,7 +214,7 @@ export default function CampaignUpload({
     }
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ['images', 'videos'],
         allowsMultipleSelection: true,
         selectionLimit: remaining,
         allowsEditing: false,
@@ -207,14 +227,41 @@ export default function CampaignUpload({
       // picker's present animation.
       setIsImporting(true);
 
-      // Transcode every picked image to JPEG. iOS picker returns HEIC by
-      // default, and browser <img> tags can't render HEIC even though
-      // expo-image (mobile) can — campaigns are viewed on both surfaces, so
-      // mobile-only rendering is a bug. Same pattern the avatar uploader
-      // uses (app/edit-profile/index.tsx). 0.85 quality keeps file sizes
-      // sane while staying well above noticeable-loss territory.
-      const newOnes = await Promise.all(
+      // Process each asset: images → transcode to JPEG (iOS returns HEIC, which
+      // web <img> can't render — campaigns are viewed on both surfaces); videos
+      // → pass through untouched (the server-side worker transcodes to web-safe
+      // MP4 + poster) but gate on the duration cap first.
+      let rejectedReason: string | null = null;
+      const processed = await Promise.all(
         result.assets.map(async (asset) => {
+          if (asset.type === 'video') {
+            if (asset.fileSize != null && asset.fileSize > MAX_CLIP_BYTES) {
+              rejectedReason = `Videos must be ${MAX_CLIP_SIZE_LABEL} or less.`;
+              return null;
+            }
+            // ImagePicker reports video duration in milliseconds.
+            const durationSeconds = asset.duration != null ? asset.duration / 1000 : null;
+            if (durationSeconds != null && durationSeconds > MAX_CLIP_SECONDS) {
+              rejectedReason = `Videos must be ${MAX_CLIP_SECONDS}s or less.`;
+              return null;
+            }
+            const name = (asset.fileName || asset.uri || '').toLowerCase();
+            const m = name.match(/\.([a-z0-9]+)(?:\?|$)/);
+            const rawExt = m ? m[1] : '';
+            const ext = ['mp4', 'mov', 'webm', 'm4v'].includes(rawExt)
+              ? rawExt
+              : (asset.mimeType?.includes('quicktime') ? 'mov' : 'mp4');
+            return {
+              uri: asset.uri,
+              uuid: generateUUID(),
+              type: ext,
+              remote: false,
+              mediaType: 'video' as const,
+              durationSeconds,
+              posterUrl: null,
+              fileSize: asset.fileSize ?? null,
+            };
+          }
           let outputUri = asset.uri;
           if (ImageManipulator?.manipulateAsync) {
             try {
@@ -228,16 +275,14 @@ export default function CampaignUpload({
               );
               outputUri = manipulated.uri;
             } catch (err) {
-              // Best-effort: if manipulation fails (e.g. unsupported
-              // format), fall through to the raw uri. The browser may
-              // still fail to render the result, but at least submission
-              // doesn't break entirely.
               console.warn('Image transcode failed, uploading original:', err);
             }
           }
-          return { uri: outputUri, uuid: generateUUID(), type: 'jpg', remote: false };
+          return { uri: outputUri, uuid: generateUUID(), type: 'jpg', remote: false, mediaType: 'photo' as const };
         }),
       );
+      const newOnes = processed.filter((c) => c != null) as Creative[];
+      if (rejectedReason) Alert.alert('Clip too long', rejectedReason);
       setCreatives((prev) => [...prev, ...newOnes].slice(0, MAX_MEDIA));
     } finally {
       setIsImporting(false);
@@ -374,7 +419,7 @@ export default function CampaignUpload({
 
       if (newCreatives.length) {
         const presigned = await createMyAdMediaPresignedUrls({
-          files: newCreatives.map((c) => ({ file_uuid: c.uuid, file_type: c.type })),
+          files: newCreatives.map((c) => ({ file_uuid: c.uuid, file_type: c.type, file_size: c.fileSize ?? undefined })),
         }).unwrap();
         const mappings = presigned?.results?.idMappedPresignedUrls ?? [];
         const byUuid = new Map(mappings.map((m) => [m.file_uuid, m]));
@@ -384,23 +429,36 @@ export default function CampaignUpload({
           if (!m?.url) throw new Error(`Failed to provision upload URL for slide ${c.uuid}`);
           const blobResp = await fetch(c.uri);
           const blob = await blobResp.blob();
+          const contentType = c.mediaType === 'video'
+            ? `video/${c.type === 'mov' ? 'quicktime' : c.type}`
+            : `image/${c.type === 'jpg' ? 'jpeg' : c.type}`;
           const putResp = await fetch(m.url, {
             method: 'PUT',
             body: blob,
-            headers: { 'Content-Type': `image/${c.type === 'jpg' ? 'jpeg' : c.type}` },
+            headers: { 'Content-Type': contentType },
           });
           if (!putResp.ok) throw new Error(`S3 upload failed: ${putResp.status}`);
           urlByUuid.set(c.uuid, m.media_url);
         }));
       }
 
-      // media_urls preserves display order across both remote + new slides.
-      const mediaUrls = creatives.map((c) => urlByUuid.get(c.uuid)!).filter(Boolean);
+      // media_urls + parallel arrays preserve display order across remote +
+      // new slides, kept index-aligned by filtering creatives together.
+      const orderedCreatives = creatives.filter((c) => urlByUuid.get(c.uuid));
+      const mediaUrls = orderedCreatives.map((c) => urlByUuid.get(c.uuid)!);
+      const mediaTypes = orderedCreatives.map((c) => (c.mediaType === 'video' ? 'video' : 'image'));
+      // Carry an already-transcoded clip's poster/duration through an edit
+      // (updateMyAd DELETE+re-INSERTs); new clips have none → server re-enqueues.
+      const mediaPosters = orderedCreatives.map((c) => (c.mediaType === 'video' ? (c.posterUrl ?? null) : null));
+      const mediaDurations = orderedCreatives.map((c) => (c.mediaType === 'video' ? (c.durationSeconds ?? null) : null));
 
       const payload = {
         placement_key: placement,
-        media_type: 'image' as const,
+        media_type: mediaTypes.includes('video') ? 'video' : 'image',
         media_urls: mediaUrls,
+        media_types: mediaTypes,
+        media_posters: mediaPosters,
+        media_durations: mediaDurations,
         thumbnail_index: thumbnailIndex,
         click_url: clickUrl.trim() || null,
         headline: headline.trim(),
@@ -987,7 +1045,25 @@ export default function CampaignUpload({
                           },
                         ]}
                       >
-                        <Image source={{ uri: c.uri }} style={s.slideTileImage} contentFit="cover" />
+                        {c.mediaType === 'video' ? (
+                          c.posterUrl ? (
+                            <Image source={{ uri: c.posterUrl }} style={s.slideTileImage} contentFit="cover" />
+                          ) : (
+                            <View style={[s.slideTileImage, { alignItems: 'center', justifyContent: 'center', backgroundColor: isDark ? '#0f172a' : '#1f2937' }]}>
+                              <Ionicons name={c.remote ? 'hourglass-outline' : 'videocam'} size={22} color="#9ca3af" />
+                              <Text style={{ color: '#9ca3af', fontSize: 9, marginTop: 2 }} numberOfLines={1}>
+                                {c.remote ? 'Processing…' : 'Video'}
+                              </Text>
+                            </View>
+                          )
+                        ) : (
+                          <Image source={{ uri: c.uri }} style={s.slideTileImage} contentFit="cover" />
+                        )}
+                        {c.mediaType === 'video' && c.posterUrl && (
+                          <View style={s.slidePlayBadge} pointerEvents="none">
+                            <Ionicons name="play" size={14} color="#fff" />
+                          </View>
+                        )}
                         {isThumb && (
                           <View style={s.thumbnailBadge}>
                             <Text style={s.thumbnailBadgeText}>Thumbnail</Text>
@@ -1049,7 +1125,7 @@ export default function CampaignUpload({
         <View style={[s.importingOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.85)' }]}>
           <View style={[s.importingCard, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
             <ActivityIndicator size="large" color="#0ea5e9" />
-            <Text style={[s.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing photos…</Text>
+            <Text style={[s.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing media…</Text>
           </View>
         </View>
       )}
@@ -1182,6 +1258,20 @@ const s = StyleSheet.create({
     position: 'relative',
   },
   slideTileImage: { width: '100%', height: '100%' },
+  slidePlayBadge: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    width: 32,
+    height: 32,
+    marginTop: -16,
+    marginLeft: -16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingLeft: 2,
+  },
   thumbnailBadge: {
     position: 'absolute',
     top: 4,

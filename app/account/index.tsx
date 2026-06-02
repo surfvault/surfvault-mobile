@@ -439,7 +439,7 @@ export default function AccountScreen() {
 
               <View style={s.storageRow}>
                 <Text style={[s.storageLabel, { color: subText }]}>
-                  {photoCount.toLocaleString()} {photoCount === 1 ? 'photo' : 'photos'}
+                  {photoCount.toLocaleString()} {photoCount === 1 ? 'item' : 'items'}
                 </Text>
                 <Text style={[s.storageValue, { color: primaryText }]}>
                   {formatStorage(storageUsed)}

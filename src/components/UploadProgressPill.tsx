@@ -9,11 +9,24 @@ export default function UploadProgressPill() {
 
   if (!upload) return null;
 
-  const { completed, total, isUploading, sessionName } = upload;
-  const progress = total > 0 ? completed / total : 0;
+  const { completed, total, isUploading, bytesProgress, etaMs } = upload;
+  // Prefer the byte-smoothed fraction so a single large clip fills the bar live
+  // instead of staying at 0 until it finishes.
+  const countFraction = total > 0 ? completed / total : 0;
+  const progress = Math.max(countFraction, bytesProgress ?? 0);
+
+  const formatEta = (ms: number) => {
+    const totalSec = Math.max(0, Math.round(ms / 1000));
+    const m = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return m > 0 ? `${m}m ${sec}s left` : `${sec}s left`;
+  };
+
   const label = isUploading
-    ? `Uploading ${completed}/${total}...`
-    : `${completed} photo${completed !== 1 ? 's' : ''} uploaded`;
+    ? (etaMs && etaMs > 0
+        ? `Uploading ${Math.round(progress * 100)}% · ${formatEta(etaMs)}`
+        : `Uploading ${completed}/${total}...`)
+    : `${completed} item${completed !== 1 ? 's' : ''} uploaded`;
 
   return (
     <View style={[s.container, { backgroundColor: isDark ? '#1f2937' : '#111827' }]}>

@@ -1,6 +1,9 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import Constants from 'expo-constants';
 import { Alert } from 'react-native';
+// Legacy FS API exposes createUploadTask, which streams a file from disk to S3
+// (no loading a 2GB clip into a JS blob) AND reports byte progress.
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import { getAuthToken } from '../store/apis/customBaseQuery';
 
 const API_BASE_URL = Constants.expoConfig?.extra?.apiBaseUrl ?? '';
@@ -20,6 +23,11 @@ interface UploadState {
   total: number;
   isUploading: boolean;
   error: string | null;
+  // Smoothed 0–1 progress (finished files + the in-flight file's byte fraction)
+  // and a live ETA in ms. Lets the pill show a real % + countdown for a single
+  // large clip instead of sitting at 0/1 the whole time.
+  bytesProgress?: number;
+  etaMs?: number | null;
 }
 
 interface UploadContextType {
@@ -42,6 +50,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
   const [upload, setUpload] = useState<UploadState | null>(null);
   const cancelledRef = useRef(false);
   const uploadingRef = useRef(false);
+  const currentTaskRef = useRef<LegacyFileSystem.UploadTask | null>(null);
 
   const finalize = useCallback(async (uploadId: string, uploadFileIds: string[]) => {
     const token = await getAuthToken();
@@ -90,6 +99,8 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
       total: files.length,
       isUploading: true,
       error: null,
+      bytesProgress: 0,
+      etaMs: null,
     });
 
     // Run upload loop async (non-blocking)
@@ -100,24 +111,46 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
         if (cancelledRef.current) break;
 
         try {
-          // Upload to S3
-          const response = await fetch(file.uri);
-          const blob = await response.blob();
-
-          await fetch(file.presignedUrl, {
-            method: 'PUT',
-            body: blob,
-            headers: { 'Content-Type': file.type },
-          });
+          // Stream the file straight from disk to S3 (no 2GB JS blob) and
+          // report byte progress so the pill can show a live % + ETA.
+          const startedAt = Date.now();
+          const task = LegacyFileSystem.createUploadTask(
+            file.presignedUrl,
+            file.uri,
+            {
+              httpMethod: 'PUT',
+              uploadType: LegacyFileSystem.FileSystemUploadType.BINARY_CONTENT,
+              headers: { 'Content-Type': file.type },
+            },
+            ({ totalBytesSent, totalBytesExpectedToSend }) => {
+              if (totalBytesExpectedToSend <= 0) return;
+              const frac = totalBytesSent / totalBytesExpectedToSend;
+              const elapsed = Date.now() - startedAt;
+              let etaMs: number | null = null;
+              if (totalBytesSent > 0 && elapsed > 750 && totalBytesSent < totalBytesExpectedToSend) {
+                etaMs = (totalBytesExpectedToSend - totalBytesSent) / (totalBytesSent / elapsed);
+              }
+              setUpload((prev) =>
+                prev ? { ...prev, bytesProgress: (completed + frac) / files.length, etaMs } : null
+              );
+            }
+          );
+          currentTaskRef.current = task;
+          const result = await task.uploadAsync();
+          currentTaskRef.current = null;
+          if (!result || result.status < 200 || result.status >= 300) {
+            throw new Error(`Upload failed: HTTP ${result?.status ?? 'no response'}`);
+          }
 
           // Finalize immediately after upload
           await finalize(uploadId, [file.uploadFileId]);
 
           completed++;
           setUpload((prev) =>
-            prev ? { ...prev, completed } : null
+            prev ? { ...prev, completed, bytesProgress: completed / files.length, etaMs: null } : null
           );
         } catch (error) {
+          currentTaskRef.current = null;
           console.error(`Upload failed for ${file.name}:`, error);
           // Continue to next file on error
         }
@@ -155,6 +188,10 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
           style: 'destructive',
           onPress: () => {
             cancelledRef.current = true;
+            // Abort the in-flight transfer too, so a single large clip stops
+            // immediately instead of finishing before the between-files check.
+            currentTaskRef.current?.cancelAsync?.().catch(() => { /* ignore */ });
+            currentTaskRef.current = null;
           },
         },
       ]

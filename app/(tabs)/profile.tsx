@@ -27,6 +27,7 @@ import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useLinkedAccounts } from '../../src/context/LinkedAccountsContext';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
+import { useViewableItems } from '../../src/hooks/useViewableItems';
 import {
   useGetUserQuery,
   useGetUserSessionsQuery,
@@ -64,6 +65,7 @@ export default function ProfileScreen() {
   const trackedPush = useTrackedPush();
   const dispatch = useDispatch();
   const colorScheme = useColorScheme();
+  const { viewabilityConfig, onViewableItemsChanged, isItemViewable } = useViewableItems();
   const isDark = colorScheme === 'dark';
   const { visible: kbVisible, height: kbHeight } = useKeyboardVisible();
   const { user, setCurrentUser } = useUser();
@@ -174,8 +176,8 @@ export default function ProfileScreen() {
     Alert.alert(
       'Delete Session',
       `This will permanently delete "${name}" and everything associated with it:\n\n` +
-        `• All photos${photoCount ? ` (${photoCount})` : ''} and their originals from storage\n` +
-        `• All photo groups and assignments\n` +
+        `• All media${photoCount ? ` (${photoCount})` : ''} and their originals from storage\n` +
+        `• All groups and assignments\n` +
         `• All tagged users\n` +
         `• All access requests\n` +
         `• All related notifications\n\n` +
@@ -218,7 +220,7 @@ export default function ProfileScreen() {
         const names = requests
           .map((r: any) => {
             const display = r.name || `@${r.handle}`;
-            return `• ${display} (${r.photoCount} photo${r.photoCount === 1 ? '' : 's'})`;
+            return `• ${display} (${r.photoCount} item${r.photoCount === 1 ? '' : 's'})`;
           })
           .join('\n');
         const count = requests.length;
@@ -814,6 +816,8 @@ export default function ProfileScreen() {
         keyExtractor={(item) =>
           activeTab === 'favorites' ? item.surf_break_id : (item.session_id ?? item.id)
         }
+        onViewableItemsChanged={onViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
         numColumns={activeTab === 'grid' ? 3 : 1}
         key={activeTab === 'grid' ? 'grid' : 'rows'}
         renderItem={({ item }) => {
@@ -865,25 +869,50 @@ export default function ProfileScreen() {
                     <Ionicons name="image-outline" size={24} color={isDark ? '#374151' : '#d1d5db'} />
                   </View>
                 )}
-                {(item.view_count != null || item.photo_count > 0) && (
-                  <View style={s.gridViewCount}>
-                    {item.photo_count > 0 && (
-                      <>
-                        <Ionicons name="images-outline" size={10} color="#fff" />
-                        <Text style={s.gridViewCountText}>{formatCount(item.photo_count)}</Text>
-                      </>
-                    )}
-                    {item.photo_count > 0 && item.view_count != null && (
-                      <Text style={[s.gridViewCountText, { opacity: 0.7 }]}> · </Text>
-                    )}
-                    {item.view_count != null && (
-                      <>
-                        <Ionicons name="eye-outline" size={10} color="#fff" />
-                        <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
-                      </>
-                    )}
+                {/* Video thumbnail indicator — tile taps navigate (not play),
+                    so a center videocam badge, not a ▶. */}
+                {item.thumbnail_media_type === 'video' && (
+                  <View style={StyleSheet.absoluteFill} pointerEvents="none">
+                    <View style={s.gridVideoBadgeWrap}>
+                      <View style={s.gridVideoBadge}>
+                        <Ionicons name="videocam" size={14} color="#fff" />
+                      </View>
+                    </View>
                   </View>
                 )}
+                {(() => {
+                  const videoCount = item.video_count ?? 0;
+                  // photo_count is TOTAL media; subtract videos to avoid double-counting.
+                  const photoOnly = Math.max(0, (item.photo_count ?? 0) - videoCount);
+                  const showView = item.view_count != null;
+                  if (photoOnly === 0 && videoCount === 0 && !showView) return null;
+                  return (
+                    <View style={s.gridViewCount}>
+                      {photoOnly > 0 && (
+                        <>
+                          <Ionicons name="images-outline" size={10} color="#fff" />
+                          <Text style={s.gridViewCountText}>{formatCount(photoOnly)}</Text>
+                        </>
+                      )}
+                      {photoOnly > 0 && videoCount > 0 && <Text style={s.gridViewCountText}> </Text>}
+                      {videoCount > 0 && (
+                        <>
+                          <Ionicons name="videocam-outline" size={10} color="#fff" />
+                          <Text style={s.gridViewCountText}>{formatCount(videoCount)}</Text>
+                        </>
+                      )}
+                      {(photoOnly > 0 || videoCount > 0) && showView && (
+                        <Text style={[s.gridViewCountText, { opacity: 0.7 }]}> · </Text>
+                      )}
+                      {showView && (
+                        <>
+                          <Ionicons name="eye-outline" size={10} color="#fff" />
+                          <Text style={s.gridViewCountText}>{formatCount(item.view_count ?? 0)}</Text>
+                        </>
+                      )}
+                    </View>
+                  );
+                })()}
                 {/* Bottom-right ellipsis — same chrome as shaper grid tile.
                     Tap opens the existing session action sheet. */}
                 <Pressable
@@ -921,6 +950,7 @@ export default function ProfileScreen() {
                 compact
                 showHiddenLocations
                 hideFavoriteBreak
+                isViewable={isItemViewable(item.session_id ?? item.id)}
                 onPress={() => {
                   const sid = item.session_id ?? item.id;
                   if (sid) trackedPush(`/session/${sid}` as any);
@@ -936,6 +966,7 @@ export default function ProfileScreen() {
               showViewCount
               showHiddenLocations
               hideFavoriteBreak
+              isViewable={isItemViewable(item.session_id ?? item.id)}
               onPress={() => {
                 const sid = item.session_id ?? item.id;
                 if (sid) trackedPush(`/session/${sid}` as any);
@@ -1374,6 +1405,15 @@ const s = StyleSheet.create({
     paddingHorizontal: 5, paddingVertical: 2,
   },
   gridViewCountText: { fontSize: 10, fontWeight: '600', color: '#fff' },
+  gridVideoBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  gridVideoBadge: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center',
+  },
   gridDate: {
     position: 'absolute', top: 4, left: 4,
     backgroundColor: 'rgba(0,0,0,0.55)', borderRadius: 6,

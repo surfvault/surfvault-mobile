@@ -22,7 +22,7 @@ import {
   type Board,
   type BoardPhoto,
 } from '../store';
-import { getBoardPhotoUrl } from '../helpers/mediaUrl';
+import { getBoardPhotoUrl, boardPhotoDisplay } from '../helpers/mediaUrl';
 import { useTrackedPush } from '../context/NavigationContext';
 import { useRequireAuth } from '../hooks/useRequireAuth';
 import ActionSheet from './ActionSheet';
@@ -245,11 +245,18 @@ export default function ShaperBoardsGrid({
                   style={StyleSheet.absoluteFillObject}
                 >
                   <Image
-                    source={{ uri: getBoardPhotoUrl(t.photo.s3_key) ?? undefined }}
+                    source={{ uri: boardPhotoDisplay(t.photo).posterUrl ?? undefined }}
                     style={styles.tileImg}
                     contentFit="cover"
                     transition={150}
                   />
+                  {boardPhotoDisplay(t.photo).isVideo ? (
+                    <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
+                      <View style={styles.tilePlayBadge}>
+                        <Ionicons name="videocam" size={12} color="#fff" />
+                      </View>
+                    </View>
+                  ) : null}
                 </Pressable>
 
                 {/* Top-left: name + dimensions (star icon when featured). */}
@@ -454,6 +461,7 @@ function BoardListCard({
             style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
             renderItem={({ item, index }) => {
               const slideStyle = { width: slideWidth, aspectRatio: thumbAspect };
+              const disp = boardPhotoDisplay(item);
               return (
                 <Pressable
                   onPress={() => onPhotoPress(index)}
@@ -462,11 +470,18 @@ function BoardListCard({
                   style={slideStyle}
                 >
                   <Image
-                    source={{ uri: getBoardPhotoUrl(item.s3_key) ?? undefined }}
+                    source={{ uri: disp.posterUrl ?? undefined }}
                     style={slideStyle}
                     contentFit="cover"
                     transition={200}
                   />
+                  {disp.isVideo ? (
+                    <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
+                      <View style={styles.tilePlayBadge}>
+                        <Ionicons name="videocam" size={12} color="#fff" />
+                      </View>
+                    </View>
+                  ) : null}
                 </Pressable>
               );
             }}
@@ -479,11 +494,18 @@ function BoardListCard({
             style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}
           >
             <Image
-              source={{ uri: getBoardPhotoUrl(photos[0].s3_key) ?? undefined }}
+              source={{ uri: boardPhotoDisplay(photos[0]).posterUrl ?? undefined }}
               style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
               contentFit="cover"
               transition={200}
             />
+            {boardPhotoDisplay(photos[0]).isVideo ? (
+              <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
+                <View style={styles.tilePlayBadge}>
+                  <Ionicons name="videocam" size={12} color="#fff" />
+                </View>
+              </View>
+            ) : null}
           </Pressable>
         ) : null}
       </View>
@@ -568,6 +590,22 @@ const styles = StyleSheet.create({
   tileImg: {
     width: '100%',
     height: '100%',
+  },
+  // Clip indicator — a bottom-right corner badge, NOT a center play button:
+  // these tiles tap to NAVIGATE (not play), so a ▶ would mislead. Bottom-right
+  // is the only free corner (name spans top, stats sit bottom-left).
+  tilePlayBadgeWrap: {
+    position: 'absolute',
+    bottom: 6,
+    right: 6,
+  },
+  tilePlayBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // ---- Tile overlays (top-left name, bottom-left stats, bottom-right ellipsis) ----
   topLeftLabel: {

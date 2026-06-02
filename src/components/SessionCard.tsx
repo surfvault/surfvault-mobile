@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, useColorScheme, FlatList } from 'react-native';
 import type { ViewToken, LayoutChangeEvent, GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
+import AutoplayVideo from './AutoplayVideo';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
@@ -51,8 +52,11 @@ interface SessionCardProps {
     session_name?: string;
     session_date?: string;
     thumbnail?: string;
-    extra_photos?: Array<{ id: string; url: string }>;
+    thumbnail_media_type?: 'photo' | 'video';
+    thumbnail_preview_video_url?: string | null;
+    extra_photos?: Array<{ id: string; url: string; media_type?: 'photo' | 'video'; preview_video_url?: string | null }>;
     photo_count?: number;
+    video_count?: number;
     user_handle?: string;
     handle?: string;
     user_picture?: string;
@@ -130,9 +134,18 @@ function FadingSubtitle({ items, visible = true }: { items: string[]; visible?: 
 }
 
 type Slide =
-  | { kind: 'thumb'; url: string }
-  | { kind: 'photo'; url: string; id: string }
+  | { kind: 'thumb'; url: string; media_type?: 'photo' | 'video'; preview_video_url?: string | null }
+  | { kind: 'photo'; url: string; id: string; media_type?: 'photo' | 'video'; preview_video_url?: string | null }
   | { kind: 'cta' };
+
+/** Autoplaying clip slide (the watermarked session preview). Plays muted+looped
+ *  only when `active` (active carousel slide AND card on-screen); poster shows
+ *  while paused. pointerEvents none so the parent Pressable still handles taps. */
+// Lazy: AutoplayVideo only spins up the native player while `active` (the visible
+// playing slide), so a feed never holds N players at once — see AutoplayVideo.
+function SessionCardVideoSlide({ uri, poster, style, active }: { uri: string; poster?: string; style: any; active: boolean }) {
+  return <AutoplayVideo uri={uri} poster={poster} active={active} style={style} />;
+}
 
 export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, compact = false, hideFavoriteBreak = false, hideAspectRatioOption = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
   // Owner-set aspect ratio wins. Fallback: compact list rows stay 5:4
@@ -165,12 +178,12 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
     const photoCount = session.photo_count ?? 0;
     const shownSoFar = 1 + extras.length;
     const list: Slide[] = [
-      { kind: 'thumb', url: session.thumbnail },
-      ...extras.map((p) => ({ kind: 'photo' as const, url: p.url, id: p.id })),
+      { kind: 'thumb', url: session.thumbnail, media_type: session.thumbnail_media_type, preview_video_url: session.thumbnail_preview_video_url },
+      ...extras.map((p) => ({ kind: 'photo' as const, url: p.url, id: p.id, media_type: p.media_type, preview_video_url: p.preview_video_url })),
     ];
     if (photoCount > shownSoFar) list.push({ kind: 'cta' });
     return list;
-  }, [enableCarousel, session.thumbnail, session.extra_photos, session.photo_count]);
+  }, [enableCarousel, session.thumbnail, session.extra_photos, session.photo_count, session.thumbnail_media_type, session.thumbnail_preview_video_url]);
 
   const useCarousel = slides.length > 1;
   const prefetchedRef = useRef<Set<string>>(new Set());
@@ -427,7 +440,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
             onViewableItemsChanged={handleViewChange}
             viewabilityConfig={viewabilityConfig}
             style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
               const slideStyle = { width: slideWidth, aspectRatio: thumbAspect };
               if (item.kind === 'cta') {
                 return (
@@ -440,6 +453,19 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
                       <Text style={[styles.ctaHint, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Tap to open</Text>
                       <Ionicons name="chevron-forward" size={14} color={isDark ? '#9ca3af' : '#6b7280'} />
                     </View>
+                  </Pressable>
+                );
+              }
+              // Ready clip → poster + autoplay (active slide AND card viewable).
+              if (item.media_type === 'video' && item.preview_video_url) {
+                return (
+                  <Pressable onPressIn={onTapStart} onPress={guardTap(handlePress)} onLongPress={openSheet} style={slideStyle}>
+                    <SessionCardVideoSlide
+                      uri={item.preview_video_url}
+                      poster={item.url}
+                      style={slideStyle}
+                      active={index === activeSlide && isViewable}
+                    />
                   </Pressable>
                 );
               }
@@ -457,12 +483,21 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
           />
         ) : !useCarousel && session.thumbnail ? (
           <Pressable onPressIn={onTapStart} onPress={guardTap(handlePress)} onLongPress={openSheet} style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}>
-            <Image
-              source={{ uri: session.thumbnail }}
-              style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
-              contentFit="cover"
-              transition={200}
-            />
+            {session.thumbnail_media_type === 'video' && session.thumbnail_preview_video_url ? (
+              <SessionCardVideoSlide
+                uri={session.thumbnail_preview_video_url}
+                poster={session.thumbnail}
+                style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
+                active={isViewable}
+              />
+            ) : (
+              <Image
+                source={{ uri: session.thumbnail }}
+                style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
+                contentFit="cover"
+                transition={200}
+              />
+            )}
           </Pressable>
         ) : null}
 
@@ -485,26 +520,41 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
           </View>
         )}
 
-        {/* Stats badge — bottom left (taps pass through to slide) */}
-        {(session.photo_count > 0 || (showViewCount && session.view_count != null)) && (
-          <View style={styles.statsBadge} pointerEvents="none">
-            {showViewCount && session.view_count != null && (
-              <>
-                <Ionicons name="eye-outline" size={11} color="#fff" />
-                <Text style={styles.statsText}>{formatCount(session.view_count ?? 0)}</Text>
-              </>
-            )}
-            {showViewCount && session.view_count != null && session.photo_count > 0 && (
-              <Text style={styles.statsText}> · </Text>
-            )}
-            {session.photo_count > 0 && (
-              <>
-                <Ionicons name="images-outline" size={11} color="#fff" />
-                <Text style={styles.statsText}>{formatCount(session.photo_count)}</Text>
-              </>
-            )}
-          </View>
-        )}
+        {/* Stats badge — bottom left (taps pass through to slide). photo_count
+            is TOTAL media; videos are a subset, so show photos (total − videos)
+            and videos separately to avoid double-counting clips. */}
+        {(() => {
+          const videoCount = session.video_count ?? 0;
+          const photoOnly = Math.max(0, (session.photo_count ?? 0) - videoCount);
+          const showView = showViewCount && session.view_count != null;
+          if (photoOnly === 0 && videoCount === 0 && !showView) return null;
+          return (
+            <View style={styles.statsBadge} pointerEvents="none">
+              {showView && (
+                <>
+                  <Ionicons name="eye-outline" size={11} color="#fff" />
+                  <Text style={styles.statsText}>{formatCount(session.view_count ?? 0)}</Text>
+                </>
+              )}
+              {showView && (photoOnly > 0 || videoCount > 0) && (
+                <Text style={styles.statsText}> · </Text>
+              )}
+              {photoOnly > 0 && (
+                <>
+                  <Ionicons name="images-outline" size={11} color="#fff" />
+                  <Text style={styles.statsText}>{formatCount(photoOnly)}</Text>
+                </>
+              )}
+              {photoOnly > 0 && videoCount > 0 && <Text style={styles.statsText}>  </Text>}
+              {videoCount > 0 && (
+                <>
+                  <Ionicons name="videocam-outline" size={11} color="#fff" />
+                  <Text style={styles.statsText}>{formatCount(videoCount)}</Text>
+                </>
+              )}
+            </View>
+          );
+        })()}
       </View>
 
       {/* Dot pager — tapered, no floor: dots fade out past distance 7 so large

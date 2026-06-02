@@ -126,6 +126,15 @@ export default function HomeScreen() {
   // fade-in animations — visible as a "flash twice" on every tab return.
   const [hasViewabilityReport, setHasViewabilityReport] = useState(false);
   const [viewableIds, setViewableIds] = useState<Set<string>>(new Set());
+  // Pause clip autoplay when the Home tab is blurred (another tab / a pushed
+  // route on top) — "in view" means on-screen AND focused.
+  const [feedFocused, setFeedFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setFeedFocused(true);
+      return () => setFeedFocused(false);
+    }, [])
+  );
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: any[] }) => {
     // Ignore transient empty reports (fires briefly during back-navigation
@@ -838,14 +847,14 @@ export default function HomeScreen() {
           data={feedRows}
           keyExtractor={(row) => row.key}
           renderItem={({ item: row }) => {
-            const viewable = !hasViewabilityReport || viewableIds.has(row.key);
+            const viewable = feedFocused && (!hasViewabilityReport || viewableIds.has(row.key));
             if (row.type === 'ad') {
               // Mixed promo stream — first entry's _kind picks the renderer.
               // Each ad now occupies its own slot (Phase B per-ad carousels)
               // — the `row.data` group is always a 1-element array for ads.
               const first = row.data[0];
               if (first?._kind === 'shaper') {
-                return <ShaperFeedCard shaper={first} />;
+                return <ShaperFeedCard shaper={first} isViewable={viewable} />;
               }
               return (
                 <SponsoredCard
@@ -859,7 +868,7 @@ export default function HomeScreen() {
             // Grouped feed (Discover/Favorites): item is a BreakDateGroup
             // with a `group_key`. Following stays on per-session SessionCard.
             if (item?.group_key && Array.isArray(item?.sessions)) {
-              return <BreakDateCard group={item as BreakDateGroup} />;
+              return <BreakDateCard group={item as BreakDateGroup} isViewable={viewable} />;
             }
             return (
               <SessionCard

@@ -1,6 +1,7 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, FlatList, Platform, Share, useColorScheme, type LayoutChangeEvent, type ViewToken, type GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
+import AutoplayVideo from './AutoplayVideo';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import ActionSheet, { type ActionSheetOption, type ActionSheetSection } from './ActionSheet';
@@ -41,8 +42,14 @@ interface SessionInGroup {
   surf_break_country_name?: string;
   surf_break_region?: string;
   photo_count?: number;
+  video_count?: number;
   tagged_users?: Array<{ id?: string; handle?: string; picture?: string; name?: string }>;
   thumbnail?: string;
+  // Video thumbnail support (parity with SessionCard). `thumbnail` is the
+  // poster still for clips; `thumbnail_preview_video_url` is the clean trailer
+  // that autoplays on the active slide while the card is viewable.
+  thumbnail_media_type?: 'photo' | 'video';
+  thumbnail_preview_video_url?: string | null;
 }
 
 export interface BreakDateGroup {
@@ -116,7 +123,42 @@ const STACK_OVERLAP = 14;
 const STACK_AVATAR_SIZE = 36;
 const SOLO_AVATAR_SIZE = 52;
 
-export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
+// Autoplaying clip slide — mirrors SessionCard's SessionCardVideoSlide so the
+// Discover/Favorites grouped feed plays clips exactly like the per-session feed.
+// Plays only when `active` (active carousel slide AND card viewable); otherwise
+// pauses and shows the poster still.
+// Lazy player (see AutoplayVideo) — only the active slide holds a native player.
+function BreakDateVideoSlide({ uri, poster, style, active }: { uri: string; poster?: string; style: any; active: boolean }) {
+  return <AutoplayVideo uri={uri} poster={poster} active={active} style={style} />;
+}
+
+// Bottom-left media count. `photo_count` is TOTAL media; videos are a subset,
+// so show photos (total − videos) and a separate videocam segment to avoid
+// double-counting clips. Mirrors SessionCard's stats badge.
+function MediaCountBadge({ photoCount, videoCount }: { photoCount?: number; videoCount?: number }) {
+  const vids = videoCount ?? 0;
+  const photos = Math.max(0, (photoCount ?? 0) - vids);
+  if (photos === 0 && vids === 0) return null;
+  return (
+    <View style={styles.statsBadge} pointerEvents="none">
+      {photos > 0 && (
+        <>
+          <Ionicons name="images-outline" size={11} color="#fff" />
+          <Text style={styles.statsText}>{formatCount(photos)}</Text>
+        </>
+      )}
+      {photos > 0 && vids > 0 && <Text style={styles.statsText}>  </Text>}
+      {vids > 0 && (
+        <>
+          <Ionicons name="videocam-outline" size={11} color="#fff" />
+          <Text style={styles.statsText}>{formatCount(vids)}</Text>
+        </>
+      )}
+    </View>
+  );
+}
+
+export default function BreakDateCard({ group, isViewable = true }: { group: BreakDateGroup; isViewable?: boolean }) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const trackedPush = useTrackedPush();
@@ -306,12 +348,21 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
               onLongPress={openSheet}
               style={[styles.thumbnail, { aspectRatio: cardAspect, position: 'absolute', top: 0, left: 0 }]}
             >
-              <Image
-                source={{ uri: solo.thumbnail }}
-                style={[styles.thumbnail, { aspectRatio: cardAspect }]}
-                contentFit="cover"
-                transition={200}
-              />
+              {solo.thumbnail_media_type === 'video' && solo.thumbnail_preview_video_url ? (
+                <BreakDateVideoSlide
+                  uri={solo.thumbnail_preview_video_url}
+                  poster={solo.thumbnail}
+                  style={[styles.thumbnail, { aspectRatio: cardAspect }]}
+                  active={isViewable}
+                />
+              ) : (
+                <Image
+                  source={{ uri: solo.thumbnail }}
+                  style={[styles.thumbnail, { aspectRatio: cardAspect }]}
+                  contentFit="cover"
+                  transition={200}
+                />
+              )}
             </Pressable>
           )}
 
@@ -330,12 +381,7 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
             </View>
           )}
 
-          {(solo.photo_count ?? 0) > 0 && (
-            <View style={styles.statsBadge} pointerEvents="none">
-              <Ionicons name="images-outline" size={11} color="#fff" />
-              <Text style={styles.statsText}>{formatCount(solo.photo_count!)}</Text>
-            </View>
-          )}
+          <MediaCountBadge photoCount={solo.photo_count} videoCount={solo.video_count} />
         </View>
 
         <ActionSheet
@@ -456,19 +502,28 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
             onViewableItemsChanged={handleViewChange}
             viewabilityConfig={viewabilityConfig}
             style={[styles.thumbnail, { position: 'absolute', top: 0, left: 0 }]}
-            renderItem={({ item }) => (
+            renderItem={({ item, index }) => (
               <Pressable
                 onPressIn={onTapStart}
                 onPress={guardTap(goToBreakOnDate)}
                 onLongPress={multiSections.length > 0 ? openSheet : undefined}
                 style={{ width: slideWidth, aspectRatio: cardAspect }}
               >
-                <Image
-                  source={{ uri: item.thumbnail! }}
-                  style={{ width: slideWidth, aspectRatio: cardAspect }}
-                  contentFit="cover"
-                  transition={200}
-                />
+                {item.thumbnail_media_type === 'video' && item.thumbnail_preview_video_url ? (
+                  <BreakDateVideoSlide
+                    uri={item.thumbnail_preview_video_url}
+                    poster={item.thumbnail ?? undefined}
+                    style={{ width: slideWidth, aspectRatio: cardAspect }}
+                    active={index === activeSlide && isViewable}
+                  />
+                ) : (
+                  <Image
+                    source={{ uri: item.thumbnail! }}
+                    style={{ width: slideWidth, aspectRatio: cardAspect }}
+                    contentFit="cover"
+                    transition={200}
+                  />
+                )}
               </Pressable>
             )}
           />
@@ -493,13 +548,11 @@ export default function BreakDateCard({ group }: { group: BreakDateGroup }) {
           </View>
         )}
 
-        {/* Photo count for the active slide. Bottom-left. */}
-        {(slides[activeSlide]?.photo_count ?? 0) > 0 && (
-          <View style={styles.statsBadge} pointerEvents="none">
-            <Ionicons name="images-outline" size={11} color="#fff" />
-            <Text style={styles.statsText}>{formatCount(slides[activeSlide].photo_count!)}</Text>
-          </View>
-        )}
+        {/* Media count for the active slide. Bottom-left. */}
+        <MediaCountBadge
+          photoCount={slides[activeSlide]?.photo_count}
+          videoCount={slides[activeSlide]?.video_count}
+        />
       </View>
 
       {/* Tapered dot pager — same rule as SessionCard. */}

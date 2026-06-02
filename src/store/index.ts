@@ -45,6 +45,7 @@ export {
   useUpdateMyBoardMutation,
   useDeleteMyBoardMutation,
   useCreateMyBoardPhotosMutation,
+  useFinalizeMyBoardPhotosMutation,
   useDeleteMyBoardPhotoMutation,
   useUpdateBoardThumbnailMutation,
   useReportBoardMutation,
