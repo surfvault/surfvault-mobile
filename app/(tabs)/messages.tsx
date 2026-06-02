@@ -161,7 +161,7 @@ export default function MessagesScreen() {
             Your conversations
           </Text>
           <Text style={[styles.emptySubtitle, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
-            Chat with photographers, request photos, and coordinate surf sessions all in one place
+            Chat with photographers, request media, and coordinate surf sessions all in one place
           </Text>
           <Pressable onPress={login} style={styles.signInBtn}>
             <Text style={styles.signInText}>Sign In to Get Started</Text>
@@ -180,9 +180,9 @@ export default function MessagesScreen() {
     const hasUnread = unreadCount > 0;
     const rawLastMessage = item.last_message?.body ?? '';
     const lastMessage = rawLastMessage.includes('Photo Access Request:')
-      ? 'Photo Access Request'
+      ? 'Media Access Request'
       : rawLastMessage.includes('Surf Media Access Granted:')
-        ? 'Photos Granted!'
+        ? 'Media Granted!'
         : rawLastMessage;
 
     return (

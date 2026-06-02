@@ -10,12 +10,14 @@ import {
   Alert,
   Dimensions,
   RefreshControl,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import ImageViewing from 'react-native-image-viewing';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { useUser } from '../../src/context/UserProvider';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import ScreenHeader from '../../src/components/ScreenHeader';
@@ -25,7 +27,7 @@ import {
   useSaveSurfMediaAccessRequestToVaultMutation,
 } from '../../src/store';
 import { getWatermarkUrl, toOriginalKey } from '../../src/helpers/mediaUrl';
-import { savePhotosToCameraRoll, checkMediaLibraryPermission } from '../../src/helpers/saveToPhotos';
+import { useSave } from '../../src/context/SaveContext';
 import UserAvatar from '../../src/components/UserAvatar';
 
 const FETCH_AMOUNT = 30;
@@ -33,6 +35,21 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const NUM_COLUMNS = 2;
 const GAP = 4;
 const PHOTO_WIDTH = (SCREEN_WIDTH - GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS;
+
+/** Fullscreen clip player — ImageViewing is image-only, so clips open here. */
+function AccessClipPlayer({ url, onClose }: { url: string; onClose: () => void }) {
+  const player = useVideoPlayer(url, (p) => { p.play(); });
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={s.videoOverlay}>
+        <VideoView player={player} style={s.videoOverlayPlayer} contentFit="contain" nativeControls />
+        <Pressable onPress={onClose} hitSlop={10} style={s.videoOverlayClose}>
+          <Ionicons name="close" size={26} color="#fff" />
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
 
 const formatDate = (dateStr?: string) => {
   if (!dateStr) return '';
@@ -55,8 +72,9 @@ export default function AccessRequestScreen() {
   // Lightbox
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [savingAll, setSavingAll] = useState(false);
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
   const flatListRef = useRef<FlatList<any>>(null);
+  const { startSave } = useSave();
 
   // API
   const { data, isLoading, isFetching, refetch } = useGetSurfMediaAccessRequestQuery(
@@ -171,7 +189,7 @@ export default function AccessRequestScreen() {
     if (!requestId) return;
     try {
       await grantAccess({ requestId }).unwrap();
-      Alert.alert('Access Granted', 'The requester can now view and save these photos.');
+      Alert.alert('Access Granted', 'The requester can now view and save this media.');
     } catch {
       Alert.alert('Error', 'Failed to grant access. Please try again.');
     }
@@ -181,28 +199,19 @@ export default function AccessRequestScreen() {
     if (!requestId) return;
     try {
       await saveToVault({ requestId }).unwrap();
-      Alert.alert('Saved to Vault', `${photos.length} photo${photos.length !== 1 ? 's' : ''} saved to your vault.`);
+      Alert.alert('Saved to Vault', `${photos.length} item${photos.length !== 1 ? 's' : ''} saved to your vault.`);
     } catch {
-      Alert.alert('Error', 'Failed to save photos. You may have exceeded your storage limit.');
+      Alert.alert('Error', 'Failed to save media. You may have exceeded your storage limit.');
     }
   }, [requestId, saveToVault, photos.length]);
 
-  const handleSaveAllToPhotos = useCallback(async () => {
+  // Hand off to the global save queue (floating pill + completion notification)
+  // so the page is free immediately — no on-page spinner for big clips.
+  const handleSaveAllToPhotos = useCallback(() => {
     const photoIds = photos.map((p) => p.id).filter(Boolean);
     if (!photoIds.length) return;
-    const granted = await checkMediaLibraryPermission();
-    if (!granted) return;
-    setSavingAll(true);
-    const result = await savePhotosToCameraRoll(photoIds);
-    setSavingAll(false);
-    if (result.saved === photoIds.length) {
-      Alert.alert('Saved', `${result.saved} photo${result.saved > 1 ? 's' : ''} saved to your camera roll.`);
-    } else if (result.saved > 0) {
-      Alert.alert('Partially Saved', `${result.saved}/${photoIds.length} photos saved. ${result.failed} failed.`);
-    } else {
-      Alert.alert('Error', result.errors[0] ?? 'Failed to save photos.');
-    }
-  }, [photos]);
+    startSave(photoIds);
+  }, [photos, startSave]);
 
   // Status colors — Pending (orange) or Granted (green). Denied falls back to red.
   const statusColor = isApproved ? '#22c55e' : status === 'denied' ? '#ef4444' : '#f59e0b';
@@ -210,37 +219,57 @@ export default function AccessRequestScreen() {
 
   // Memoize lightbox images so swiping (which updates viewerIndex) doesn't
   // rebuild the array and cause ImageViewing to re-initialize → flash/reopen.
-  const lightboxImages = useMemo(
-    () =>
-      photos.map((p) => ({
-        uri:
-          p.watermark_url ||
-          getWatermarkUrl(p.original_s3_key || toOriginalKey(p.url) || ''),
-      })),
-    [photos]
-  );
+  // Clips are excluded from the image lightbox (ImageViewing is image-only).
+  // Map each photo's id → its index within the image-only list so a photo tile
+  // opens the lightbox at the right slot even when clips sit between photos.
+  const { lightboxImages, lightboxIndexByPhotoId } = useMemo(() => {
+    const imgs: { uri: string }[] = [];
+    const indexById: Record<string, number> = {};
+    for (const p of photos) {
+      if (p.media_type === 'video') continue;
+      indexById[p.id] = imgs.length;
+      imgs.push({
+        uri: p.watermark_url || getWatermarkUrl(p.original_s3_key || toOriginalKey(p.url) || ''),
+      });
+    }
+    return { lightboxImages: imgs, lightboxIndexByPhotoId: indexById };
+  }, [photos]);
 
   const renderPhoto = useCallback(
-    ({ item, index }: { item: any; index: number }) => (
-      <Pressable
-        onPress={() => {
-          setViewerIndex(index);
-          viewerCurrentPhotoIdRef.current = item?.id ?? null;
-          setViewerVisible(true);
-        }}
-        onLongPress={() => {}}
-        style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
-      >
-        <Image
-          source={{ uri: item.preview_url ?? item.url ?? item }}
-          style={{ width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6 }}
-          contentFit="cover"
-          transition={200}
-          recyclingKey={item.id}
-        />
-      </Pressable>
-    ),
-    []
+    ({ item }: { item: any; index: number }) => {
+      const isVideo = item.media_type === 'video';
+      return (
+        <Pressable
+          onPress={() => {
+            if (isVideo) {
+              if (item.preview_video_url) setActiveVideoUrl(item.preview_video_url);
+              return;
+            }
+            setViewerIndex(lightboxIndexByPhotoId[item.id] ?? 0);
+            viewerCurrentPhotoIdRef.current = item?.id ?? null;
+            setViewerVisible(true);
+          }}
+          onLongPress={() => {}}
+          style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}
+        >
+          <Image
+            source={{ uri: item.preview_url ?? item.url ?? item }}
+            style={{ width: PHOTO_WIDTH, height: PHOTO_WIDTH * 1.2, borderRadius: 6 }}
+            contentFit="cover"
+            transition={200}
+            recyclingKey={item.id}
+          />
+          {isVideo && (
+            <View style={s.videoBadgeWrap} pointerEvents="none">
+              <View style={s.videoBadge}>
+                <Ionicons name={item.preview_video_url ? 'play' : 'hourglass-outline'} size={16} color="#fff" />
+              </View>
+            </View>
+          )}
+        </Pressable>
+      );
+    },
+    [lightboxIndexByPhotoId]
   );
 
   const listHeader = (
@@ -256,7 +285,7 @@ export default function AccessRequestScreen() {
 
       {/* Photo count */}
       <Text style={[s.title, { color: isDark ? '#fff' : '#111827' }]}>
-        {photos.length} photo{photos.length !== 1 ? 's' : ''} requested
+        {photos.length} item{photos.length !== 1 ? 's' : ''} requested
       </Text>
 
       {/* Other user */}
@@ -373,13 +402,9 @@ export default function AccessRequestScreen() {
                 </Text>
               </Pressable>
             )}
-            <Pressable onPress={handleSaveAllToPhotos} disabled={savingAll} style={[s.actionBtn, { backgroundColor: '#38bdf8' }]}>
-              {savingAll ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="download-outline" size={18} color="#fff" />
-              )}
-              <Text style={s.actionBtnText}>{savingAll ? 'Saving...' : 'Save to Photos'}</Text>
+            <Pressable onPress={handleSaveAllToPhotos} style={[s.actionBtn, { backgroundColor: '#38bdf8' }]}>
+              <Ionicons name="download-outline" size={18} color="#fff" />
+              <Text style={s.actionBtnText}>Save to Photos</Text>
             </Pressable>
           </>
         )}
@@ -406,7 +431,7 @@ export default function AccessRequestScreen() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <ScreenHeader
-        title="Photo Request"
+        title="Media Request"
         left={
           <Pressable onPress={smartBack} hitSlop={8}>
             <Ionicons name="chevron-back" size={28} color={isDark ? '#fff' : '#000'} />
@@ -429,7 +454,7 @@ export default function AccessRequestScreen() {
               !isFetching ? (
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                   <Ionicons name="images-outline" size={40} color={isDark ? '#374151' : '#d1d5db'} />
-                  <Text style={{ color: '#9ca3af', marginTop: 8, fontSize: 14 }}>No photos</Text>
+                  <Text style={{ color: '#9ca3af', marginTop: 8, fontSize: 14 }}>No media</Text>
                 </View>
               ) : null
             }
@@ -466,12 +491,31 @@ export default function AccessRequestScreen() {
         swipeToCloseEnabled
         doubleTapToZoomEnabled
       />
+
+      {activeVideoUrl && (
+        <AccessClipPlayer url={activeVideoUrl} onClose={() => setActiveVideoUrl(null)} />
+      )}
     </>
   );
 }
 
 const s = StyleSheet.create({
   container: { flex: 1 },
+  videoBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  videoBadge: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center', justifyContent: 'center', paddingLeft: 2,
+  },
+  videoOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.95)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  videoOverlayPlayer: { width: '100%', height: '70%' },
+  videoOverlayClose: { position: 'absolute', top: 60, right: 20, padding: 6 },
   loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   headerWrap: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16 },
   statusBadge: {

@@ -626,7 +626,7 @@ function SessionOrBoardCreate() {
         <View style={styles.fieldWrap}>
           <View style={styles.photosHeader}>
             <Text style={[styles.fieldLabel, { color: isDark ? '#d1d5db' : '#374151', marginBottom: 0 }]}>
-              Photos {files.length > 0 && `(${files.length})`}
+              Media {files.length > 0 && `(${files.length})`}
             </Text>
             {files.length > 0 && (
               <Pressable onPress={clearFiles}>
@@ -641,7 +641,7 @@ function SessionOrBoardCreate() {
           >
             <Ionicons name="images-outline" size={28} color={isDark ? '#6b7280' : '#9ca3af'} />
             <Text style={[styles.addPhotosText, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-              {isShaper ? 'Tap to select photos' : 'Tap to select photos or clips'}
+              {isShaper ? 'Tap to select media' : 'Tap to select photos or clips'}
             </Text>
             <Text style={{ color: isDark ? '#4b5563' : '#9ca3af', fontSize: 12 }}>
               {isShaper ? 'JPG, PNG, HEIC, RAW supported' : 'Photos (JPG, PNG, HEIC, RAW) + video clips'}
@@ -758,7 +758,7 @@ function SessionOrBoardCreate() {
         <View style={[styles.importingOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.85)' }]}>
           <View style={[styles.importingCard, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
             <ActivityIndicator size="large" color="#0ea5e9" />
-            <Text style={[styles.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing photos…</Text>
+            <Text style={[styles.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing media…</Text>
           </View>
         </View>
       )}

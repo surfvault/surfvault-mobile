@@ -223,7 +223,7 @@ export default function BoardDetailScreen() {
     if (!board) return;
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permission needed', 'SurfVault needs photo library access to upload board photos.');
+      Alert.alert('Permission needed', 'SurfVault needs photo library access to upload board media.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({

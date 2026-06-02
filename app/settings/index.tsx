@@ -305,7 +305,7 @@ export default function SettingsScreen() {
             c={c}
             isDark={isDark}
             label="Favorite breaks"
-            description="New photos posted at breaks you've favorited"
+            description="New media posted at breaks you've favorited"
             value={prefs.notifications.favorites}
             onValueChange={(v) => patch({ notifications: { favorites: v } })}
           />
@@ -313,7 +313,7 @@ export default function SettingsScreen() {
             c={c}
             isDark={isDark}
             label="Tagged in a session"
-            description="When a photographer tags you in their photos"
+            description="When a photographer tags you in their media"
             value={prefs.notifications.tagged}
             onValueChange={(v) => patch({ notifications: { tagged: v } })}
           />
@@ -411,14 +411,14 @@ export default function SettingsScreen() {
         {/* Photos — photographer-owned download policy */}
         {user?.user_type === 'photographer' && (
           <>
-            <SectionTitle c={c}>Photos</SectionTitle>
+            <SectionTitle c={c}>Media</SectionTitle>
             <Card c={c}>
               <ToggleRow
                 c={c}
                 isDark={isDark}
                 first
                 label="Auto-grant photo access"
-                description="Let surfers download your photos instantly without sending an access request. You'll still be notified when someone downloads."
+                description="Let surfers download your media instantly without sending an access request. You'll still be notified when someone downloads."
                 value={prefs.autoGrantMediaAccess}
                 onValueChange={(v) => patch({ autoGrantMediaAccess: v })}
               />

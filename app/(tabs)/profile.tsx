@@ -176,8 +176,8 @@ export default function ProfileScreen() {
     Alert.alert(
       'Delete Session',
       `This will permanently delete "${name}" and everything associated with it:\n\n` +
-        `• All photos${photoCount ? ` (${photoCount})` : ''} and their originals from storage\n` +
-        `• All photo groups and assignments\n` +
+        `• All media${photoCount ? ` (${photoCount})` : ''} and their originals from storage\n` +
+        `• All groups and assignments\n` +
         `• All tagged users\n` +
         `• All access requests\n` +
         `• All related notifications\n\n` +
@@ -220,7 +220,7 @@ export default function ProfileScreen() {
         const names = requests
           .map((r: any) => {
             const display = r.name || `@${r.handle}`;
-            return `• ${display} (${r.photoCount} photo${r.photoCount === 1 ? '' : 's'})`;
+            return `• ${display} (${r.photoCount} item${r.photoCount === 1 ? '' : 's'})`;
           })
           .join('\n');
         const count = requests.length;

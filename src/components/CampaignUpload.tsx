@@ -1125,7 +1125,7 @@ export default function CampaignUpload({
         <View style={[s.importingOverlay, { backgroundColor: isDark ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.85)' }]}>
           <View style={[s.importingCard, { backgroundColor: isDark ? '#1f2937' : '#fff' }]}>
             <ActivityIndicator size="large" color="#0ea5e9" />
-            <Text style={[s.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing photos…</Text>
+            <Text style={[s.importingText, { color: isDark ? '#fff' : '#111827' }]}>Importing media…</Text>
           </View>
         </View>
       )}

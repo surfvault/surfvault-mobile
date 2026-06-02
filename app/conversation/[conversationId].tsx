@@ -46,7 +46,7 @@ function MessageBody({ body, isOutbound, isDark, onNavigate }: { body: string; i
     if (id && UUID_REGEX.test(id)) {
       return (
         <Text style={[styles.messageText, { color: textColor }]}>
-          Photo Access Request:{' '}
+          Media Access Request:{' '}
           <Text
             style={{ color: linkColor, textDecorationLine: 'underline' }}
             onPress={() => onNavigate(`/access/${id}`)}
@@ -64,12 +64,12 @@ function MessageBody({ body, isOutbound, isDark, onNavigate }: { body: string; i
     if (id && UUID_REGEX.test(id)) {
       return (
         <Text style={[styles.messageText, { color: textColor }]}>
-          Photos Granted!{' '}
+          Media Granted!{' '}
           <Text
             style={{ color: linkColor, textDecorationLine: 'underline' }}
             onPress={() => onNavigate(`/access/${id}`)}
           >
-            View Photos
+            View Media
           </Text>
         </Text>
       );
