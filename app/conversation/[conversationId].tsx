@@ -9,6 +9,7 @@ import {
   useColorScheme,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -125,6 +126,8 @@ const formatDateSeparator = (dateStr: string) => {
 
 const getDateKey = (dateStr: string) => new Date(dateStr).toDateString();
 
+const MESSAGES_PAGE_SIZE = 30;
+
 export default function ConversationDetailScreen() {
   const { conversationId, recipientHandle } = useLocalSearchParams<{ conversationId: string; recipientHandle?: string }>();
   const isNew = conversationId === 'new';
@@ -144,10 +147,46 @@ export default function ConversationDetailScreen() {
   // ReportMessageSheet keyed to its id.
   const [actionTarget, setActionTarget] = useState<{ id: string; body: string; isOutbound: boolean } | null>(null);
 
-  const { data, isLoading } = useGetConversationWithMessagesQuery(
-    { conversationId: conversationId ?? '' },
+  // Growing-window pagination: fetch the most-recent N messages, grow N when
+  // the user scrolls to the top ("load older").
+  const [messagesLimit, setMessagesLimit] = useState(MESSAGES_PAGE_SIZE);
+  const loadingOlderRef = useRef(false);
+  const { data, isLoading, isFetching } = useGetConversationWithMessagesQuery(
+    { conversationId: conversationId ?? '', limit: messagesLimit },
     { skip: !conversationId || isNew }
   );
+
+  // Keep the last good results so the thread doesn't flash empty while a larger
+  // window is fetching (the limit change creates a fresh cache key). We never
+  // null this on conversation change — `activeResults` below gates by id so a
+  // cached conversation shows instantly without a clobber race.
+  const [threadResults, setThreadResults] = useState<any>(null);
+  useEffect(() => {
+    if (!isNew && data?.results) setThreadResults(data.results);
+  }, [data, isNew]);
+  useEffect(() => {
+    setMessagesLimit(MESSAGES_PAGE_SIZE);
+    hasScrolledRef.current = false;
+    loadingOlderRef.current = false;
+  }, [conversationId]);
+
+  const hasMoreMessages = !!data?.results?.continuationToken;
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  useEffect(() => {
+    if (!isFetching) {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [isFetching]);
+
+  const handleThreadScroll = useCallback((e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    if (y <= 60 && hasMoreMessages && !isFetching && !loadingOlderRef.current) {
+      loadingOlderRef.current = true;
+      setLoadingOlder(true);
+      setMessagesLimit((n) => n + MESSAGES_PAGE_SIZE);
+    }
+  }, [hasMoreMessages, isFetching]);
 
   // New-conversation mode: fetch the recipient by handle so we can render the
   // header chrome and have a userId to send the first message to.
@@ -162,8 +201,15 @@ export default function ConversationDetailScreen() {
   const [startConversationWithUser, { isLoading: starting }] = useStartConversationWithUserMutation();
   const [readConversation] = useReadConversationMutation();
 
-  const conversation = data?.results?.conversation;
-  const messages = isNew ? [] : (data?.results?.messages ?? []);
+  // Prefer live results when they match the current conversation (cached opens
+  // show instantly); fall back to the stable copy to bridge the grow-fetch gap.
+  const liveResults =
+    !isNew && data?.results?.conversation?.id === conversationId ? data.results : null;
+  const activeResults =
+    liveResults ?? (threadResults?.conversation?.id === conversationId ? threadResults : null);
+
+  const conversation = activeResults?.conversation;
+  const messages = isNew ? [] : (activeResults?.messages ?? []);
 
   // Determine other participant
   const otherUser = isNew
@@ -321,6 +367,14 @@ export default function ConversationDetailScreen() {
               contentContainerStyle={[styles.messagesList, { paddingTop: insets.top + 70 }]}
               showsVerticalScrollIndicator={false}
               inverted={false}
+              onScroll={handleThreadScroll}
+              scrollEventThrottle={16}
+              maintainVisibleContentPosition={{ minIndexForVisible: 1 }}
+              ListHeaderComponent={
+                loadingOlder ? (
+                  <View style={{ paddingVertical: 12 }}><ActivityIndicator /></View>
+                ) : null
+              }
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               keyboardShouldPersistTaps="handled"
             />

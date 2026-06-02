@@ -913,18 +913,8 @@ export default function ProfileScreen() {
                     </View>
                   );
                 })()}
-                {/* Bottom-right ellipsis — same chrome as shaper grid tile.
-                    Tap opens the existing session action sheet. */}
-                <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleSessionLongPress(item);
-                  }}
-                  hitSlop={6}
-                  style={s.gridEllipsisBtn}
-                >
-                  <Ionicons name="ellipsis-horizontal" size={14} color="#fff" />
-                </Pressable>
+                {/* No ellipsis button on grid tiles — long-press the tile opens
+                    the same session action sheet, freeing up the tile chrome. */}
                 {(item.session_date || item.surf_break_name) && (
                   <View style={s.gridDate}>
                     {item.surf_break_name && (
@@ -1422,13 +1412,6 @@ const s = StyleSheet.create({
   gridDateText: { fontSize: 9, fontWeight: '600', color: '#fff' },
   // Bottom-right ellipsis on session grid tiles — matches the shaper grid
   // ellipsisBtn so any user_type's profile reads the same way.
-  gridEllipsisBtn: {
-    position: 'absolute', bottom: 4, right: 4,
-    width: 22, height: 22,
-    borderRadius: 6,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center', justifyContent: 'center',
-  },
   noteSheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: 34 },
   noteSheetHeader: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

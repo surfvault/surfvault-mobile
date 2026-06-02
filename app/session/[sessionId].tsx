@@ -302,6 +302,8 @@ export default function SessionDetailScreen() {
   const [updateSessionThumbnail] = useUpdateSessionThumbnailMutation();
   const [reportSessionView] = useCreateSurfSessionViewReportMutation();
   const [updateTaggedUsers] = useUpdateSessionsTaggedUsersMutation();
+  // Per-row in-flight id so the tapped Tag/Remove row can show a spinner.
+  const [taggingUserId, setTaggingUserId] = useState<string | null>(null);
   const [createGroup] = useCreateSessionGroupMutation();
   const [updateGroup] = useUpdateSessionGroupMutation();
   const [deleteGroup] = useDeleteSessionGroupMutation();
@@ -326,6 +328,31 @@ export default function SessionDetailScreen() {
   const initialToken = sessionData?.results?.continuationToken ?? '';
   const sessionHandle = session?.handle ?? session?.user_handle;
   const isOwner = !!user?.handle && user.handle === sessionHandle;
+
+  // Tag/untag a user from the Tag Users sheet. Tracks the in-flight id so the
+  // tapped row shows a spinner (the whole row is pressable, not just the button).
+  const handleTagUser = useCallback(async (u: any) => {
+    if (taggingUserId || !session?.id || !u?.id) return;
+    setTaggingUserId(u.id);
+    try {
+      await updateTaggedUsers({ sessionId: session.id, userId: u.id, action: 'add' }).unwrap();
+    } catch {
+      Alert.alert('Error', 'Failed to tag user.');
+    } finally {
+      setTaggingUserId(null);
+    }
+  }, [taggingUserId, updateTaggedUsers, session?.id]);
+  const handleUntagUser = useCallback(async (tu: any) => {
+    if (taggingUserId || !session?.id || !tu?.id) return;
+    setTaggingUserId(tu.id);
+    try {
+      await updateTaggedUsers({ sessionId: session.id, userId: tu.id, action: 'remove' }).unwrap();
+    } catch {
+      Alert.alert('Error', 'Failed to remove tag.');
+    } finally {
+      setTaggingUserId(null);
+    }
+  }, [taggingUserId, updateTaggedUsers, session?.id]);
   const isFavorited = session?.surf_break_is_favorited;
   // When the photographer has auto-grant on, surfers skip the request
   // handshake: the floating CTA becomes "Download Photos" and confirming
@@ -637,15 +664,16 @@ export default function SessionDetailScreen() {
     setSelectedPhotoIds([]);
   }, []);
 
-  // Start action modes
-  const handleStartAction = useCallback(async (action: string) => {
+  // Start action modes. `preselectId` auto-selects a single photo (used by the
+  // per-photo long-press sheet) so the bottom banner opens with it already chosen.
+  const handleStartAction = useCallback(async (action: string, preselectId?: string) => {
     if (!requireAuth()) return;
     if (action === 'download') {
       const granted = await checkMediaLibraryPermission();
       if (!granted) return;
     }
     setSessionAction(action);
-    setSelectedPhotoIds([]);
+    setSelectedPhotoIds(preselectId ? [preselectId] : []);
   }, [requireAuth]);
 
   // After granting notification permission, immediately sync the push token so
@@ -959,12 +987,25 @@ export default function SessionDetailScreen() {
           return { ...m, groups: (m.groups ?? []).filter((g: any) => g.id !== groupId) };
         }));
       }
-      Alert.alert('Done', `${action === 'add' ? 'Added' : 'Removed'} ${selectedPhotoIds.length} photo${selectedPhotoIds.length !== 1 ? 's' : ''} ${action === 'add' ? 'to' : 'from'} group.`);
+      Alert.alert('Done', `${action === 'add' ? 'Added' : 'Removed'} ${selectedPhotoIds.length} item${selectedPhotoIds.length !== 1 ? 's' : ''} ${action === 'add' ? 'to' : 'from'} group.`);
       cancelAction();
     } catch {
       Alert.alert('Error', 'Failed to update group media.');
     }
   }, [sessionAction, selectedPhotoIds, session?.id, groups, updateGroupPhotos, cancelAction]);
+
+  // In ungroup mode, only surface pills for groups the selected media actually
+  // belong to (single long-press → just that photo's groups; bulk → union of
+  // the selection's groups). Keeps "remove" free of no-op taps.
+  const ungroupGroupPills = useMemo(() => {
+    if (sessionAction !== 'ungroup' || selectedPhotoIds.length === 0) return [];
+    const sel = new Set(selectedPhotoIds);
+    const present = new Set<string>();
+    sessionMedia.forEach((m) => {
+      if (sel.has(m.id)) (m.groups ?? []).forEach((g: any) => present.add(g.id));
+    });
+    return groups.filter((g: any) => present.has(g.id));
+  }, [sessionAction, selectedPhotoIds, sessionMedia, groups]);
 
   // Share
   const handleShare = useCallback(async () => {
@@ -1229,34 +1270,44 @@ export default function SessionDetailScreen() {
           icon: 'checkmark-circle-outline' as const,
           onPress: () => {},
         }]),
-        ...(groups.length > 0 ? groups.map((g: any) => {
-          const photoGroups = photoSheetItem.groups ?? [];
-          const isInGroup = photoGroups.some((pg: any) => pg.id === g.id);
-          return {
-            label: isInGroup ? `Remove from ${g.name}` as const : `Add to ${g.name}` as const,
-            icon: (isInGroup ? 'remove-circle-outline' : 'add-circle-outline') as const,
-            destructive: isInGroup,
-            onPress: () => {
-              const action = isInGroup ? 'remove' : 'add';
-              updateGroupPhotos({ sessionId: session!.id, groupId: g.id, photoIds: [photoSheetItem.id], action }).unwrap()
-                .then(() => {
-                  setSessionMedia((prev) => prev.map((m) => {
-                    if (m.id !== photoSheetItem.id) return m;
-                    const existing = m.groups ?? [];
-                    if (action === 'add') {
-                      if (existing.some((eg: any) => eg.id === g.id)) return m;
-                      return { ...m, groups: [...existing, { id: g.id, name: g.name, color: g.color }] };
-                    }
-                    return { ...m, groups: existing.filter((eg: any) => eg.id !== g.id) };
-                  }));
-                });
-            },
-          };
-        }) : [{
-          label: 'Create Group' as const,
-          icon: 'color-palette-outline' as const,
-          onPress: () => setGroupSheetVisible(true),
-        }]),
+      ],
+    },
+    {
+      // Group actions mirror the session-level flow: tapping one auto-selects the
+      // held photo and opens the bottom group-pill banner (group/ungroup mode).
+      options: groups.length > 0 ? [
+        {
+          label: 'Assign to Group' as const,
+          icon: 'add-circle-outline' as const,
+          onPress: () => handleStartAction('group', photoSheetItem.id),
+        },
+        ...(((photoSheetItem.groups ?? []).length > 0) ? [{
+          label: 'Remove from Group' as const,
+          icon: 'remove-circle-outline' as const,
+          destructive: true,
+          onPress: () => handleStartAction('ungroup', photoSheetItem.id),
+        }] : []),
+      ] : [{
+        label: 'Create Group' as const,
+        icon: 'color-palette-outline' as const,
+        onPress: () => setGroupSheetVisible(true),
+      }],
+    },
+    {
+      // Save/Delete drop into the standard select-mode banner with this photo
+      // pre-selected, so the user can add more before confirming.
+      options: [
+        {
+          label: 'Save Media' as const,
+          icon: 'download-outline' as const,
+          onPress: () => handleStartAction('download', photoSheetItem.id),
+        },
+        {
+          label: 'Delete Media' as const,
+          icon: 'trash-outline' as const,
+          destructive: true,
+          onPress: () => handleStartAction('delete', photoSheetItem.id),
+        },
       ],
     },
   ] : [];
@@ -1562,7 +1613,7 @@ export default function SessionDetailScreen() {
                 </Pressable>
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={[styles.actionBarCount, { color: isDark ? ac.textDark : ac.text }]}>
-                    {selectedPhotoIds.length} photo{selectedPhotoIds.length !== 1 ? 's' : ''} selected
+                    {selectedPhotoIds.length} item{selectedPhotoIds.length !== 1 ? 's' : ''} selected
                   </Text>
                   <Text style={[styles.actionBarHint, { color: isDark ? ac.textDark : ac.text }]}>
                     {selectedPhotoIds.length === 0
@@ -1576,7 +1627,7 @@ export default function SessionDetailScreen() {
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.groupPillScroll}
               >
-                {groups.map((g: any) => (
+                {(sessionAction === 'ungroup' ? ungroupGroupPills : groups).map((g: any) => (
                   <Pressable
                     key={g.id}
                     onPress={() => handleGroupPhotoAction(g.id)}
@@ -1620,7 +1671,7 @@ export default function SessionDetailScreen() {
                 <Ionicons name="close" size={24} color={isDark ? ac.textDark : ac.text} />
               </Pressable>
               <Text style={[styles.actionBarCount, { color: isDark ? ac.textDark : ac.text }]}>
-                {selectedPhotoIds.length} photo{selectedPhotoIds.length !== 1 ? 's' : ''} selected
+                {selectedPhotoIds.length} item{selectedPhotoIds.length !== 1 ? 's' : ''} selected
               </Text>
               <Pressable
                 onPress={handleConfirmAction}
@@ -1730,25 +1781,23 @@ export default function SessionDetailScreen() {
                     );
                   }
                   return searchResults.map((u: any) => (
-                    <View key={u.id ?? u.handle} style={styles.tagResultRow}>
+                    <Pressable
+                      key={u.id ?? u.handle}
+                      onPress={() => handleTagUser(u)}
+                      disabled={!!taggingUserId}
+                      style={styles.tagResultRow}
+                    >
                       <UserAvatar uri={u.picture} name={u.name ?? u.handle} size={36} />
                       <View style={styles.tagResultInfo}>
                         <Text style={[styles.tagResultName, { color: isDark ? '#ffffff' : '#111827' }]}>{u.name ?? u.handle}</Text>
                         <Text style={[styles.tagResultHandle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>@{u.handle}</Text>
                       </View>
-                      <Pressable
-                        onPress={async () => {
-                          try {
-                            await updateTaggedUsers({ sessionId: session!.id, userId: u.id, action: 'add' }).unwrap();
-                          } catch {
-                            Alert.alert('Error', 'Failed to tag user.');
-                          }
-                        }}
-                        style={[styles.tagActionBtn, { backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#eff6ff' }]}
-                      >
-                        <Text style={[styles.tagActionText, { color: '#3b82f6' }]}>Tag</Text>
-                      </Pressable>
-                    </View>
+                      <View style={[styles.tagActionBtn, { backgroundColor: isDark ? 'rgba(59,130,246,0.15)' : '#eff6ff' }]}>
+                        {taggingUserId === u.id
+                          ? <ActivityIndicator size="small" color="#3b82f6" />
+                          : <Text style={[styles.tagActionText, { color: '#3b82f6' }]}>Tag</Text>}
+                      </View>
+                    </Pressable>
                   ));
                 }
 
@@ -1768,16 +1817,13 @@ export default function SessionDetailScreen() {
                       </View>
                       {isOwner && (
                         <Pressable
-                          onPress={async () => {
-                            try {
-                              await updateTaggedUsers({ sessionId: session!.id, userId: tu.id, action: 'remove' }).unwrap();
-                            } catch {
-                              Alert.alert('Error', 'Failed to remove tag.');
-                            }
-                          }}
+                          onPress={() => handleUntagUser(tu)}
+                          disabled={!!taggingUserId}
                           style={[styles.tagActionBtn, { backgroundColor: isDark ? 'rgba(239,68,68,0.15)' : '#fef2f2' }]}
                         >
-                          <Text style={[styles.tagActionText, { color: '#ef4444' }]}>Remove</Text>
+                          {taggingUserId === tu.id
+                            ? <ActivityIndicator size="small" color="#ef4444" />
+                            : <Text style={[styles.tagActionText, { color: '#ef4444' }]}>Remove</Text>}
                         </Pressable>
                       )}
                     </Pressable>

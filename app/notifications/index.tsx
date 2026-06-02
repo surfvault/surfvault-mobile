@@ -37,6 +37,8 @@ import UserAvatar from '../../src/components/UserAvatar';
 // rejection language regardless of which surface the admin used. The "Other"
 // option opens a free-text field so admins can write a custom reason; the
 // advertiser sees whichever reason was chosen on their campaign.
+const NOTIFICATIONS_PAGE_SIZE = 25;
+
 const CAMPAIGN_REJECT_REASON_TEMPLATES = [
   { label: 'NSFW or inappropriate', template: "Contains inappropriate content for the SurfVault audience." },
   { label: 'Off-topic for surf community', template: "Not relevant to surfing or the SurfVault community." },
@@ -218,16 +220,26 @@ export default function NotificationsScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data, isLoading, refetch } = useGetNotificationsQuery(
-    { read: '' as any, filter: '', limit: 25, continuationToken: '' },
+  // Growing-window pagination: fetch the most-recent N, grow N on scroll-end.
+  const [notificationsLimit, setNotificationsLimit] = useState(NOTIFICATIONS_PAGE_SIZE);
+  const { data, isLoading, isFetching, refetch } = useGetNotificationsQuery(
+    { read: '' as any, filter: '', limit: notificationsLimit, continuationToken: '' },
     { refetchOnMountOrArgChange: true }
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    setNotificationsLimit(NOTIFICATIONS_PAGE_SIZE);
     await refetch();
     setRefreshing(false);
   }, [refetch]);
+
+  const hasMoreNotifications = !!data?.results?.continuationToken;
+  const loadMoreNotifications = useCallback(() => {
+    if (hasMoreNotifications && !isFetching) {
+      setNotificationsLimit((n) => n + NOTIFICATIONS_PAGE_SIZE);
+    }
+  }, [hasMoreNotifications, isFetching]);
   const [markAsRead, { isLoading: marking }] = useMarkNotificationsAsReadMutation();
   const [updateAccessRequest, { isLoading: processingAccess }] = useUpdateAccessRequestMutation();
   const [approveAdminAd, { isLoading: approvingCampaign }] = useApproveAdminAdMutation();
@@ -631,6 +643,13 @@ export default function NotificationsScreen() {
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
             stickySectionHeadersEnabled
             showsVerticalScrollIndicator={false}
+            onEndReached={loadMoreNotifications}
+            onEndReachedThreshold={0.4}
+            ListFooterComponent={
+              hasMoreNotifications && isFetching && !refreshing ? (
+                <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View>
+              ) : null
+            }
           />
         )}
       </SafeAreaView>

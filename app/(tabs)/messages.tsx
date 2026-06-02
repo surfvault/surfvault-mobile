@@ -26,6 +26,8 @@ import UserAvatar from '../../src/components/UserAvatar';
 import SearchBar from '../../src/components/SearchBar';
 import MessagesSkeleton from '../../src/components/MessagesSkeleton';
 
+const CONVERSATIONS_PAGE_SIZE = 20;
+
 const formatTime = (dateStr?: string) => {
   if (!dateStr) return '';
   const d = new Date(dateStr);
@@ -58,17 +60,28 @@ export default function MessagesScreen() {
   const composeInputRef = useRef<TextInput>(null);
   const composeDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data, isLoading, error, refetch } = useGetConversationsQuery(undefined, {
-    skip: !isAuthenticated,
-  });
+  // Growing-window pagination: fetch the most-recent N, grow N on scroll-end.
+  const [conversationsLimit, setConversationsLimit] = useState(CONVERSATIONS_PAGE_SIZE);
+  const { data, isLoading, isFetching, error, refetch } = useGetConversationsQuery(
+    { limit: conversationsLimit },
+    { skip: !isAuthenticated },
+  );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
+    setConversationsLimit(CONVERSATIONS_PAGE_SIZE);
     await refetch();
     setRefreshing(false);
   }, [refetch]);
 
   const conversations = data?.results?.conversations ?? [];
+  const hasMoreConversations = !!data?.results?.continuationToken;
+
+  const loadMoreConversations = useCallback(() => {
+    if (hasMoreConversations && !isFetching) {
+      setConversationsLimit((n) => n + CONVERSATIONS_PAGE_SIZE);
+    }
+  }, [hasMoreConversations, isFetching]);
 
   // Map other-user-id → conversation id so compose can route to an existing
   // thread instead of double-creating one.
@@ -340,6 +353,13 @@ export default function MessagesScreen() {
           }
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMoreConversations}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={
+            hasMoreConversations && isFetching && !refreshing ? (
+              <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View>
+            ) : null
+          }
         />
       )}
     </SafeAreaView>

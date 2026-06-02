@@ -4,8 +4,8 @@ const conversationApi = rootApi.injectEndpoints({
   endpoints: (builder) => ({
     getConversations: builder.query({
       providesTags: [ApiTag.Conversation],
-      query: () => ({
-        url: '/conversations',
+      query: ({ limit }: { limit?: number } = {}) => ({
+        url: `/conversations${limit ? `?limit=${limit}` : ''}`,
         method: 'GET',
       }),
     }),
@@ -26,8 +26,8 @@ const conversationApi = rootApi.injectEndpoints({
     }),
     getConversationWithMessages: builder.query({
       providesTags: [ApiTag.Conversation],
-      query: ({ conversationId }: { conversationId: string }) => ({
-        url: `/conversation/${conversationId}`,
+      query: ({ conversationId, limit }: { conversationId: string; limit?: number }) => ({
+        url: `/conversation/${conversationId}${limit ? `?limit=${limit}` : ''}`,
         method: 'GET',
       }),
     }),
