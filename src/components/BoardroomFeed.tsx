@@ -24,7 +24,7 @@ import { useUserPreferences, formatDistance as formatDistanceUnit } from '../hel
 import { useViewableItems } from '../hooks/useViewableItems';
 import { useTrackedPush } from '../context/NavigationContext';
 import { boardPhotoDisplay } from '../helpers/mediaUrl';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import AutoplayVideo from './AutoplayVideo';
 import ActionSheet from './ActionSheet';
 import UserAvatar from './UserAvatar';
 import type { ActionSheetSection } from './ActionSheet';
@@ -398,24 +398,10 @@ function ShaperCard({ shaper, isDark, isViewable = true }: { shaper: BoardroomSh
 
 // Autoplaying contained video layer (active slide only). Mirrors ShaperFeedCard
 // / ad SponsoredVideoSlide: muted + looped, plays only when `active`.
+// Lazy overlay (see AutoplayVideo): nothing while inactive (parent poster shows
+// through), native player only while active. `contain` keeps boards letterboxed.
 function BoardVideoLayer({ uri, active }: { uri: string; active: boolean }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = true;
-  });
-  useEffect(() => {
-    if (active) player.play();
-    else player.pause();
-  }, [active, player]);
-  return (
-    <VideoView
-      player={player}
-      style={StyleSheet.absoluteFillObject}
-      contentFit="contain"
-      nativeControls={false}
-      pointerEvents="none"
-    />
-  );
+  return <AutoplayVideo uri={uri} active={active} style={StyleSheet.absoluteFillObject} contentFit="contain" />;
 }
 
 function SlideHero({

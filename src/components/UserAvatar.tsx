@@ -68,8 +68,7 @@ export default function UserAvatar({
       }}
     >
       {showImage ? (
-        <Image
-          source={uri}
+        <View
           style={{
             width: size,
             height: size,
@@ -80,12 +79,25 @@ export default function UserAvatar({
             shadowOffset: { width: 0, height: 2 },
             elevation: 4,
           }}
-          contentFit="cover"
-          transition={200}
-          recyclingKey={uri ?? undefined}
-          cachePolicy="memory-disk"
-          onError={() => setImgError(true)}
-        />
+        >
+          {/* Colored-initial fallback sits BEHIND the image so a slow or
+              failed avatar load shows the initial instead of an empty grey
+              disk (Android emulators are slow at concurrent small-image
+              decode). The image fades in on top via `transition` once it
+              decodes. */}
+          <View style={{ position: 'absolute', top: 0, left: 0 }}>
+            <InitialPlaceholder initial={initial} size={size} />
+          </View>
+          <Image
+            source={uri}
+            style={{ width: size, height: size, borderRadius: size / 2 }}
+            contentFit="cover"
+            transition={200}
+            recyclingKey={uri ?? undefined}
+            cachePolicy="memory-disk"
+            onError={() => setImgError(true)}
+          />
+        </View>
       ) : (
         <InitialPlaceholder initial={initial} size={size} />
       )}

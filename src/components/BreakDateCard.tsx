@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, FlatList, Platform, Share, useColorScheme, type LayoutChangeEvent, type ViewToken, type GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import AutoplayVideo from './AutoplayVideo';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
 import ActionSheet, { type ActionSheetOption, type ActionSheetSection } from './ActionSheet';
@@ -127,23 +127,9 @@ const SOLO_AVATAR_SIZE = 52;
 // Discover/Favorites grouped feed plays clips exactly like the per-session feed.
 // Plays only when `active` (active carousel slide AND card viewable); otherwise
 // pauses and shows the poster still.
+// Lazy player (see AutoplayVideo) — only the active slide holds a native player.
 function BreakDateVideoSlide({ uri, poster, style, active }: { uri: string; poster?: string; style: any; active: boolean }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = true;
-  });
-  useEffect(() => {
-    if (active) player.play();
-    else player.pause();
-  }, [active, player]);
-  return (
-    <View style={style}>
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} pointerEvents="none" />
-      {!active && poster ? (
-        <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} contentFit="cover" />
-      ) : null}
-    </View>
-  );
+  return <AutoplayVideo uri={uri} poster={poster} active={active} style={style} />;
 }
 
 // Bottom-left media count. `photo_count` is TOTAL media; videos are a subset,

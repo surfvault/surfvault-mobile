@@ -12,7 +12,7 @@ import {
   type ViewToken,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import AutoplayVideo from './AutoplayVideo';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTrackedPush } from '../context/NavigationContext';
 import type { BoardroomShaper, Board } from '../store';
@@ -314,24 +314,11 @@ function CtaSlide({ width, isDark }: { width: number; isDark: boolean }) {
 // Autoplaying contained video layer (active slide only). Mirrors the ad
 // SponsoredVideoSlide: muted + looped, plays when `active`, pauses otherwise.
 // pointerEvents none so the slide Pressable still taps through to the profile.
+// Lazy overlay (see AutoplayVideo): renders nothing while inactive so the
+// parent BoardSlide's poster shows through; mounts the native player only while
+// active. `contain` keeps boards letterboxed (not cropped).
 function BoardVideoLayer({ uri, active }: { uri: string; active: boolean }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = true;
-  });
-  useEffect(() => {
-    if (active) player.play();
-    else player.pause();
-  }, [active, player]);
-  return (
-    <VideoView
-      player={player}
-      style={StyleSheet.absoluteFillObject}
-      contentFit="contain"
-      nativeControls={false}
-      pointerEvents="none"
-    />
-  );
+  return <AutoplayVideo uri={uri} active={active} style={StyleSheet.absoluteFillObject} contentFit="contain" />;
 }
 
 function BoardSlide({ board, width, isDark, active }: { board: Board; width: number; isDark: boolean; active: boolean }) {

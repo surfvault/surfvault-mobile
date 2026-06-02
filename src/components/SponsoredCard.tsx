@@ -72,6 +72,30 @@ interface SponsoredCardProps {
  * otherwise. While inactive it shows the poster still + a ▶ badge so paused
  * slides read as video. A corner button toggles sound. Tapping click-throughs.
  */
+// Player stays alive while the slide is mounted; we toggle play/pause on
+// `active` so it starts instantly (no spin-up stutter) when scrolled into
+// view. VideoView fades to opacity 0 when inactive so the poster shows. Ads
+// keep their mute toggle, so muting follows `muted` (not forced).
+function SponsoredVideoLayer({ uri, active, muted }: { uri: string; active: boolean; muted: boolean }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.muted = muted;
+  });
+  useEffect(() => { player.muted = muted; }, [muted, player]);
+  useEffect(() => {
+    if (active) player.play();
+    else player.pause();
+  }, [active, player]);
+  return (
+    <VideoView
+      player={player}
+      style={[StyleSheet.absoluteFill, { opacity: active ? 1 : 0 }]}
+      contentFit="cover"
+      nativeControls={false}
+    />
+  );
+}
+
 function SponsoredVideoSlide({
   uri,
   poster,
@@ -91,35 +115,14 @@ function SponsoredVideoSlide({
   onPress: () => void;
   ctaLabel?: string;
 }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = true;
-  });
-
-  useEffect(() => {
-    if (active) {
-      player.muted = muted;
-      player.play();
-    } else {
-      player.pause();
-    }
-  }, [active, muted, player]);
-
   return (
     <Pressable onPress={onPress} style={width ? { width } : undefined}>
-      <VideoView
-        player={player}
-        style={styles.thumb}
-        contentFit="cover"
-        nativeControls={false}
-      />
-      {!active && poster ? (
-        <Image
-          source={{ uri: poster }}
-          style={[styles.thumb, StyleSheet.absoluteFillObject]}
-          contentFit="cover"
-        />
-      ) : null}
+      {/* Poster mounted permanently underneath; the player stays alive and
+          fades in over it when active (no remount flash, instant playback). */}
+      <View style={styles.thumb}>
+        {poster ? <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
+        <SponsoredVideoLayer uri={uri} active={active} muted={muted} />
+      </View>
       {!active ? (
         <View style={[StyleSheet.absoluteFill, styles.playBadgeWrap]} pointerEvents="none">
           <View style={styles.playBadge}>

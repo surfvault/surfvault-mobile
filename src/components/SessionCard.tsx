@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, useColorScheme, FlatList } from 'react-native';
 import type { ViewToken, LayoutChangeEvent, GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
-import { VideoView, useVideoPlayer } from 'expo-video';
+import AutoplayVideo from './AutoplayVideo';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import UserAvatar from './UserAvatar';
@@ -141,23 +141,10 @@ type Slide =
 /** Autoplaying clip slide (the watermarked session preview). Plays muted+looped
  *  only when `active` (active carousel slide AND card on-screen); poster shows
  *  while paused. pointerEvents none so the parent Pressable still handles taps. */
+// Lazy: AutoplayVideo only spins up the native player while `active` (the visible
+// playing slide), so a feed never holds N players at once — see AutoplayVideo.
 function SessionCardVideoSlide({ uri, poster, style, active }: { uri: string; poster?: string; style: any; active: boolean }) {
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = true;
-    p.muted = true;
-  });
-  useEffect(() => {
-    if (active) player.play();
-    else player.pause();
-  }, [active, player]);
-  return (
-    <View style={style}>
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} pointerEvents="none" />
-      {!active && poster ? (
-        <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} contentFit="cover" />
-      ) : null}
-    </View>
-  );
+  return <AutoplayVideo uri={uri} poster={poster} active={active} style={style} />;
 }
 
 export default function SessionCard({ session, hidePhotographer = false, showViewCount = false, showHiddenLocations = false, enableCarousel = false, compact = false, hideFavoriteBreak = false, hideAspectRatioOption = false, onPress: customOnPress, onDelete, isViewable = true }: SessionCardProps) {
