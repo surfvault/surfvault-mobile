@@ -40,23 +40,13 @@ import React from 'react';
 
 type FilterType = 'all' | 'favorites' | 'mine';
 
-// Module-scope subscription store for selection state. Markers subscribe via
-// `useSyncExternalStore` and re-render ONLY when their own isSelected value
-// actually flips. Keeps the markers array reference stable (no parent
-// useMemo bust on selection) AND avoids the per-marker re-render that a
-// Context provider would cause when its value changes.
-let currentSelectedBreakId: string | null = null;
-const breakSelectionListeners = new Set<() => void>();
-function setSelectedBreakIdStore(id: string | null) {
-  if (currentSelectedBreakId === id) return;
-  currentSelectedBreakId = id;
-  breakSelectionListeners.forEach((l) => l());
-}
-function subscribeBreakSelection(listener: () => void) {
-  breakSelectionListeners.add(listener);
-  return () => { breakSelectionListeners.delete(listener); };
-}
-
+// Plain break pin. The selection halo is NOT drawn here — see SelectedBreakHalo
+// below. iOS + the New Architecture do not reliably re-snapshot an
+// already-mounted custom marker view when its children change (toggling
+// `tracksViewChanges` isn't enough), so swapping a dot for a halo in-place
+// rendered in React but never painted on the native map. Instead, every pin
+// stays a stable dot and a separate, freshly-mounted marker draws the halo
+// over the selected one — a fresh mount always paints.
 const SurfBreakMarker = React.memo(({
   sb,
   markerColor,
@@ -66,27 +56,20 @@ const SurfBreakMarker = React.memo(({
   markerColor: string;
   onMarkerPress: (sb: any) => void;
 }) => {
-  // useSyncExternalStore compares snapshots with Object.is — markers whose
-  // returned boolean didn't change are skipped by React entirely, no
-  // re-render at all. Only the previously- and newly-selected markers wake up.
-  const isSelected = React.useSyncExternalStore(
-    subscribeBreakSelection,
-    () => currentSelectedBreakId === sb.id,
-  );
-  // Android snapshots the custom marker view to a bitmap; track briefly on
-  // mount, color change, and selection change so the new view actually paints.
+  // iOS/Android snapshot the custom marker view to a bitmap; track briefly on
+  // mount and on color change (filter switch) so the dot actually paints, then
+  // stop tracking to keep the marker cheap.
   const [tracks, setTracks] = useState(true);
   useEffect(() => {
     setTracks(true);
     const t = setTimeout(() => setTracks(false), 400);
     return () => clearTimeout(t);
-  }, [markerColor, isSelected]);
+  }, [markerColor]);
 
   const handlePress = useCallback(() => onMarkerPress(sb), [sb, onMarkerPress]);
 
   return (
     <Marker
-      key={sb.id}
       coordinate={{
         latitude: parseFloat(sb.coordinates?.lat) || 0,
         longitude: parseFloat(sb.coordinates?.lon) || 0,
@@ -94,16 +77,47 @@ const SurfBreakMarker = React.memo(({
       tracksViewChanges={tracks}
       onPress={handlePress}
       stopPropagation
-      zIndex={isSelected ? 9999 : undefined}
     >
-      {isSelected ? (
-        <View style={styles.selectedHaloWrap}>
-          <View style={[styles.selectedHalo, { backgroundColor: markerColor }]} />
-          <View style={[styles.selectedCore, { backgroundColor: markerColor }]} />
-        </View>
-      ) : (
-        <View style={[styles.marker, { backgroundColor: markerColor }]} />
-      )}
+      <View style={[styles.marker, { backgroundColor: markerColor }]} />
+    </Marker>
+  );
+});
+
+// Selection halo, drawn as its own marker over the selected break's pin. The
+// PARENT keys this by `selectedBreak.id`, so changing selection unmounts the
+// old halo and mounts a new one — a fresh mount reliably paints on iOS where
+// an in-place child swap does not. `tracksViewChanges` is true just long
+// enough for the initial bitmap snapshot, then turns off.
+const SelectedBreakHalo = React.memo(({
+  sb,
+  color,
+  onPress,
+}: {
+  sb: any;
+  color: string;
+  onPress: () => void;
+}) => {
+  const [tracks, setTracks] = useState(true);
+  useEffect(() => {
+    setTracks(true);
+    const t = setTimeout(() => setTracks(false), 600);
+    return () => clearTimeout(t);
+  }, []);
+  const lat = parseFloat(sb.coordinates?.lat);
+  const lon = parseFloat(sb.coordinates?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return (
+    <Marker
+      coordinate={{ latitude: lat, longitude: lon }}
+      tracksViewChanges={tracks}
+      onPress={onPress}
+      stopPropagation
+      zIndex={9999}
+    >
+      <View style={styles.selectedHaloWrap}>
+        <View style={[styles.selectedHalo, { backgroundColor: color }]} />
+        <View style={[styles.selectedCore, { backgroundColor: color }]} />
+      </View>
     </Marker>
   );
 });
@@ -145,6 +159,15 @@ export default function MapScreen() {
   const searchInputRef = useRef<TextInput>(null);
   const hasAnimatedToLocation = useRef(false);
   const isAnimatingRef = useRef(false);
+  // Clears `isAnimatingRef` a beat after the LAST region-change event of a
+  // programmatic animation. Android emits several events per animation, so a
+  // single one-shot reset would mis-classify the trailing ones as user pans.
+  const animationResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Timestamp of the most recent marker tap. `handleMapPress` uses it to
+  // ignore the map's onPress that fires right after a marker tap on iOS (where
+  // the marker tap propagates to the map and `action` is undefined, so the
+  // Android-only `marker-press` guard misses it).
+  const lastMarkerPressAtRef = useRef(0);
   const [locationGranted, setLocationGranted] = useState(false);
 
   // Device location from Redux
@@ -237,10 +260,6 @@ export default function MapScreen() {
   // map is zoomed past the threshold below.
   const [selectedAd, setSelectedAd] = useState<any>(null);
   const [sheetMode, setSheetMode] = useState<SheetMode>('break');
-  // Mirror selection state into the module-scope subscription store so
-  // SurfBreakMarker components can subscribe surgically (only re-render the
-  // markers whose isSelected actually flipped, not all 100+ of them).
-  useEffect(() => { setSelectedBreakIdStore(selectedBreak?.id ?? null); }, [selectedBreak]);
   const sheetRef = useRef<BottomSheet>(null);
   const CARD_WIDTH = Math.round(Dimensions.get('window').width * 0.85);
   // Capture the initial zoom-range state once at mount so the BottomSheet
@@ -268,12 +287,19 @@ export default function MapScreen() {
   const [addBreakSheetVisible, setAddBreakSheetVisible] = useState(false);
   const [createSurfBreak] = useCreateSurfBreakMutation();
 
+  // Fetch a box slightly LARGER than the visible viewport. A margin means
+  // everything on screen is covered even if `region` under-reports the frame
+  // (e.g. mapPadding insets the reported region), and it buffers small pans so
+  // markers don't pop in late. The server LIMIT + client 200-cap bound the cost.
+  const BOUNDS_MARGIN = 0.35; // +35% of each delta on every side
+  const latSpan = region.latitudeDelta * (0.5 + BOUNDS_MARGIN);
+  const lonSpan = region.longitudeDelta * (0.5 + BOUNDS_MARGIN);
   // Round bounds based on zoom level — coarser when zoomed out, precise when zoomed in
   const precision = region.latitudeDelta > 10 ? 10 : region.latitudeDelta > 1 ? 100 : 1000;
-  const minLat = Math.floor((region.latitude - region.latitudeDelta / 2) * precision) / precision;
-  const maxLat = Math.ceil((region.latitude + region.latitudeDelta / 2) * precision) / precision;
-  const minLon = Math.floor((region.longitude - region.longitudeDelta / 2) * precision) / precision;
-  const maxLon = Math.ceil((region.longitude + region.longitudeDelta / 2) * precision) / precision;
+  const minLat = Math.floor((region.latitude - latSpan) * precision) / precision;
+  const maxLat = Math.ceil((region.latitude + latSpan) * precision) / precision;
+  const minLon = Math.floor((region.longitude - lonSpan) * precision) / precision;
+  const maxLon = Math.ceil((region.longitude + lonSpan) * precision) / precision;
 
   const getContinent = (lat: number, lon: number): string => {
     if (lat < -60) return 'an';
@@ -438,10 +464,19 @@ export default function MapScreen() {
 
   const handleRegionChange = useCallback((newRegion: Region) => {
     if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
-    // If programmatic animation, just update region directly without skipping query
+    // If programmatic animation, just update region directly without skipping
+    // query. Don't clear the flag on the first event — Android fires several
+    // region-change events across one animateToRegion, and clearing here would
+    // make the trailing events look like user pans (spurious refetch + marker
+    // churn). Instead keep pushing a short reset out; once events stop (the
+    // animation settled), the timer clears the flag.
     if (isAnimatingRef.current) {
-      isAnimatingRef.current = false;
       setRegion(newRegion);
+      if (animationResetTimerRef.current) clearTimeout(animationResetTimerRef.current);
+      animationResetTimerRef.current = setTimeout(() => {
+        isAnimatingRef.current = false;
+        animationResetTimerRef.current = null;
+      }, 400);
       return;
     }
     setRegionStable(false);
@@ -499,6 +534,7 @@ export default function MapScreen() {
   // wherever) up to half-snap so the carousel becomes visible for the tapped
   // item. Map is NOT animated — selection only changes the marker style.
   const handleMarkerPress = useCallback((sb: any) => {
+    lastMarkerPressAtRef.current = Date.now();
     setSelectedBreak(sb);
     setSelectedAd(null);
     setSheetMode('break');
@@ -506,6 +542,7 @@ export default function MapScreen() {
   }, []);
 
   const handleAdMarkerPress = useCallback((ad: any) => {
+    lastMarkerPressAtRef.current = Date.now();
     setSelectedAd(ad);
     setSelectedBreak(null);
     setSheetMode('ad');
@@ -560,27 +597,45 @@ export default function MapScreen() {
   // re-filtering by `region` client-side would cause an off-by-one when the
   // current region has drifted slightly from the last API query (markers
   // still on screen but technically outside the new bounds → would render on
-  // the map but vanish from the list). We just sort by distance from the
-  // current map center for a "closest first" carousel order.
-  const sortByDistanceFromCenter = useCallback(<T extends { lat: number; lon: number }>(items: T[]) => {
-    const cLat = region.latitude;
-    const cLon = region.longitude;
-    return [...items].sort((a, b) => {
-      const dA = (a.lat - cLat) ** 2 + (a.lon - cLon) ** 2;
-      const dB = (b.lat - cLat) ** 2 + (b.lon - cLon) ** 2;
-      return dA - dB;
-    });
-  }, [region.latitude, region.longitude]);
+  // the map but vanish from the list).
+  //
+  // Order along the viewport's DOMINANT geographic axis so swiping the carousel
+  // sweeps the selected pin smoothly across the map in one direction, instead
+  // of hopping by radius from center (which scatters the selection all over the
+  // screen). A N–S spread sorts north→south; an E–W spread sorts west→east.
+  // Self-relative (depends only on the items' own spread), so it doesn't
+  // re-sort on every small pan the way a center-relative sort does.
+  const sortBySpatialSweep = useCallback(<T extends { lat: number; lon: number }>(items: T[]) => {
+    if (items.length < 2) return items;
+    let minLatV = Infinity, maxLatV = -Infinity, minLonV = Infinity, maxLonV = -Infinity;
+    for (const it of items) {
+      if (it.lat < minLatV) minLatV = it.lat;
+      if (it.lat > maxLatV) maxLatV = it.lat;
+      if (it.lon < minLonV) minLonV = it.lon;
+      if (it.lon > maxLonV) maxLonV = it.lon;
+    }
+    const latSpread = maxLatV - minLatV;
+    // Longitude degrees shrink toward the poles — scale by cos(midLat) so the
+    // spread comparison reflects real east–west distance, not raw degrees.
+    const midLatRad = (((maxLatV + minLatV) / 2) * Math.PI) / 180;
+    const lonSpread = (maxLonV - minLonV) * Math.cos(midLatRad);
+    const byLat = latSpread >= lonSpread;
+    return [...items].sort((a, b) =>
+      byLat
+        ? b.lat - a.lat || a.lon - b.lon // north→south, then west→east
+        : a.lon - b.lon || b.lat - a.lat, // west→east, then north→south
+    );
+  }, []);
 
   const sheetBreaks = useMemo<MapNearbyItem[]>(() => {
     const items = (committedBreaks as any[]).map(breakToItem);
-    return sortByDistanceFromCenter(items);
-  }, [committedBreaks, breakToItem, sortByDistanceFromCenter]);
+    return sortBySpatialSweep(items);
+  }, [committedBreaks, breakToItem, sortBySpatialSweep]);
 
   const sheetAds = useMemo<MapNearbyItem[]>(() => {
     const items = (mapAds as any[]).map(adToItem);
-    return sortByDistanceFromCenter(items);
-  }, [mapAds, adToItem, sortByDistanceFromCenter]);
+    return sortBySpatialSweep(items);
+  }, [mapAds, adToItem, sortBySpatialSweep]);
 
   // Carousel swipe → change which pin is selected on the map (visual
   // reference between list position and map position). Map is NOT animated —
@@ -592,11 +647,15 @@ export default function MapScreen() {
       if (item.kind === 'ad') {
         const currentId = selectedAd?.id;
         if (String(currentId ?? '') === item.id) return;
-        setSelectedAd(mapAds.find((a: any) => String(a.id) === item.id) ?? null);
+        // Keep the current selection if the centered card isn't in the latest
+        // in-bounds set (a region settle can drop it) — don't null it out.
+        const next = mapAds.find((a: any) => String(a.id) === item.id);
+        if (next) setSelectedAd(next);
       } else {
         const currentId = selectedBreak?.id;
         if (String(currentId ?? '') === item.id) return;
-        setSelectedBreak(committedBreaks.find((b: any) => String(b.id) === item.id) ?? null);
+        const next = committedBreaks.find((b: any) => String(b.id) === item.id);
+        if (next) setSelectedBreak(next);
       }
     },
     [selectedBreak, selectedAd, mapAds, committedBreaks],
@@ -683,20 +742,25 @@ export default function MapScreen() {
 
   const markerColor = filter === 'favorites' ? '#ef4444' : filter === 'mine' ? '#8b5cf6' : '#0ea5e9';
 
-  // Stable array — does NOT depend on selectedBreak. Each marker subscribes to
-  // the module-scope selection store via `useSyncExternalStore`, so when
-  // selection changes only the two affected markers re-render (the rest of
-  // the array re-uses its previous JSX). The array reference passed to
-  // <MapView> is identical across selection changes, so the native subview
-  // list never receives spurious insert/remove ops.
-  const markers = useMemo(() => surfBreaks.map((sb: any) => (
-    <SurfBreakMarker
-      key={sb.id}
-      sb={sb}
-      markerColor={markerColor}
-      onMarkerPress={handleMarkerPress}
-    />
-  )), [surfBreaks, markerColor, handleMarkerPress]);
+  // Stable array — does NOT depend on selectedBreak, so the marker list passed
+  // to <MapView> is identical across selection changes and the native subview
+  // list never receives spurious insert/remove ops. Selection is drawn by a
+  // separate <SelectedBreakHalo> marker layered on top, not by mutating these.
+  const markers = useMemo(() => surfBreaks.map((sb: any) => {
+    // Skip breaks with missing/unparseable coordinates rather than dropping a
+    // pin at (0,0) off West Africa.
+    const lat = parseFloat(sb.coordinates?.lat);
+    const lon = parseFloat(sb.coordinates?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    return (
+      <SurfBreakMarker
+        key={sb.id}
+        sb={sb}
+        markerColor={markerColor}
+        onMarkerPress={handleMarkerPress}
+      />
+    );
+  }), [surfBreaks, markerColor, handleMarkerPress]);
 
   // Ad venue pins. Amber default, red when selected. Tap → impression + open
   // sheet to ad mode. Inline rendering (no wrapper component) because the
@@ -721,9 +785,14 @@ export default function MapScreen() {
   }), [mapAds, handleAdMarkerPress, selectedAd]);
 
   const handleMapPress = useCallback((e: any) => {
-    // On iOS a marker tap also fires the map's onPress with this action; ignore
-    // it so tapping a marker doesn't immediately dismiss its info card.
+    // Android sets action === 'marker-press' on the map onPress that follows a
+    // marker tap; ignore it so tapping a marker doesn't dismiss its info card.
     if (e?.nativeEvent?.action === 'marker-press') return;
+    // iOS doesn't set that action and `stopPropagation` is unreliable for
+    // custom-view markers, so the marker tap's propagated map onPress would
+    // otherwise clear the selection we just set in the same tick. Ignore any
+    // map press within a short window of a marker tap.
+    if (Date.now() - lastMarkerPressAtRef.current < 350) return;
     if (searchOpen && !searchTerm) {
       setSearchOpen(false);
       Keyboard.dismiss();
@@ -775,18 +844,25 @@ export default function MapScreen() {
         showsUserLocation={locationGranted}
         showsMyLocationButton={false}
         toolbarEnabled={false}
+        // Android auto-centers the camera on a tapped marker by default, which
+        // fires onRegionChangeComplete → debounced refetch → the whole marker
+        // set is swapped out from under the user (markers "shift/disappear on
+        // tap"). We drive the camera ourselves, so disable the auto-move.
+        moveOnMarkerPress={false}
         minZoomLevel={2}
         maxZoomLevel={18}
-        // Push the map's apparent center upward so Google Maps' Android-only
-        // auto-center-on-marker-tap behavior lands the marker in the visible
-        // top portion of the screen instead of being hidden behind the bottom
-        // sheet. iOS doesn't auto-center so padding only affects which area
-        // is treated as "center" for user-location framing; harmless there.
+        // Small bottom inset just clears the peek sheet (handle + tab bar) so
+        // the map attribution / user-location dot aren't hidden behind it.
+        // It used to be 40% of the screen to push Android's auto-center-on-tap
+        // above the sheet, but that's disabled now (moveOnMarkerPress=false) —
+        // and a large inset shrinks the region react-native-maps reports, which
+        // dropped the bottom of the visible map out of the fetch bounds so
+        // on-screen breaks went missing.
         mapPadding={{
           top: 0,
           left: 0,
           right: 0,
-          bottom: Math.round(Dimensions.get('window').height * 0.4),
+          bottom: safeAreaInsets.bottom + 72,
         }}
         // Keep all markers mounted across viewport pans to avoid the
         // `-[AIRMap insertReactSubview:atIndex:]` crash class on the new
@@ -796,6 +872,14 @@ export default function MapScreen() {
         onLongPress={isSuperAdmin ? handleMapLongPress : undefined}
       >
         {markers}
+        {selectedBreak && (
+          <SelectedBreakHalo
+            key={`sel-${selectedBreak.id}`}
+            sb={selectedBreak}
+            color={markerColor}
+            onPress={() => handleMarkerPress(selectedBreak)}
+          />
+        )}
         {adMarkers}
         {pendingBreakCoord && (
           <Marker

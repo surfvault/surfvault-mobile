@@ -100,11 +100,15 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
   const onAdImpressionRef = useRef(onAdImpression);
   const carouselListRef = useRef(carouselList);
   const cardWidthRef = useRef(cardWidth);
+  // Latest selection, read by the deferred auto-promote in handleSheetChange so
+  // it never acts on a stale value (see note there).
+  const selectedIdRef = useRef(selectedId);
   useEffect(() => {
     onCenterRef.current = onCenterItem;
     onAdImpressionRef.current = onAdImpression;
     carouselListRef.current = carouselList;
     cardWidthRef.current = cardWidth;
+    selectedIdRef.current = selectedId;
   });
 
   // Impressions fire on visible-during-scroll (so an ad seen briefly still
@@ -150,16 +154,25 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
       if (index === -1) {
         seenAdsRef.current.clear();
         onClose();
+        return;
       }
-      // When opening to half-snap (or above) and no item is selected yet,
-      // promote the first card to selected so the map always has a matching
-      // selected pin alongside the carousel.
-      if (index >= 1 && !selectedId) {
-        const first = carouselList[0];
-        if (first) onCenterItem?.(first);
+      // When opening to half-snap (or above) with NO selection, promote the
+      // first card so the map always has a matching selected pin alongside the
+      // carousel. Deferred a frame and read from a ref because a marker tap
+      // sets the selection AND snaps the sheet open in the same gesture — a
+      // synchronous read here can still see the pre-tap (empty) value and would
+      // wrongly override the tapped break with the centered one. By next frame
+      // the selection has settled, so a tap is respected while a plain
+      // swipe-open (still empty) correctly promotes the first card.
+      if (index >= 1) {
+        requestAnimationFrame(() => {
+          if (selectedIdRef.current) return;
+          const first = carouselListRef.current[0];
+          if (first) onCenterRef.current?.(first);
+        });
       }
     },
-    [onClose, selectedId, carouselList, onCenterItem],
+    [onClose],
   );
 
   // Helper to render the type-locked carousel at the half snap point.
@@ -188,6 +201,17 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
         onViewableItemsChanged={handleViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
         onMomentumScrollEnd={handleMomentumScrollEnd}
+        // Guard against the uncaught invariant RN throws if a scrollToIndex /
+        // initialScrollIndex ever lands out of range. Re-attempt via offset
+        // (we know each page is cardWidth + 12 wide) on the next frame.
+        onScrollToIndexFailed={(info: { index: number }) => {
+          requestAnimationFrame(() => {
+            carouselRef.current?.scrollToOffset({
+              offset: info.index * (cardWidth + 12),
+              animated: false,
+            });
+          });
+        }}
         renderItem={({ item }: { item: MapNearbyItem }) => (
           <MapNearbyCard item={item} isDark={isDark} onPress={() => onPressItem(item)} width={cardWidth} />
         )}
