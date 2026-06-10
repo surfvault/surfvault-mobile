@@ -27,8 +27,10 @@ interface AuthContextType {
   /**
    * Run Auth0 authorize, then push the new credentials into LinkedAccountsContext.
    * The new account becomes active. Resolves to the new userId on success.
+   * Pass `loginHint` (an email) to pre-fill Auth0's form when re-establishing
+   * a specific already-linked account ("Sign in to switch").
    */
-  login: () => Promise<string | null>;
+  login: (opts?: { loginHint?: string }) => Promise<string | null>;
   /**
    * Sign out of the *active* account only. The entry stays in the linked
    * set marked `expired` (switching back requires reauth). Other linked
@@ -202,7 +204,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [linked]);
 
   // -------------------- LOGIN --------------------
-  const login = useCallback(async (): Promise<string | null> => {
+  const login = useCallback(async (opts?: { loginHint?: string }): Promise<string | null> => {
     try {
       const audience = Constants.expoConfig?.extra?.auth0Audience;
       await authorize({
@@ -210,7 +212,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         scope: 'openid profile email offline_access',
         // Force the account-picker so adding a sibling profile actually shows
         // Auth0's login form rather than silently re-using the SSO cookie.
-        additionalParameters: { prompt: 'login' },
+        // login_hint pre-fills the email when re-establishing a known account.
+        additionalParameters: {
+          prompt: 'login',
+          ...(opts?.loginHint ? { login_hint: opts.loginHint } : {}),
+        },
       });
       const creds = await getCredentials();
       if (!creds?.accessToken || !creds?.refreshToken) return null;
