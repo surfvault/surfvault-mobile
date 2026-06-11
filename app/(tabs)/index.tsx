@@ -471,8 +471,8 @@ export default function HomeScreen() {
   // of every partial page.
   const hasMoreSessions = Boolean(sessionsCurrentData?.results?.continuationToken);
   const feedRows = useMemo(
-    () =>
-      interleavePromoGroups(
+    () => {
+      const rows = interleavePromoGroups(
         sessions,
         feedAds,
         undefined,
@@ -481,8 +481,27 @@ export default function HomeScreen() {
             ? `g-${t.session_date}-${t.group_key}`
             : t?.session_id ?? t?.id ?? `item-${i}`,
         hasMoreSessions
-      ) as FeedRow<any, any>[],
-    [sessions, feedAds, hasMoreSessions]
+      ) as FeedRow<any, any>[];
+
+      // Following only: a followed shaper is editorial content the viewer
+      // explicitly opted into — not a fill-in ad. interleavePromoGroups anchors
+      // promos on sessions and returns [] when there are none, which would
+      // silently drop the shaper if nobody you follow has posted a session.
+      // Once the session query has resolved empty, surface the followed shapers
+      // on their own so they aren't lost. (Ads are intentionally NOT drained
+      // here — an ads-only feed is exactly what the empty-items guard avoids.)
+      if (rows.length === 0 && feedType === 'following' && sessionsCurrentData) {
+        const shapers = followedShapersData?.results?.shapers || [];
+        return shapers.map((s: any) => ({
+          type: 'ad' as const,
+          key: `a-${s.id ?? s.handle}`,
+          data: [{ ...s, _kind: 'shaper' as const }],
+        })) as FeedRow<any, any>[];
+      }
+
+      return rows;
+    },
+    [sessions, feedAds, hasMoreSessions, feedType, sessionsCurrentData, followedShapersData]
   );
 
   // Parse search results — API returns searchContent array, dedupe by composite key

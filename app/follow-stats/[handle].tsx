@@ -9,6 +9,7 @@ import {
   Keyboard,
   StyleSheet,
   useColorScheme,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -16,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import UserAvatar from '../../src/components/UserAvatar';
-import { useGetUserQuery, useGetUserFollowingQuery } from '../../src/store';
+import { useGetUserQuery, useGetUserFollowingQuery, useFollowUserMutation } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 
 type Tab = 'followers' | 'following';
@@ -41,6 +42,18 @@ export default function FollowStatsScreen() {
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [revokeFollower] = useFollowUserMutation();
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+
+  // Only a private profile, viewing its OWN followers, can revoke access — the
+  // manual counterpart to grant expiry. Server-gated to target = caller too.
+  const canRevoke =
+    !!currentUser?.handle &&
+    currentUser.handle === handle &&
+    tab === 'followers' &&
+    currentUser?.access === 'private';
 
   // Fetch the profile so we can show follower / following counts on the tab pills
   const { data: userData } = useGetUserQuery(
@@ -112,6 +125,7 @@ export default function FollowStatsScreen() {
     setSearchTerm('');
     setContinuationToken('');
     setItems([]);
+    setConfirmingId(null);
     seenIdsRef.current = new Set();
   }, [tab]);
 
@@ -127,6 +141,22 @@ export default function FollowStatsScreen() {
     Keyboard.dismiss();
     trackedPush(`/user/${selectedHandle}` as any);
   }, [trackedPush]);
+
+  // Inline two-step confirm on the row (no popup): tapping Remove arms a
+  // Cancel/Remove pair; the second tap calls this.
+  const doRevoke = useCallback(async (target: any) => {
+    try {
+      setRevokingId(target.id);
+      await revokeFollower({ userId: target.id, action: 'revoke-follower' }).unwrap();
+      setItems((prev) => prev.filter((u) => u.id !== target.id));
+      seenIdsRef.current.delete(target.id);
+    } catch (e) {
+      Alert.alert('Error', "Couldn't remove access. Please try again.");
+    } finally {
+      setRevokingId(null);
+      setConfirmingId(null);
+    }
+  }, [revokeFollower]);
 
   const renderItem = useCallback(({ item }: { item: any }) => {
     return (
@@ -149,7 +179,6 @@ export default function FollowStatsScreen() {
             name={item.name ?? item.handle}
             size={42}
             verified={item.verified}
-            userType={item.user_type}
           />
         </View>
         <View style={{ flex: 1, minWidth: 0, marginLeft: 12, marginRight: 8 }}>
@@ -165,11 +194,60 @@ export default function FollowStatsScreen() {
           >
             {item.handle}
           </Text>
+          {canRevoke && (
+            <Text
+              style={{ fontSize: 11, color: isDark ? '#38bdf8' : '#0ea5e9', marginTop: 2 }}
+              numberOfLines={1}
+            >
+              {item.follow_expires_at
+                ? `Access until ${new Date(item.follow_expires_at).toLocaleDateString()}`
+                : 'Full access'}
+            </Text>
+          )}
         </View>
-        <Ionicons name="chevron-forward" size={18} color={isDark ? '#4b5563' : '#cbd5e1'} />
+        {canRevoke ? (
+          revokingId === item.id ? (
+            <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#6b7280' : '#9ca3af', paddingHorizontal: 12, paddingVertical: 6 }}>
+              Removing…
+            </Text>
+          ) : confirmingId === item.id ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Pressable
+                onPress={() => setConfirmingId(null)}
+                hitSlop={6}
+                style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#9ca3af' : '#64748b' }}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => doRevoke(item)}
+                hitSlop={6}
+                style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#e11d48' }}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>Remove</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => setConfirmingId(item.id)}
+              hitSlop={6}
+              style={{
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                borderRadius: 8,
+                borderWidth: StyleSheet.hairlineWidth,
+                borderColor: isDark ? '#374151' : '#e2e8f0',
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '700', color: isDark ? '#fb7185' : '#e11d48' }}>Remove</Text>
+            </Pressable>
+          )
+        ) : (
+          <Ionicons name="chevron-forward" size={18} color={isDark ? '#4b5563' : '#cbd5e1'} />
+        )}
       </Pressable>
     );
-  }, [handleSelect, isDark]);
+  }, [handleSelect, isDark, canRevoke, doRevoke, confirmingId, revokingId]);
 
   return (
     <>

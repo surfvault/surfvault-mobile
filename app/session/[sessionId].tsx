@@ -460,7 +460,10 @@ export default function SessionDetailScreen() {
     (activeGroupId !== null) || (!!continuationToken)
   );
 
-  const { data: morePhotos, isFetching: loadingMore, refetch: refetchPhotos } = useGetSessionPhotosQuery(
+  // currentData (not data): undefined while a fetch is in-flight, so the merge
+  // effect never processes a stale prior-args result during arg transitions.
+  // (Matches the web gallery's deliberate choice.)
+  const { currentData: morePhotos, isFetching: loadingMore, refetch: refetchPhotos } = useGetSessionPhotosQuery(
     {
       sessionId: session?.id ?? '',
       limit: FETCH_AMOUNT,
@@ -982,17 +985,26 @@ export default function SessionDetailScreen() {
           return { ...m, groups: [...existing, { id: group.id, name: group.name, color: group.color }] };
         }));
       } else {
-        setSessionMedia((prev) => prev.map((m) => {
-          if (!selectedPhotoIds.includes(m.id)) return m;
-          return { ...m, groups: (m.groups ?? []).filter((g: any) => g.id !== groupId) };
-        }));
+        const removed = new Set(selectedPhotoIds);
+        if (groupId === activeGroupId) {
+          // Viewing the group we just removed from → drop the tiles entirely.
+          // The additive page-merge (seenMediaRef dedup) can't remove rows on
+          // refetch, so without this they'd linger until re-filter.
+          removed.forEach((id) => seenMediaRef.current.delete(id));
+          setSessionMedia((prev) => prev.filter((m) => !removed.has(m.id)));
+        } else {
+          setSessionMedia((prev) => prev.map((m) => {
+            if (!removed.has(m.id)) return m;
+            return { ...m, groups: (m.groups ?? []).filter((g: any) => g.id !== groupId) };
+          }));
+        }
       }
       Alert.alert('Done', `${action === 'add' ? 'Added' : 'Removed'} ${selectedPhotoIds.length} item${selectedPhotoIds.length !== 1 ? 's' : ''} ${action === 'add' ? 'to' : 'from'} group.`);
       cancelAction();
     } catch {
       Alert.alert('Error', 'Failed to update group media.');
     }
-  }, [sessionAction, selectedPhotoIds, session?.id, groups, updateGroupPhotos, cancelAction]);
+  }, [sessionAction, selectedPhotoIds, session?.id, groups, activeGroupId, updateGroupPhotos, cancelAction]);
 
   // In ungroup mode, only surface pills for groups the selected media actually
   // belong to (single long-press → just that photo's groups; bulk → union of
