@@ -25,14 +25,16 @@ export async function fetchAccountBadge(accessToken: string): Promise<AccountBad
 
   const [msg, notif] = await Promise.all([
     get('/conversations-unread'),
-    // limit=0 → backend returns just the unread set; we count its length, the
-    // same signal the tab-bar bell badge uses.
-    get('/notifications?read=false&filter=&limit=0&continuationToken='),
+    // limit must be > 0 — the backend does `limit ? Number(limit) : 25`, so
+    // limit=0 → SQL LIMIT 0 → an empty array → the notification count was
+    // always 0. Fetch a small page of unread and count it.
+    get('/notifications?read=false&filter=&limit=20&continuationToken='),
   ]);
 
   return {
     messages:
       Number(msg?.results?.unreadCount ?? msg?.results?.totalUnreadMessages ?? 0) || 0,
-    notifications: notif?.results?.notifications?.length ?? 0,
+    notifications:
+      notif?.results?.unreadCount ?? notif?.results?.notifications?.length ?? 0,
   };
 }

@@ -48,12 +48,14 @@ function TabsInner() {
     ? Number(unreadData?.results?.unreadCount ?? unreadData?.results?.totalUnreadMessages ?? 0) || 0
     : 0;
 
+  // limit must be > 0 — the backend does `limit ? Number(limit) : 25`, so
+  // limit:0 → SQL LIMIT 0 → empty array → the bell badge was always 0.
   const { data: notifData, refetch: refetchNotifs } = useGetNotificationsQuery(
-    { read: false, filter: '', limit: 0, continuationToken: '' },
+    { read: false, filter: '', limit: 20, continuationToken: '' },
     { skip: !isAuthenticated }
   );
   const unreadNotifCount = isAuthenticated
-    ? (notifData?.results?.notifications?.length ?? 0)
+    ? (notifData?.results?.unreadCount ?? notifData?.results?.notifications?.length ?? 0)
     : 0;
 
   // Refetch counts when app returns to foreground. RTK Query's refetchOnFocus

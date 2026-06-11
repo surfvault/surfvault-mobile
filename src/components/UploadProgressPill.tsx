@@ -9,7 +9,8 @@ export default function UploadProgressPill() {
 
   if (!upload) return null;
 
-  const { completed, total, isUploading, bytesProgress, etaMs } = upload;
+  const { completed, total, failed, isUploading, bytesProgress, etaMs } = upload;
+  const failedCount = failed ?? 0;
   // Prefer the byte-smoothed fraction so a single large clip fills the bar live
   // instead of staying at 0 until it finishes.
   const countFraction = total > 0 ? completed / total : 0;
@@ -22,11 +23,16 @@ export default function UploadProgressPill() {
     return m > 0 ? `${m}m ${sec}s left` : `${sec}s left`;
   };
 
+  const doneLabel = failedCount > 0
+    ? `${completed} uploaded · ${failedCount} failed`
+    : `${completed} item${completed !== 1 ? 's' : ''} uploaded`;
   const label = isUploading
     ? (etaMs && etaMs > 0
         ? `Uploading ${Math.round(progress * 100)}% · ${formatEta(etaMs)}`
         : `Uploading ${completed}/${total}...`)
-    : `${completed} item${completed !== 1 ? 's' : ''} uploaded`;
+    : doneLabel;
+  const doneIcon = failedCount > 0 ? 'alert-circle' : 'checkmark-circle';
+  const doneColor = failedCount > 0 ? '#f59e0b' : '#22c55e';
 
   return (
     <View style={[s.container, { backgroundColor: isDark ? '#1f2937' : '#111827' }]}>
@@ -36,9 +42,9 @@ export default function UploadProgressPill() {
       {/* Content */}
       <View style={s.content}>
         <Ionicons
-          name={isUploading ? 'cloud-upload-outline' : 'checkmark-circle'}
+          name={isUploading ? 'cloud-upload-outline' : doneIcon}
           size={16}
-          color={isUploading ? '#60a5fa' : '#22c55e'}
+          color={isUploading ? '#60a5fa' : doneColor}
         />
         <Text style={s.label} numberOfLines={1}>{label}</Text>
         {isUploading && (

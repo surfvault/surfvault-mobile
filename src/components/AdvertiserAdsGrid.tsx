@@ -40,6 +40,7 @@ type AdMedia = {
   id: string | null;
   type?: 'photo' | 'video';
   s3_key: string;
+  poster_s3_key?: string | null;
   landscape_s3_key?: string | null;
   sort_order?: number;
 };
@@ -79,17 +80,32 @@ const formatCount = (n: number): string => {
   return String(v);
 };
 
-function pickThumbnailKey(ad: AdRow): string | null {
+// The representative still for a media row. For a VIDEO row `s3_key` is the
+// transcoded MP4 (not an image) — so the still is `poster_s3_key` (null while
+// the clip is still transcoding). A photo's still is its `s3_key`.
+function mediaStill(m?: AdMedia | null): string | null {
+  if (!m) return null;
+  return m.type === 'video' ? (m.poster_s3_key ?? null) : (m.s3_key ?? null);
+}
+
+// The media row used for the tile thumbnail: owner-chosen `thumbnail_ad_media_id`
+// when set, else the lowest sort_order. (Backend pre-sorts, but sort defensively.)
+function pickThumbnailMedia(ad: AdRow): AdMedia | null {
   const media = ad.media ?? [];
   if (ad.thumbnail_ad_media_id) {
     const t = media.find((m) => m.id === ad.thumbnail_ad_media_id);
-    if (t?.s3_key) return t.s3_key;
+    if (t) return t;
   }
   if (media.length) {
-    const sorted = [...media].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    return sorted[0]?.s3_key ?? null;
+    return [...media].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))[0] ?? null;
   }
-  return ad.media_url ?? null;
+  return null;
+}
+
+function pickThumbnailKey(ad: AdRow): string | null {
+  const picked = pickThumbnailMedia(ad);
+  // Fall back to the legacy inline media_url when there's no media[] row.
+  return picked ? mediaStill(picked) : (ad.media_url ?? null);
 }
 
 export default function AdvertiserAdsGrid({
@@ -239,13 +255,16 @@ export default function AdvertiserAdsGrid({
   // Shared per-ad derivation so grid + list stay in sync.
   const adMeta = (ad: AdRow) => {
     const thumb = pickThumbnailKey(ad);
+    const isVideoThumb = pickThumbnailMedia(ad)?.type === 'video';
+    const allMedia = Array.isArray(ad.media) ? ad.media : [];
+    const videoCount = allMedia.filter((m) => m.type === 'video').length;
+    const imageCount = allMedia.length - videoCount;
     const status = (ad.status ?? 'approved') as NonNullable<AdRow['status']>;
     // An approved ad past its end date isn't serving — surface it as "Expired"
     // instead of "Active" so the advertiser knows it needs a new window.
     const isExpired = status === 'approved' && !!ad.ends_at && new Date(ad.ends_at).getTime() < Date.now();
     const pillStatus: NonNullable<AdRow['status']> | 'expired' = isExpired ? 'expired' : status;
     const isLive = status === 'approved' && ad.is_active !== false && !isExpired;
-    const mediaCount = Array.isArray(ad.media) ? ad.media.length : 0;
     // Daily credit burn = 1 per targeted break + 1 if on Discover.
     const dailyCost = dailyCreditCost(
       Array.isArray(ad.surf_break_targets) ? ad.surf_break_targets.length : 0,
@@ -258,7 +277,7 @@ export default function AdvertiserAdsGrid({
       if (!isLive) return;
       if (ad.click_url) Linking.openURL(ad.click_url).catch(() => { /* noop */ });
     };
-    return { thumb, status, pillStatus, isLive, mediaCount, dailyCost, onPress };
+    return { thumb, isVideoThumb, status, pillStatus, isLive, imageCount, videoCount, dailyCost, onPress };
   };
 
   return (
@@ -268,7 +287,7 @@ export default function AdvertiserAdsGrid({
         // ellipsis) on top, edge-to-edge thumbnail with a bottom-left stats chip.
         <View>
           {ads.map((ad) => {
-            const { thumb, pillStatus, isLive, mediaCount, dailyCost, onPress } = adMeta(ad);
+            const { thumb, isVideoThumb, pillStatus, isLive, imageCount, videoCount, dailyCost, onPress } = adMeta(ad);
             return (
               <View key={ad.id} style={s.listCard}>
                 <View style={s.listCardHeader}>
@@ -306,8 +325,15 @@ export default function AdvertiserAdsGrid({
                       <Ionicons name="megaphone-outline" size={32} color={isDark ? '#374151' : '#d1d5db'} />
                     </View>
                   )}
+                  {isVideoThumb && thumb ? (
+                    <View style={s.videoBadgeWrap} pointerEvents="none">
+                      <View style={s.videoBadgeCircle}>
+                        <Ionicons name="videocam" size={16} color="#fff" />
+                      </View>
+                    </View>
+                  ) : null}
                   <View style={s.listStatsBL} pointerEvents="none">
-                    <StatsChip mediaCount={mediaCount} impressions={ad.impression_count} clicks={ad.click_count} showAnalytics={!!isSelf} large />
+                    <StatsChip imageCount={imageCount} videoCount={videoCount} impressions={ad.impression_count} clicks={ad.click_count} showAnalytics={!!isSelf} large />
                   </View>
                 </Pressable>
               </View>
@@ -317,7 +343,7 @@ export default function AdvertiserAdsGrid({
       ) : (
       <View style={s.grid}>
       {ads.map((ad) => {
-        const { thumb, pillStatus, isLive, mediaCount, dailyCost, onPress } = adMeta(ad);
+        const { thumb, isVideoThumb, pillStatus, isLive, imageCount, videoCount, dailyCost, onPress } = adMeta(ad);
         return (
           <Pressable
             key={ad.id}
@@ -337,6 +363,14 @@ export default function AdvertiserAdsGrid({
                 <Ionicons name="megaphone-outline" size={28} color={isDark ? '#4b5563' : '#9ca3af'} />
               </View>
             )}
+
+            {isVideoThumb && thumb ? (
+              <View style={s.videoBadgeWrap} pointerEvents="none">
+                <View style={s.videoBadgeCircle}>
+                  <Ionicons name="videocam" size={15} color="#fff" />
+                </View>
+              </View>
+            ) : null}
 
             {/* TOP-LEFT chip — status dot (self) + name + CTA label (mirrors the
                 session grid tile's chip; the dot replaces a full status pill so a
@@ -361,7 +395,7 @@ export default function AdvertiserAdsGrid({
                 stats (self-view shows both). */}
             <View style={s.gridBottomLeft} pointerEvents="none">
               {isSelf && <CreditChip cost={dailyCost} />}
-              <StatsChip mediaCount={mediaCount} impressions={ad.impression_count} clicks={ad.click_count} showAnalytics={!!isSelf} />
+              <StatsChip imageCount={imageCount} videoCount={videoCount} impressions={ad.impression_count} clicks={ad.click_count} showAnalytics={!!isSelf} />
             </View>
 
             {/* BOTTOM-RIGHT — ellipsis actions (self-view only). */}
@@ -421,8 +455,9 @@ function StatusPill({ status }: { status: AdStatus }) {
  * self-view (private analytics, like SessionCard's owner-only view count).
  * `large` matches SessionCard's thumbnail badge; default matches the grid tile.
  */
-function StatsChip({ mediaCount, impressions, clicks, showAnalytics, large = false }: {
-  mediaCount: number;
+function StatsChip({ imageCount, videoCount, impressions, clicks, showAnalytics, large = false }: {
+  imageCount: number;
+  videoCount: number;
   impressions?: number;
   clicks?: number;
   showAnalytics: boolean;
@@ -433,17 +468,25 @@ function StatsChip({ mediaCount, impressions, clicks, showAnalytics, large = fal
   // drop media there. List view (room for all three) and public grid tiles
   // (analytics are private, so media is the only stat) keep it.
   const showMedia = !(showAnalytics && !large);
+  const hasMedia = imageCount > 0 || videoCount > 0;
   return (
     <View style={large ? s.chipLg : s.chip} pointerEvents="none">
-      {showMedia && (
+      {showMedia && imageCount > 0 && (
         <>
           <Ionicons name="images-outline" size={iconSize} color="#fff" />
-          <Text style={s.statsChipText}>{formatCount(mediaCount)}</Text>
+          <Text style={s.statsChipText}>{formatCount(imageCount)}</Text>
+        </>
+      )}
+      {showMedia && videoCount > 0 && (
+        <>
+          {imageCount > 0 && <Text style={[s.statsChipText, { opacity: 0.7 }]}> · </Text>}
+          <Ionicons name="videocam-outline" size={iconSize} color="#fff" />
+          <Text style={s.statsChipText}>{formatCount(videoCount)}</Text>
         </>
       )}
       {showAnalytics && (
         <>
-          {showMedia && <Text style={[s.statsChipText, { opacity: 0.7 }]}> · </Text>}
+          {showMedia && hasMedia && <Text style={[s.statsChipText, { opacity: 0.7 }]}> · </Text>}
           <Ionicons name="eye-outline" size={iconSize} color="#fff" />
           <Text style={s.statsChipText}>{formatCount(impressions ?? 0)}</Text>
           <Text style={[s.statsChipText, { opacity: 0.7 }]}> · </Text>
@@ -474,6 +517,22 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: GRID_GAP,
+  },
+  // Center clip indicator — videocam (matches the web ad gallery + the board /
+  // session grids). Center is clear of the name (top-left), stats (bottom-left)
+  // and ellipsis (bottom-right).
+  videoBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoBadgeCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   listCard: {
     marginBottom: 16,

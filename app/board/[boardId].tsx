@@ -18,6 +18,9 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+// Legacy FS API streams a file from disk to S3 (no loading a 2GB clip into a
+// JS blob) — same approach the session upload path uses.
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 import ImageViewing from 'react-native-image-viewing';
 import { useDispatch } from 'react-redux';
 import {
@@ -266,21 +269,60 @@ export default function BoardDetailScreen() {
         },
       }).unwrap();
       const out = presigned?.results?.photos ?? [];
+
+      // Stream each file from disk to S3 with bounded concurrency. Previously
+      // this did `fetch(uri).blob()` for every asset inside an unbounded
+      // Promise.all — loading whole files (incl. 2GB clips) into JS memory at
+      // once, which OOM-crashes the app (F10). It also never checked the PUT
+      // response, so a failed upload silently left a broken tile + inflated
+      // storage (F4). Now: stream, check status, and roll back the phantom row
+      // on failure.
+      const CONCURRENCY = 3;
+      const succeeded = new Set<string>();
+      let failedUploads = 0;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < out.length) {
+          const idx = cursor++;
+          const p: any = out[idx];
+          const asset = accepted[idx];
+          if (!p || !asset) continue;
+          const contentType = asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg');
+          try {
+            const result = await LegacyFileSystem.createUploadTask(
+              p.url,
+              asset.uri,
+              {
+                httpMethod: 'PUT',
+                uploadType: LegacyFileSystem.FileSystemUploadType.BINARY_CONTENT,
+                headers: { 'Content-Type': contentType },
+              }
+            ).uploadAsync();
+            if (!result || result.status < 200 || result.status >= 300) {
+              throw new Error(`HTTP ${result?.status ?? 'no response'}`);
+            }
+            if (p.id) succeeded.add(p.id);
+          } catch (e) {
+            failedUploads++;
+            console.warn('board photo upload failed:', e);
+            // Roll back the phantom row + its storage debit (the server
+            // committed the row at presign time, before this PUT).
+            if (p.id) {
+              try { await deleteMyBoardPhoto({ photoId: p.id }).unwrap(); } catch { /* best-effort */ }
+            }
+          }
+        }
+      };
       await Promise.all(
-        out.map(async (p: any, i: number) => {
-          const asset = accepted[i];
-          const blob = await (await fetch(asset.uri)).blob();
-          await fetch(p.url, {
-            method: 'PUT',
-            headers: { 'Content-Type': asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg') },
-            body: blob,
-          });
-        })
+        Array.from({ length: Math.min(CONCURRENCY, out.length) }, () => worker())
       );
-      // Trigger transcode for video rows now that their S3 objects exist
-      // (boards have no per-file finalize → create couldn't enqueue without
-      // racing the upload). Best-effort.
-      const videoPhotoIds = out.filter((p: any) => p.media_type === 'video').map((p: any) => p.id);
+
+      // Trigger transcode only for video rows that actually landed (boards have
+      // no per-file finalize → create couldn't enqueue without racing the
+      // upload). Best-effort.
+      const videoPhotoIds = out
+        .filter((p: any) => p.media_type === 'video' && succeeded.has(p.id))
+        .map((p: any) => p.id);
       if (videoPhotoIds.length) {
         try {
           await finalizeMyBoardPhotos({ boardId: board.id, photoIds: videoPhotoIds }).unwrap();
@@ -289,6 +331,12 @@ export default function BoardDetailScreen() {
         }
       }
       refetch();
+      if (failedUploads > 0) {
+        Alert.alert(
+          'Some media failed',
+          `${failedUploads} item${failedUploads === 1 ? '' : 's'} couldn't be uploaded. Please try again.`
+        );
+      }
     } catch (err: any) {
       Alert.alert('Upload failed', err?.data?.message || err?.message || 'Try again');
     }

@@ -20,6 +20,9 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
+// Streams a file from disk to S3 (no loading a 2GB clip into a JS blob) — same
+// approach the session/board upload paths use.
+import * as LegacyFileSystem from 'expo-file-system/legacy';
 // expo-image-manipulator is loaded dynamically (same defensive pattern the
 // avatar uploader uses) so a missing native module on older dev clients
 // doesn't crash the screen at import time. The require returns null and we
@@ -407,6 +410,22 @@ export default function CampaignUpload({
 
   const submit = useCallback(async () => {
     if (!canSubmit || creatives.length === 0) return;
+
+    // Don't let a campaign with an already-past window go to review — it would
+    // be approved and then never serve. A past START is allowed (editing a
+    // running campaign keeps its original start); only the END can't be before
+    // today (compared against start-of-today so "ends today" is still valid).
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    if (endsAt && endsAt < startOfToday) {
+      Alert.alert('Invalid dates', "Campaign end date can't be in the past. Pick a future date or clear it to run open-ended.");
+      return;
+    }
+    if (startsAt && endsAt && startsAt > endsAt) {
+      Alert.alert('Invalid dates', 'Campaign start date must be on or before the end date.');
+      return;
+    }
+
     setSubmitting(true);
     try {
       // Only NEW (local) creatives need a presigned URL + upload. Remote
@@ -427,17 +446,23 @@ export default function CampaignUpload({
         await Promise.all(newCreatives.map(async (c) => {
           const m = byUuid.get(c.uuid);
           if (!m?.url) throw new Error(`Failed to provision upload URL for slide ${c.uuid}`);
-          const blobResp = await fetch(c.uri);
-          const blob = await blobResp.blob();
           const contentType = c.mediaType === 'video'
             ? `video/${c.type === 'mov' ? 'quicktime' : c.type}`
             : `image/${c.type === 'jpg' ? 'jpeg' : c.type}`;
-          const putResp = await fetch(m.url, {
-            method: 'PUT',
-            body: blob,
-            headers: { 'Content-Type': contentType },
-          });
-          if (!putResp.ok) throw new Error(`S3 upload failed: ${putResp.status}`);
+          // Stream from disk — was `fetch(c.uri).blob()` which loaded the whole
+          // file (incl. 2GB clips) into JS memory and OOM-crashed the app (AD-1).
+          const result = await LegacyFileSystem.createUploadTask(
+            m.url,
+            c.uri,
+            {
+              httpMethod: 'PUT',
+              uploadType: LegacyFileSystem.FileSystemUploadType.BINARY_CONTENT,
+              headers: { 'Content-Type': contentType },
+            }
+          ).uploadAsync();
+          if (!result || result.status < 200 || result.status >= 300) {
+            throw new Error(`S3 upload failed: ${result?.status ?? 'no response'}`);
+          }
           urlByUuid.set(c.uuid, m.media_url);
         }));
       }

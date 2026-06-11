@@ -332,12 +332,14 @@ export default function ProfileScreen() {
   }, [setTabBarVisible]);
 
   // Notifications count
+  // limit must be > 0 — the backend does `limit ? Number(limit) : 25`, so
+  // limit:0 → SQL LIMIT 0 → empty array → the count was always 0.
   const { data: notifData } = useGetNotificationsQuery(
-    { read: false, filter: '', limit: 0, continuationToken: '' },
+    { read: false, filter: '', limit: 20, continuationToken: '' },
     { skip: !isAuthenticated }
   );
   const unreadNotifCount = isAuthenticated
-    ? (notifData?.results?.notifications?.length ?? 0)
+    ? (notifData?.results?.unreadCount ?? notifData?.results?.notifications?.length ?? 0)
     : 0;
 
   // Favorites

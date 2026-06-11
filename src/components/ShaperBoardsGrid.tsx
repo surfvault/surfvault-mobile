@@ -28,6 +28,7 @@ import { useRequireAuth } from '../hooks/useRequireAuth';
 import ActionSheet from './ActionSheet';
 import type { ActionSheetSection } from './ActionSheet';
 import ReportBoardSheet from './ReportBoardSheet';
+import AutoplayVideo from './AutoplayVideo';
 
 // Match SessionCard's formatCount so badges read the same way.
 const formatCount = (n: number): string => {
@@ -36,6 +37,52 @@ const formatCount = (n: number): string => {
   if (v < 10000) return `${(v / 1000).toFixed(1)}k`;
   return `${Math.round(v / 1000)}k`;
 };
+
+// Split media counts off a board's photos. Videos are a SUBSET of total media,
+// so we show stills (total − videos) and clips separately — same as SessionCard,
+// which avoids a clip being silently counted as a photo.
+function mediaCounts(board: Board) {
+  const all = board.photos ?? [];
+  const videoCount = all.filter((p) => p.media_type === 'video').length;
+  return { imageCount: all.length - videoCount, videoCount };
+}
+
+// Bottom-left stats pill — photos · videos · views. Mirrors SessionCard's
+// statsBadge so board tiles/cards read with the same chrome. View count is
+// caller-gated (owner-only).
+function BoardStatsBadge({
+  imageCount,
+  videoCount,
+  viewCount,
+}: {
+  imageCount: number;
+  videoCount: number;
+  viewCount: number;
+}) {
+  if (imageCount <= 0 && videoCount <= 0 && viewCount <= 0) return null;
+  return (
+    <View style={styles.statsBadge} pointerEvents="none">
+      {imageCount > 0 ? (
+        <>
+          <Ionicons name="images-outline" size={10} color="#fff" />
+          <Text style={styles.statsText}>{formatCount(imageCount)}</Text>
+        </>
+      ) : null}
+      {videoCount > 0 ? (
+        <>
+          <Ionicons name="videocam-outline" size={10} color="#fff" style={{ marginLeft: imageCount > 0 ? 4 : 0 }} />
+          <Text style={styles.statsText}>{formatCount(videoCount)}</Text>
+        </>
+      ) : null}
+      {viewCount > 0 ? (
+        <>
+          <Ionicons name="eye-outline" size={10} color="#fff" style={{ marginLeft: imageCount > 0 || videoCount > 0 ? 4 : 0 }} />
+          <Text style={styles.statsText}>{formatCount(viewCount)}</Text>
+        </>
+      ) : null}
+    </View>
+  );
+}
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const GRID_COLS = 3;
@@ -218,7 +265,7 @@ export default function ShaperBoardsGrid({
       ) : (
         <View style={styles.gridWrap}>
           {gridTiles(boards).map((t, idx) => {
-            const photoCount = t.board.photos.length;
+            const { imageCount, videoCount } = mediaCounts(t.board);
             // View count is owner-only — mirrors the session pattern. A
             // visiting surfer doesn't need (or want) to see how many times
             // a stranger's board has been viewed.
@@ -250,10 +297,13 @@ export default function ShaperBoardsGrid({
                     contentFit="cover"
                     transition={150}
                   />
+                  {/* Center clip indicator — matches the web board grid + the
+                      ad gallery. (List-card carousels keep a corner badge so it
+                      doesn't sit over the autoplaying clip.) */}
                   {boardPhotoDisplay(t.photo).isVideo ? (
-                    <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
-                      <View style={styles.tilePlayBadge}>
-                        <Ionicons name="videocam" size={12} color="#fff" />
+                    <View style={styles.tileVideoCenter} pointerEvents="none">
+                      <View style={styles.tileVideoCircle}>
+                        <Ionicons name="videocam" size={16} color="#fff" />
                       </View>
                     </View>
                   ) : null}
@@ -276,27 +326,9 @@ export default function ShaperBoardsGrid({
                   ) : null}
                 </View>
 
-                {/* Bottom-left: photo count · view count (matches SessionCard
+                {/* Bottom-left: photos · videos · views (matches SessionCard
                     statsBadge pattern). */}
-                {(photoCount > 0 || viewCount > 0) ? (
-                  <View style={styles.statsBadge} pointerEvents="none">
-                    {photoCount > 0 ? (
-                      <>
-                        <Ionicons name="images-outline" size={10} color="#fff" />
-                        <Text style={styles.statsText}>{formatCount(photoCount)}</Text>
-                      </>
-                    ) : null}
-                    {photoCount > 0 && viewCount > 0 ? (
-                      <Text style={[styles.statsText, { opacity: 0.7 }]}> · </Text>
-                    ) : null}
-                    {viewCount > 0 ? (
-                      <>
-                        <Ionicons name="eye-outline" size={10} color="#fff" />
-                        <Text style={styles.statsText}>{formatCount(viewCount)}</Text>
-                      </>
-                    ) : null}
-                  </View>
-                ) : null}
+                <BoardStatsBadge imageCount={imageCount} videoCount={videoCount} viewCount={viewCount} />
 
                 {/* Long-press handles management for self (no explicit
                     ellipsis on grid tiles — keeps the chrome clean). */}
@@ -396,6 +428,11 @@ function BoardListCard({
     if (typeof first.index === 'number') setActiveSlide(first.index);
   }).current;
 
+  const { imageCount, videoCount } = mediaCounts(board);
+  const viewCount = isSelf ? Number((board as any).view_count ?? 0) : 0;
+  const singlePhoto = !useCarousel ? photos[0] : undefined;
+  const singleDisp = singlePhoto ? boardPhotoDisplay(singlePhoto) : null;
+
   return (
     <View style={styles.card}>
       {/* Header — board name + type · dimensions subtitle. No avatar (we're
@@ -462,6 +499,10 @@ function BoardListCard({
             renderItem={({ item, index }) => {
               const slideStyle = { width: slideWidth, aspectRatio: thumbAspect };
               const disp = boardPhotoDisplay(item);
+              // Active video slide autoplays (muted/looped), mirroring
+              // SessionCard. Only the active slide mounts a player, so a profile
+              // full of board cards never holds a wall of simultaneous players.
+              const isActiveVideo = disp.isVideo && !!disp.videoUrl && index === activeSlide;
               return (
                 <Pressable
                   onPress={() => onPhotoPress(index)}
@@ -469,12 +510,21 @@ function BoardListCard({
                   delayLongPress={350}
                   style={slideStyle}
                 >
-                  <Image
-                    source={{ uri: disp.posterUrl ?? undefined }}
-                    style={slideStyle}
-                    contentFit="cover"
-                    transition={200}
-                  />
+                  {isActiveVideo ? (
+                    <AutoplayVideo
+                      uri={disp.videoUrl!}
+                      poster={disp.posterUrl ?? undefined}
+                      active
+                      style={slideStyle}
+                    />
+                  ) : (
+                    <Image
+                      source={{ uri: disp.posterUrl ?? undefined }}
+                      style={slideStyle}
+                      contentFit="cover"
+                      transition={200}
+                    />
+                  )}
                   {disp.isVideo ? (
                     <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
                       <View style={styles.tilePlayBadge}>
@@ -486,20 +536,29 @@ function BoardListCard({
               );
             }}
           />
-        ) : !useCarousel && photos[0] ? (
+        ) : !useCarousel && singlePhoto && singleDisp ? (
           <Pressable
             onPress={() => onPhotoPress(0)}
             onLongPress={onLongPress}
             delayLongPress={350}
             style={[styles.thumbnail, { aspectRatio: thumbAspect, position: 'absolute', top: 0, left: 0 }]}
           >
-            <Image
-              source={{ uri: boardPhotoDisplay(photos[0]).posterUrl ?? undefined }}
-              style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
-              contentFit="cover"
-              transition={200}
-            />
-            {boardPhotoDisplay(photos[0]).isVideo ? (
+            {singleDisp.isVideo && singleDisp.videoUrl ? (
+              <AutoplayVideo
+                uri={singleDisp.videoUrl}
+                poster={singleDisp.posterUrl ?? undefined}
+                active
+                style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
+              />
+            ) : (
+              <Image
+                source={{ uri: singleDisp.posterUrl ?? undefined }}
+                style={[styles.thumbnail, { aspectRatio: thumbAspect }]}
+                contentFit="cover"
+                transition={200}
+              />
+            )}
+            {singleDisp.isVideo ? (
               <View style={styles.tilePlayBadgeWrap} pointerEvents="none">
                 <View style={styles.tilePlayBadge}>
                   <Ionicons name="videocam" size={12} color="#fff" />
@@ -508,6 +567,10 @@ function BoardListCard({
             ) : null}
           </Pressable>
         ) : null}
+
+        {/* Bottom-left stats pill — photos · videos · views. Mirrors
+            SessionCard, which overlays the same badge on its thumbnail. */}
+        <BoardStatsBadge imageCount={imageCount} videoCount={videoCount} viewCount={viewCount} />
       </View>
 
       {/* Tapered dot pager — same shape as SessionCard / SponsoredCard. */}
@@ -591,9 +654,8 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  // Clip indicator — a bottom-right corner badge, NOT a center play button:
-  // these tiles tap to NAVIGATE (not play), so a ▶ would mislead. Bottom-right
-  // is the only free corner (name spans top, stats sit bottom-left).
+  // Corner clip badge — used by the list-card carousels (where a center badge
+  // would sit over the autoplaying clip).
   tilePlayBadgeWrap: {
     position: 'absolute',
     bottom: 6,
@@ -604,6 +666,22 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Center clip badge — used by the static grid tiles (matches the web board
+  // grid + the ad gallery). The tile name spans top-left and stats sit
+  // bottom-left, so center is clear.
+  tileVideoCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileVideoCircle: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
   },
