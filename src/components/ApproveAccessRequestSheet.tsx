@@ -125,7 +125,11 @@ export default function ApproveAccessRequestSheet({
             <Text style={[s.sectionLabel, { color: isDark ? '#94a3b8' : '#64748b' }]}>
               Access duration
             </Text>
-            <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+            {/* maxHeight fits all 7 options (incl. Unlimited) on normal font
+                sizes so none hide below the fold; indicator shown so it's still
+                discoverable as scrollable when large accessibility fonts push
+                it over. */}
+            <ScrollView style={{ maxHeight: 440 }} showsVerticalScrollIndicator={true}>
               {DURATIONS.map((d) => {
                 const isSelected = selected === d.value;
                 return (
