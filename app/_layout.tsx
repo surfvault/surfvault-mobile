@@ -1,6 +1,6 @@
 import '../global.css';
 import { useCallback, useEffect, useRef } from 'react';
-import { AppState, Platform, View } from 'react-native';
+import { AppState, Linking, Platform, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -13,6 +13,7 @@ import { Auth0Provider } from 'react-native-auth0';
 import { Provider as ReduxProvider } from 'react-redux';
 import Constants from 'expo-constants';
 import { store, useGetSelfQuery, useRegisterDeviceMutation } from '../src/store';
+import { adPlansUrl } from '../src/helpers/adTiers';
 import { AuthProvider, useAuth } from '../src/context/AuthProvider';
 import { LinkedAccountsProvider, useLinkedAccounts } from '../src/context/LinkedAccountsContext';
 import { UserProvider } from '../src/context/UserProvider';
@@ -188,6 +189,10 @@ function AppShell() {
           break;
         case 'access':
           if (data.requestId) router.push(`/access/${data.requestId}` as any);
+          break;
+        case 'billing':
+          // Billing is web-only — open the plans page to update the card.
+          Linking.openURL(adPlansUrl()).catch(() => {});
           break;
       }
     });

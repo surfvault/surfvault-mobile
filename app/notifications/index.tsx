@@ -13,10 +13,13 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Stack } from 'expo-router';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
+import { useUser } from '../../src/context/UserProvider';
+import { adPlansUrl } from '../../src/helpers/adTiers';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import ActionSheet, { type ActionSheetOption } from '../../src/components/ActionSheet';
 import ApproveAccessRequestSheet from '../../src/components/ApproveAccessRequestSheet';
@@ -73,6 +76,7 @@ const getNotifIcon = (type: string): { name: string; color: string } => {
     case 'adApproved': return { name: 'megaphone-outline', color: '#22c55e' };
     case 'adRejected': return { name: 'megaphone-outline', color: '#ef4444' };
     case 'creditPackPurchased': return { name: 'cash-outline', color: '#fbbf24' };
+    case 'paymentFailed': return { name: 'card-outline', color: '#ef4444' };
     default: return { name: 'notifications-outline', color: '#6b7280' };
   }
 };
@@ -207,6 +211,7 @@ const getNotifTitle = (n: any): string => {
     case 'adRejected': return 'Campaign Rejected';
     case 'newCampaignSubmission': return 'Ad Request';
     case 'creditPackPurchased': return 'Credits Added';
+    case 'paymentFailed': return 'Payment Failed';
     default: return 'Notification';
   }
 };
@@ -215,6 +220,7 @@ export default function NotificationsScreen() {
   const router = useRouter();
   const smartBack = useSmartBack();
   const trackedPush = useTrackedPush();
+  const { user } = useUser();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
 
@@ -479,8 +485,13 @@ export default function NotificationsScreen() {
         if (adId) trackedPush(`/campaign/${adId}/review` as any);
         break;
       }
+      case 'paymentFailed': {
+        // Billing is web-only — hand off to the plans page to update the card.
+        Linking.openURL(adPlansUrl((user as any)?.email)).catch(() => {});
+        break;
+      }
     }
-  }, [router, markAsRead, openAccessRequestSheet]);
+  }, [router, markAsRead, openAccessRequestSheet, user]);
 
   const actionSheetOptions: ActionSheetOption[] = useMemo(() => ([
     {
