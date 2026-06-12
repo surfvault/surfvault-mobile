@@ -77,12 +77,24 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
       dispatch(notificationApi.util.invalidateTags([ApiTag.Notification, ApiTag.AdPartners]));
     });
 
-    channel.bind('message', () => {
-      dispatch(conversationApi.util.invalidateTags([ApiTag.Conversation]));
+    channel.bind('message', (data: { conversationId?: string }) => {
+      // Targeted: refetch only the affected thread + the list/badge — not every
+      // conversation. Falls back to the broad tag if the event predates
+      // conversationId (rollout safety).
+      dispatch(conversationApi.util.invalidateTags(
+        data?.conversationId
+          ? [{ type: ApiTag.Conversation, id: data.conversationId }, { type: ApiTag.Conversation, id: 'LIST' }]
+          : [ApiTag.Conversation]
+      ));
     });
 
-    channel.bind('message-read', () => {
-      dispatch(conversationApi.util.invalidateTags([ApiTag.Conversation]));
+    channel.bind('message-read', (data: { message?: string }) => {
+      // message-read carries the conversationId in `data.message`.
+      dispatch(conversationApi.util.invalidateTags(
+        data?.message
+          ? [{ type: ApiTag.Conversation, id: data.message }, { type: ApiTag.Conversation, id: 'LIST' }]
+          : [ApiTag.Conversation]
+      ));
     });
 
     channel.bind('subscription', () => {

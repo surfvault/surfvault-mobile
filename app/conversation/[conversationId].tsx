@@ -240,6 +240,28 @@ export default function ConversationDetailScreen() {
     }
   }, [messages.length]);
 
+  // Scroll to bottom when a NEW newest message arrives (incoming via realtime,
+  // or our own echo) while this conversation is open. Keyed on the LAST
+  // message's id — not length — so loading OLDER messages (scroll-up
+  // pagination prepends them) doesn't yank the view to the bottom.
+  const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
+  const prevLastMessageIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastMessageId) return;
+    // First populate = initial load; the effect above already scrolls. Just
+    // record the baseline so only genuinely-new messages scroll after this.
+    if (prevLastMessageIdRef.current === null) {
+      prevLastMessageIdRef.current = lastMessageId;
+      return;
+    }
+    if (lastMessageId !== prevLastMessageIdRef.current) {
+      prevLastMessageIdRef.current = lastMessageId;
+      [50, 250].forEach((ms) => {
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), ms);
+      });
+    }
+  }, [lastMessageId]);
+
   // Mark as read on load
   useEffect(() => {
     if (isNew || !conversationId || !user?.id || !conversation) return;
