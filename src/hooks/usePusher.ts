@@ -5,6 +5,7 @@ import { conversationApi } from '../store/apis/endpoints/conversation';
 import { notificationApi } from '../store/apis/endpoints/notification';
 import { userApi } from '../store/apis/endpoints/user';
 import { ApiTag } from '../store/apis/rootApi';
+import { getAuthToken } from '../store/apis/customBaseQuery';
 
 export const usePusher = ({ userId }: { userId: string | undefined }) => {
   const dispatch = useDispatch();
@@ -14,6 +15,7 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
 
     const pusherAppKey = Constants.expoConfig?.extra?.pusherAppKey;
     const pusherCluster = Constants.expoConfig?.extra?.pusherCluster;
+    const apiBaseUrl = Constants.expoConfig?.extra?.apiBaseUrl ?? 'https://dev-api.surf-vault.com';
 
     if (!pusherAppKey) return;
 
@@ -27,13 +29,46 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
       }
       pusher = new PusherClass(pusherAppKey, {
         cluster: pusherCluster ?? 'us2',
+        // Private, server-authorized channel. customHandler reads the stored
+        // auth token and POSTs the subscription to /pusher/auth, which only
+        // signs `private-user-{callerId}` — so a user subscribes to their own
+        // realtime stream and nobody else's. (Replaces the old public
+        // `user-{id}` channel anyone could subscribe to.)
+        channelAuthorization: {
+          endpoint: `${apiBaseUrl}/pusher/auth`,
+          transport: 'ajax',
+          customHandler: async (
+            { socketId, channelName }: { socketId: string; channelName: string },
+            callback: (error: Error | null, authData: any) => void
+          ) => {
+            try {
+              const token = await getAuthToken();
+              const res = await fetch(`${apiBaseUrl}/pusher/auth`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                  Authorization: `Bearer ${token ?? ''}`,
+                },
+                body: `socket_id=${encodeURIComponent(socketId)}&channel_name=${encodeURIComponent(channelName)}`,
+              });
+              if (!res.ok) {
+                callback(new Error(`Pusher auth failed (${res.status})`), null);
+                return;
+              }
+              callback(null, await res.json());
+            } catch (e) {
+              callback(e as Error, null);
+            }
+          },
+        },
       });
     } catch (e) {
       console.warn('Pusher: failed to initialize', e);
       return;
     }
 
-    const channel = pusher.subscribe(`user-${userId}`);
+    const channelName = `private-user-${userId}`;
+    const channel = pusher.subscribe(channelName);
 
     channel.bind('notification', () => {
       // AdPartners keeps any admin ad-moderation surface (e.g. the per-ad
@@ -64,7 +99,7 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
 
     return () => {
       channel.unbind_all();
-      pusher.unsubscribe(`user-${userId}`);
+      pusher.unsubscribe(channelName);
       pusher.disconnect();
     };
   }, [userId, dispatch]);
