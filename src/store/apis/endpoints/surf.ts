@@ -68,6 +68,7 @@ const surfApi = rootApi.injectEndpoints({
         continuationToken,
         feed,
         groupByBreakDate,
+        surfBreakIds,
       }: {
         userId?: string;
         country?: string;
@@ -78,10 +79,17 @@ const surfApi = rootApi.injectEndpoints({
         continuationToken?: string;
         feed?: 'following' | 'favorites';
         groupByBreakDate?: boolean;
-      }) => ({
-        url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}&groupByBreakDate=${groupByBreakDate ? 'true' : ''}`,
-        method: 'GET',
-      }),
+        // CSV of break ids engages "nearby sessions" mode — sessions are
+        // scoped to these breaks server-side (= ANY(...)). Drives the
+        // SurfVault landing feed (mirrors web Home).
+        surfBreakIds?: string[];
+      }) => {
+        const ids = Array.isArray(surfBreakIds) && surfBreakIds.length ? surfBreakIds.join(',') : '';
+        return {
+          url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}&groupByBreakDate=${groupByBreakDate ? 'true' : ''}&surfBreakIds=${ids}`,
+          method: 'GET',
+        };
+      },
     }),
     getSurfBreakWithLatestSessions: builder.query({
       providesTags: [ApiTag.SurfBreak],
@@ -240,6 +248,7 @@ const surfApi = rootApi.injectEndpoints({
       providesTags: [],
       query: ({
         surfBreakId,
+        surfBreakIds,
         lat,
         lon,
         placement,
@@ -247,6 +256,10 @@ const surfApi = rootApi.injectEndpoints({
         feed,
       }: {
         surfBreakId?: string;
+        // CSV of nearby break ids — serves "Nearby Business" ads scoped to the
+        // SurfVault landing anchor (mirrors web Home). Falls back to lat/lon
+        // geo-boost when absent.
+        surfBreakIds?: string[];
         lat?: number;
         lon?: number;
         placement?: string | string[];
@@ -255,6 +268,7 @@ const surfApi = rootApi.injectEndpoints({
       } = {}) => {
         const params = new URLSearchParams();
         if (surfBreakId) params.set('surfBreakId', surfBreakId);
+        if (Array.isArray(surfBreakIds) && surfBreakIds.length) params.set('surfBreakIds', surfBreakIds.join(','));
         if (lat != null && !Number.isNaN(lat)) params.set('lat', String(lat));
         if (lon != null && !Number.isNaN(lon)) params.set('lon', String(lon));
         if (placement) params.set('placement', Array.isArray(placement) ? placement.join(',') : placement);
