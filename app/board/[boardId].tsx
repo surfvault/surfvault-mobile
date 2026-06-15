@@ -74,6 +74,23 @@ const GAP = 4;
 const PHOTO_WIDTH = (SCREEN_WIDTH - GAP * (NUM_COLUMNS + 1)) / NUM_COLUMNS;
 const PHOTO_HEIGHT = PHOTO_WIDTH * 1.2;
 
+// Board/shaper accent (amber) — the "amber = shaper-flavored" token used by the
+// featured star + CTA. NOT `ac.btn`, which defaults to delete-red outside
+// action mode.
+const BOARD_ACCENT = '#f59e0b';
+
+// In-flight upload shown as a placeholder tile (dimmed local preview + a live
+// progress bar) appended to the grid until the board refetches with the real
+// rows. Local-only — boards have no global UploadContext like sessions, so
+// progress is visible while on this page (not across navigation).
+type PendingUpload = {
+  uuid: string;
+  uri: string;       // local asset uri (photo preview; videos show an icon)
+  isVideo: boolean;
+  progress: number;  // 0..1
+  failed?: boolean;
+};
+
 // Module-level dedup: one view-report per board id per app launch.
 // Mirrors viewedSessionIds on the session page.
 const viewedBoardIds = new Set<string>();
@@ -155,6 +172,9 @@ export default function BoardDetailScreen() {
     }, 3000);
     return () => clearTimeout(t);
   }, [board?.id, isSelf, user, reportBoardView]);
+
+  // In-flight uploads (placeholder tiles + progress). Cleared after refetch.
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
 
   // ---- Lightbox ----
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -252,19 +272,44 @@ export default function BoardDetailScreen() {
     }
     if (!accepted.length) return;
 
+    // Stable per-file metadata: one uuid shared by the presign payload, the
+    // progress placeholder, and the upload correlation — so a tile can be
+    // matched to its in-flight PUT regardless of response ordering.
+    const filesMeta = accepted.map((a) => ({
+      asset: a,
+      uuid: generateUUID(),
+      isVideo: a.type === 'video',
+    }));
+
+    // Seed placeholder tiles immediately (before any network) so the grid shows
+    // what's uploading the instant the picker closes.
+    setPendingUploads(
+      filesMeta.map((f) => ({ uuid: f.uuid, uri: f.asset.uri, isVideo: f.isVideo, progress: 0 }))
+    );
+
+    const setProgress = (uuid: string, progress: number) => {
+      setPendingUploads((prev) => {
+        const cur = prev.find((u) => u.uuid === uuid);
+        // Bail (return same ref → no re-render) on tiny deltas to throttle the
+        // flood of progress callbacks across concurrent uploads.
+        if (!cur || (progress < 1 && Math.abs(cur.progress - progress) < 0.02)) return prev;
+        return prev.map((u) => (u.uuid === uuid ? { ...u, progress } : u));
+      });
+    };
+
     try {
       const presigned = await createMyBoardPhotos({
         boardId: board.id,
         payload: {
-          files: accepted.map((a) => ({
-            file_uuid: generateUUID(),
-            file_type: a.mimeType ?? (a.type === 'video' ? 'video/mp4' : 'image/jpeg'),
+          files: filesMeta.map((f) => ({
+            file_uuid: f.uuid,
+            file_type: f.asset.mimeType ?? (f.isVideo ? 'video/mp4' : 'image/jpeg'),
             // Backend uses this to update users.current_storage atomically
             // with the INSERT. ImagePicker reports `fileSize` in bytes; falls
             // back to 0 (unknown) → reconcile cron surfaces drift.
-            file_size_bytes: Number(a.fileSize ?? 0) || 0,
+            file_size_bytes: Number(f.asset.fileSize ?? 0) || 0,
             // Video-only; backend classifies media_type from MIME + gates.
-            duration_seconds: a.type === 'video' && a.duration != null ? a.duration / 1000 : null,
+            duration_seconds: f.isVideo && f.asset.duration != null ? f.asset.duration / 1000 : null,
           })),
         },
       }).unwrap();
@@ -275,8 +320,8 @@ export default function BoardDetailScreen() {
       // Promise.all — loading whole files (incl. 2GB clips) into JS memory at
       // once, which OOM-crashes the app (F10). It also never checked the PUT
       // response, so a failed upload silently left a broken tile + inflated
-      // storage (F4). Now: stream, check status, and roll back the phantom row
-      // on failure.
+      // storage (F4). Now: stream, check status, drive the per-tile progress
+      // bar, and roll back the phantom row on failure.
       const CONCURRENCY = 3;
       const succeeded = new Set<string>();
       let failedUploads = 0;
@@ -285,9 +330,11 @@ export default function BoardDetailScreen() {
         while (cursor < out.length) {
           const idx = cursor++;
           const p: any = out[idx];
-          const asset = accepted[idx];
+          const meta = filesMeta[idx];
+          const asset = meta?.asset;
           if (!p || !asset) continue;
-          const contentType = asset.mimeType ?? (asset.type === 'video' ? 'video/mp4' : 'image/jpeg');
+          const uuid = meta.uuid;
+          const contentType = asset.mimeType ?? (meta.isVideo ? 'video/mp4' : 'image/jpeg');
           try {
             const result = await LegacyFileSystem.createUploadTask(
               p.url,
@@ -296,15 +343,26 @@ export default function BoardDetailScreen() {
                 httpMethod: 'PUT',
                 uploadType: LegacyFileSystem.FileSystemUploadType.BINARY_CONTENT,
                 headers: { 'Content-Type': contentType },
+              },
+              (data) => {
+                const total = data.totalBytesExpectedToSend || 0;
+                // Cap at 0.99 — the tile flips to "done" (1) only after the PUT
+                // resolves with a 2xx, so the bar never reads full while we're
+                // still awaiting the server.
+                setProgress(uuid, total > 0 ? Math.min(0.99, data.totalBytesSent / total) : 0);
               }
             ).uploadAsync();
             if (!result || result.status < 200 || result.status >= 300) {
               throw new Error(`HTTP ${result?.status ?? 'no response'}`);
             }
             if (p.id) succeeded.add(p.id);
+            setProgress(uuid, 1);
           } catch (e) {
             failedUploads++;
             console.warn('board photo upload failed:', e);
+            setPendingUploads((prev) =>
+              prev.map((u) => (u.uuid === uuid ? { ...u, failed: true } : u))
+            );
             // Roll back the phantom row + its storage debit (the server
             // committed the row at presign time, before this PUT).
             if (p.id) {
@@ -317,20 +375,24 @@ export default function BoardDetailScreen() {
         Array.from({ length: Math.min(CONCURRENCY, out.length) }, () => worker())
       );
 
-      // Trigger transcode only for video rows that actually landed (boards have
-      // no per-file finalize → create couldn't enqueue without racing the
-      // upload). Best-effort.
-      const videoPhotoIds = out
-        .filter((p: any) => p.media_type === 'video' && succeeded.has(p.id))
+      // Finalize every row that actually landed (boards have no per-file
+      // finalize → create couldn't enqueue without racing the upload). Backend
+      // routes each: videos → transcode, photos → web-safe JPEG preview.
+      // Best-effort + idempotent.
+      const finalizePhotoIds = out
+        .filter((p: any) => succeeded.has(p.id))
         .map((p: any) => p.id);
-      if (videoPhotoIds.length) {
+      if (finalizePhotoIds.length) {
         try {
-          await finalizeMyBoardPhotos({ boardId: board.id, photoIds: videoPhotoIds }).unwrap();
+          await finalizeMyBoardPhotos({ boardId: board.id, photoIds: finalizePhotoIds }).unwrap();
         } catch (e) {
-          console.warn('board finalize (transcode enqueue) failed:', e);
+          console.warn('board finalize (media processing enqueue) failed:', e);
         }
       }
-      refetch();
+      // Pull the real rows in, THEN drop the placeholders — clearing after the
+      // refetch resolves avoids a flash of empty grid between the two.
+      await refetch();
+      setPendingUploads([]);
       if (failedUploads > 0) {
         Alert.alert(
           'Some media failed',
@@ -338,9 +400,10 @@ export default function BoardDetailScreen() {
         );
       }
     } catch (err: any) {
+      setPendingUploads([]);
       Alert.alert('Upload failed', err?.data?.message || err?.message || 'Try again');
     }
-  }, [board, createMyBoardPhotos, finalizeMyBoardPhotos, refetch]);
+  }, [board, createMyBoardPhotos, finalizeMyBoardPhotos, deleteMyBoardPhoto, refetch]);
 
   // Set the board's thumbnail. Mirrors session's `handleSetThumbnail` —
   // single-action that applies immediately when invoked from the photo
@@ -711,7 +774,7 @@ export default function BoardDetailScreen() {
           </View>
 
           {/* Photo grid — 2-column to mirror session detail. */}
-          {photos.length === 0 ? (
+          {photos.length === 0 && pendingUploads.length === 0 ? (
             <View style={s.emptyWrap}>
               <Ionicons name="images-outline" size={40} color={isDark ? '#374151' : '#d1d5db'} />
               <Text style={{ marginTop: 8, color: isDark ? '#6b7280' : '#9ca3af' }}>
@@ -820,6 +883,64 @@ export default function BoardDetailScreen() {
                   </Pressable>
                 );
               })}
+
+              {/* In-flight upload placeholders — appended where the new rows
+                  will land. Dimmed local preview (photos) or a video icon, with
+                  a live progress bar; turns red on failure. */}
+              {pendingUploads.map((u) => (
+                <View key={`pending-${u.uuid}`} style={{ width: PHOTO_WIDTH, margin: GAP / 2 }}>
+                  <View style={{ position: 'relative' }}>
+                    <View
+                      style={[
+                        s.photoPlaceholder,
+                        {
+                          width: PHOTO_WIDTH,
+                          height: PHOTO_HEIGHT,
+                          backgroundColor: isDark ? '#1f2937' : '#f3f4f6',
+                        },
+                      ]}
+                    >
+                      {u.isVideo ? (
+                        <Ionicons name="videocam-outline" size={28} color={isDark ? '#374151' : '#d1d5db'} />
+                      ) : null}
+                    </View>
+                    {!u.isVideo ? (
+                      <Image
+                        source={{ uri: u.uri }}
+                        style={{
+                          width: PHOTO_WIDTH,
+                          height: PHOTO_HEIGHT,
+                          borderRadius: 6,
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          opacity: 0.45,
+                        }}
+                        contentFit="cover"
+                      />
+                    ) : null}
+
+                    <View style={s.uploadOverlay} pointerEvents="none">
+                      {u.failed ? (
+                        <Ionicons name="alert-circle" size={24} color="#ef4444" />
+                      ) : (
+                        <ActivityIndicator size="small" color="#ffffff" />
+                      )}
+                    </View>
+
+                    {!u.failed ? (
+                      <View style={s.progressTrack} pointerEvents="none">
+                        <View
+                          style={[
+                            s.progressFill,
+                            { width: `${Math.round(u.progress * 100)}%`, backgroundColor: BOARD_ACCENT },
+                          ]}
+                        />
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+              ))}
             </View>
           )}
         </ScrollView>
@@ -1064,6 +1185,32 @@ const s = StyleSheet.create({
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // In-flight upload chrome (placeholder tiles).
+  uploadOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    borderRadius: 6,
+  },
+  progressTrack: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 6,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.4)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 4,
+    borderRadius: 2,
   },
   // Mirrors session's checkbox style (same size, colors, position).
   checkbox: {

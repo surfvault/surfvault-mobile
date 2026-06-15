@@ -54,6 +54,7 @@ export interface BoardPhotoLike {
   s3_key?: string | null;
   poster_s3_key?: string | null;
   preview_video_s3_key?: string | null;
+  preview_s3_key?: string | null;
 }
 
 export interface BoardPhotoDisplay {
@@ -64,15 +65,18 @@ export interface BoardPhotoDisplay {
 }
 
 /**
- * Resolve a board photo to render-ready URLs + flags. Board video keeps
- * `s3_key` as the CLEAN (non-web-playable) original — so the still comes from
- * `poster_s3_key` and the playable clip from `preview_video_s3_key` (NOT s3_key,
- * unlike ad_media which repoints). Mirrors web boardPhotoDisplay.
+ * Resolve a board photo to render-ready URLs + flags. Board media keeps `s3_key`
+ * as the CLEAN original (NOT repointed, unlike ad_media). For VIDEO the still is
+ * `poster_s3_key` + playable clip `preview_video_s3_key`. For a PHOTO the
+ * original is a raw upload (often HEIC) — so we render `preview_s3_key` (the
+ * worker's web-safe JPEG) so every platform shows one decodable format, falling
+ * back to `s3_key` only until the preview lands. Mirrors web boardPhotoDisplay.
  */
 export function boardPhotoDisplay(photo: BoardPhotoLike | null | undefined): BoardPhotoDisplay {
   if (!photo) return { isVideo: false, posterUrl: null, videoUrl: null, processing: false };
   if (photo.media_type !== 'video') {
-    return { isVideo: false, posterUrl: getBoardPhotoUrl(photo.s3_key), videoUrl: null, processing: false };
+    const posterUrl = getBoardPhotoUrl(photo.preview_s3_key) || getBoardPhotoUrl(photo.s3_key);
+    return { isVideo: false, posterUrl, videoUrl: null, processing: false };
   }
   const posterUrl = getBoardPhotoUrl(photo.poster_s3_key);
   const videoUrl = getBoardPhotoUrl(photo.preview_video_s3_key);
