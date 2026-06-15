@@ -19,7 +19,7 @@ import { useUser } from '../../context/UserProvider';
 import { useAuth } from '../../context/AuthProvider';
 import { useUserCoords } from '../../hooks/useUserCoords';
 import SponsoredCard from '../SponsoredCard';
-import { NearbySessionRailCard, NearbyShaperRailCard } from './NearbyRail';
+import { SessionTile, ShaperTile } from './FeedTiles';
 
 /**
  * The "Discover" feed re-cast as a browsable 2-column Explore grid — lives as
@@ -149,7 +149,11 @@ export default function ExploreGrid({
   const rows = useMemo<Row[]>(() => {
     const tiles: Tile[] = [];
     let si = 0;
-    groups.forEach((g, i) => {
+    // Only groups the session tile can render (needs at least one session).
+    // Hidden-location groups DO render now (region/country label), so they're
+    // kept — this just drops any empty group so every 2-col row stays full.
+    const renderable = groups.filter((g) => (g?.sessions?.length ?? 0) > 0);
+    renderable.forEach((g, i) => {
       tiles.push({ kind: 'session', key: `s-${g.session_date}|${g.group_key}`, data: g });
       if ((i + 1) % SHAPER_EVERY === 0 && si < shapers.length) {
         const sh = shapers[si++];
@@ -197,9 +201,9 @@ export default function ExploreGrid({
           {row.items.map((t, idx) => (
             <View key={t.key} style={{ marginRight: idx === 0 ? GAP : 0 }}>
               {t.kind === 'session' ? (
-                <NearbySessionRailCard group={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+                <SessionTile group={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
               ) : (
-                <NearbyShaperRailCard shaper={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+                <ShaperTile shaper={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
               )}
             </View>
           ))}

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { View, Text, Animated, StyleSheet, useColorScheme } from 'react-native';
-import { RAIL_TILE_WIDTH } from './NearbyRail';
+import { RAIL_TILE_WIDTH } from './FeedTiles';
 
 /**
  * Loading placeholder for a SurfVault home rail — a real section title over a

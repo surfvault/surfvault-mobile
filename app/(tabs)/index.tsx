@@ -51,10 +51,10 @@ import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import SponsoredCard from '../../src/components/SponsoredCard';
 import HomeSkeleton from '../../src/components/HomeSkeleton';
 import {
-  NearbySessionRailCard,
-  NearbyShaperRailCard,
-  NearbyBusinessRailCard,
-} from '../../src/components/home/NearbyRail';
+  SessionTile,
+  ShaperTile,
+  BusinessTile,
+} from '../../src/components/home/FeedTiles';
 import ExploreGrid from '../../src/components/home/ExploreGrid';
 import RailSkeleton from '../../src/components/home/RailSkeleton';
 import {
@@ -1454,7 +1454,7 @@ export default function HomeScreen() {
                     onViewableItemsChanged={onSessionRailViewable}
                     viewabilityConfig={railViewConfig}
                     renderItem={({ item }) => (
-                      <NearbySessionRailCard
+                      <SessionTile
                         group={item}
                         isViewable={feedFocused && railsInView.sessions !== false && sessionRailViewable.has(`${item.session_date}|${item.group_key}`)}
                       />
@@ -1552,7 +1552,7 @@ export default function HomeScreen() {
                     onViewableItemsChanged={onShaperRailViewable}
                     viewabilityConfig={railViewConfig}
                     renderItem={({ item }) => (
-                      <NearbyShaperRailCard
+                      <ShaperTile
                         shaper={item}
                         isViewable={feedFocused && railsInView.shapers !== false && shaperRailViewable.has(item.id ?? item.handle)}
                       />
@@ -1582,7 +1582,7 @@ export default function HomeScreen() {
                     onViewableItemsChanged={onAdRailViewable}
                     viewabilityConfig={railViewConfig}
                     renderItem={({ item }) => (
-                      <NearbyBusinessRailCard
+                      <BusinessTile
                         ad={item}
                         surfBreakId={anchorBreakId}
                         isViewable={feedFocused && railsInView.business !== false && adRailViewable.has(item.id)}

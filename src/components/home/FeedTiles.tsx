@@ -153,7 +153,7 @@ function Chip({ children }: { children: React.ReactNode }) {
 }
 
 // ─────────────────────────── Nearby Sessions ───────────────────────────
-export function NearbySessionRailCard({
+export function SessionTile({
   group,
   width,
   style,
@@ -191,8 +191,18 @@ export function NearbySessionRailCard({
     return out;
   }, [sessions]);
 
-  const breakName =
-    group?.surf_break_name || group?.surf_break_identifier?.replace(/_/g, ' ') || 'Surf break';
+  // Hidden-location groups have no break to open — show a soft area label
+  // (US → state/region, elsewhere → country) and tap through to the session.
+  const showBreakInfo = !group?.hide_location && !!(group?.surf_break_name || group?.surf_break_identifier);
+  const titleCaseLabel = (s?: string | null) =>
+    s ? s.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : null;
+  const hiddenLabel =
+    group?.surf_break_country === 'US'
+      ? titleCaseLabel(group?.surf_break_region)
+      : titleCaseLabel(group?.surf_break_country_name);
+  const breakName = showBreakInfo
+    ? group?.surf_break_name || group?.surf_break_identifier?.replace(/_/g, ' ') || 'Surf break'
+    : hiddenLabel || 'Hidden location';
 
   const goToBreakOnDate = () => {
     if (!group?.surf_break_country || !group?.surf_break_identifier) return;
@@ -201,8 +211,13 @@ export function NearbySessionRailCard({
     const path = `/break/${group.surf_break_country}/${region}/${group.surf_break_identifier}${date}`;
     (onNavigate ?? trackedPush)(path as any);
   };
+  const goToSession = () => {
+    const sid = (lead as any)?.session_id;
+    if (sid) (onNavigate ?? trackedPush)(`/session/${sid}` as any);
+  };
+  const onPress = showBreakInfo ? goToBreakOnDate : goToSession;
 
-  if (!lead || !group?.surf_break_identifier) return null;
+  if (!lead) return null;
 
   const lead0 = lead as any;
   const sessionCount = sessions.length;
@@ -279,7 +294,7 @@ export function NearbySessionRailCard({
 
   return (
     <RailTile
-      onPress={goToBreakOnDate}
+      onPress={onPress}
       heroUri={lead0.thumbnail}
       fallbackColor="#0c4a6e"
       fallbackIcon={<Ionicons name="images-outline" size={28} color="#38bdf8" />}
@@ -298,7 +313,7 @@ export function NearbySessionRailCard({
 }
 
 // ─────────────────────────── Nearby Shapers ───────────────────────────
-export function NearbyShaperRailCard({
+export function ShaperTile({
   shaper,
   width,
   style,
@@ -344,7 +359,7 @@ export function NearbyShaperRailCard({
 }
 
 // ─────────────────────────── Nearby Business (ads) ───────────────────────────
-export function NearbyBusinessRailCard({
+export function BusinessTile({
   ad,
   surfBreakId,
   isViewable = false,
