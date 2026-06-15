@@ -159,10 +159,13 @@ export default function ExploreGrid({
 
     const out: Row[] = [];
     let ai = 0;
+    let pairCount = 0; // count PAIR rows only (not the ad rows) so the cadence
+    // stays a full 2×2 block (AD_EVERY_ROWS rows = 4 cards) between every ad.
     for (let i = 0; i < tiles.length; i += 2) {
       const pair = tiles.slice(i, i + 2);
       out.push({ type: 'pair', key: `pair-${pair[0].key}`, items: pair });
-      if (out.length % AD_EVERY_ROWS === 0 && ads.length) {
+      pairCount++;
+      if (pairCount % AD_EVERY_ROWS === 0 && ads.length) {
         const ad = ads[ai % ads.length];
         out.push({ type: 'ad', key: `ad-${ad.id}-${ai}`, ad });
         ai++;
