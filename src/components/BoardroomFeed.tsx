@@ -15,12 +15,11 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
-  useGetBoardroomShapersQuery,
+  useGetShapersForSurfBreakQuery,
   type BoardroomShaper,
   type Board,
 } from '../store';
 import { useUser } from '../context/UserProvider';
-import { useUserPreferences, formatDistance as formatDistanceUnit } from '../helpers/preferences';
 import { useViewableItems } from '../hooks/useViewableItems';
 import { useTrackedPush } from '../context/NavigationContext';
 import { boardPhotoDisplay } from '../helpers/mediaUrl';
@@ -39,6 +38,10 @@ const MAX_INLINE_SLIDES = 9;
 
 type Props = {
   isDark: boolean;
+  // Shared nearby anchor (from the home screen) — Boardroom inherits the
+  // location set on SurfVault and shows shapers in that break's REGION (the
+  // full "See all" of the Nearby Shapers rail). Falls back to the home break.
+  anchorBreakId?: string;
 };
 
 export type BoardroomFeedHandle = {
@@ -46,7 +49,7 @@ export type BoardroomFeedHandle = {
 };
 
 const BoardroomFeed = forwardRef<BoardroomFeedHandle, Props>(function BoardroomFeed(
-  { isDark },
+  { isDark, anchorBreakId },
   ref
 ) {
   const { user } = useUser();
@@ -61,15 +64,14 @@ const BoardroomFeed = forwardRef<BoardroomFeedHandle, Props>(function BoardroomF
     },
   }), []);
 
-  // Anchor to the viewer's home surf break (`users.surf_break_id`). The
-  // server resolves it to lat/lon and sorts shapers by distance, NULLS LAST
-  // so shapers without a break show up at the bottom. When the viewer hasn't
-  // set a home break (or isn't logged in), the server falls back to the
-  // latest-activity sort — same as the Discover feed.
+  // Anchor to the shared nearby break (set on SurfVault), falling back to the
+  // viewer's home break. Boardroom content is REGION-filtered to this break's
+  // region (country fallback) — the full set the Nearby Shapers rail previews.
   const viewerSurfBreakId =
-    typeof (user as any)?.surf_break_id === 'string'
+    anchorBreakId ??
+    (typeof (user as any)?.surf_break_id === 'string'
       ? ((user as any).surf_break_id as string)
-      : null;
+      : null);
 
   const breakName =
     typeof user?.surf_break_name === 'string' ? (user.surf_break_name as string) : null;
@@ -81,9 +83,10 @@ const BoardroomFeed = forwardRef<BoardroomFeedHandle, Props>(function BoardroomF
     ? [breakName, breakRegion?.replaceAll('_', ' '), breakCountry].filter(Boolean).join(' · ')
     : null;
 
-  const { data, isLoading, isFetching, refetch } = useGetBoardroomShapersQuery({
-    viewerSurfBreakId,
-  });
+  const { data, isLoading, isFetching, refetch } = useGetShapersForSurfBreakQuery(
+    { breakId: viewerSurfBreakId ?? '', limit: 100 },
+    { skip: !viewerSurfBreakId }
+  );
 
   const shapers = useMemo<BoardroomShaper[]>(
     () => data?.results?.shapers ?? [],
@@ -177,7 +180,6 @@ type Slide =
 
 function ShaperCard({ shaper, isDark, isViewable = true }: { shaper: BoardroomShaper; isDark: boolean; isViewable?: boolean }) {
   const trackedPush = useTrackedPush();
-  const { units } = useUserPreferences();
   const [width, setWidth] = useState(Dimensions.get('window').width);
   const [activeIdx, setActiveIdx] = useState(0);
   const [sheetVisible, setSheetVisible] = useState(false);
@@ -271,14 +273,9 @@ function ShaperCard({ shaper, isDark, isViewable = true }: { shaper: BoardroomSh
     }],
   });
 
-  // Subtitle priority:
-  //   1. Distance — when the viewer has a home break and the shaper has one too
-  //   2. Shaper's surf break name — when distance unavailable but break is set
-  //   3. Empty string — neither known (rare; backend usually populates one)
-  const subtitle =
-    shaper.distance_km != null
-      ? `${formatDistanceUnit(shaper.distance_km, units)} away`
-      : shaper.surf_break_name ?? '';
+  // The feed is already region-filtered, so every shaper is local — show their
+  // home break (which break in the region) rather than a distance.
+  const subtitle = shaper.surf_break_name ?? '';
 
   return (
     <View style={styles.card} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -302,9 +299,11 @@ function ShaperCard({ shaper, isDark, isViewable = true }: { shaper: BoardroomSh
             >
               {shaper.name ?? shaper.handle}
             </Text>
-            <Text style={styles.subtitle} numberOfLines={1}>
-              {subtitle}
-            </Text>
+            {subtitle ? (
+              <Text style={styles.subtitle} numberOfLines={1}>
+                {subtitle}
+              </Text>
+            ) : null}
           </View>
         </Pressable>
         <Pressable onPress={() => setSheetVisible(true)} hitSlop={8}>

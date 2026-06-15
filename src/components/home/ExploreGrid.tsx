@@ -194,7 +194,7 @@ export default function ExploreGrid({
           {row.items.map((t, idx) => (
             <View key={t.key} style={{ marginRight: idx === 0 ? GAP : 0 }}>
               {t.kind === 'session' ? (
-                <NearbySessionRailCard group={t.data} width={cellW} noStack onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+                <NearbySessionRailCard group={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
               ) : (
                 <NearbyShaperRailCard shaper={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
               )}
@@ -249,7 +249,9 @@ export default function ExploreGrid({
 }
 
 const styles = StyleSheet.create({
-  pairRow: { flexDirection: 'row', paddingHorizontal: PAD, marginBottom: GAP },
+  // Extra bottom room so a multi-session tile's depth-peek edges show before
+  // the next row covers them.
+  pairRow: { flexDirection: 'row', paddingHorizontal: PAD, marginBottom: GAP + 6 },
   adRow: { marginBottom: 8 },
   gridTile: { marginRight: 0 },
   centered: { paddingVertical: 60, alignItems: 'center' },

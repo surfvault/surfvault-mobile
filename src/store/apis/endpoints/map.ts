@@ -11,13 +11,17 @@ const mapApi = rootApi.injectEndpoints({
         type,
         tags,
         viewerId,
+        suggest,
       }: {
         search: string;
         type?: string;
         tags?: string[];
         viewerId?: string;
+        // > 0 returns N suggested users (recent, block-filtered) for the empty
+        // search state — mirrors web. Backend supports this for users only.
+        suggest?: number;
       }) => ({
-        url: `/map/search?term=${search}&type=${type ?? 'all'}&tags=${(tags ?? []).join(',')}&viewerId=${viewerId ?? ''}`,
+        url: `/map/search?term=${search}&type=${type ?? 'all'}&tags=${(tags ?? []).join(',')}&viewerId=${viewerId ?? ''}&suggest=${suggest ?? 0}`,
         method: 'GET',
       }),
     }),

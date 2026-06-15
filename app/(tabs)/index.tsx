@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
+  Animated,
   useColorScheme,
   StyleSheet,
   TextInput,
@@ -31,9 +32,12 @@ import {
   useGetShapersForSurfBreakQuery,
   useGetSurfBreaksQuery,
   useUpdateUserRecentSearchesMutation,
+  useUpdatePreferencesMutation,
+  useGetUserFavoritesQuery,
+  useGetUserFollowingQuery,
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
-import { useUserPreferences, formatDistance } from '../../src/helpers/preferences';
+import { useUserPreferences, formatDistance, kmToUnit, unitToKm } from '../../src/helpers/preferences';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
 import SessionCard from '../../src/components/SessionCard';
@@ -52,6 +56,7 @@ import {
   NearbyBusinessRailCard,
 } from '../../src/components/home/NearbyRail';
 import ExploreGrid from '../../src/components/home/ExploreGrid';
+import RailSkeleton from '../../src/components/home/RailSkeleton';
 import {
   // groupAdsByPartner intentionally not imported — Phase B retired
   // partner-level ad grouping in favor of per-ad media[] carousels.
@@ -69,14 +74,14 @@ type FeedType = 'surfvault' | 'discover' | 'following' | 'favorites' | 'boardroo
 // Mirrors web Home's "Set location" — overrides the GPS/home-break chain.
 type NearbyAnchor = { lat: number; lon: number; breakId?: string; name?: string };
 
-// NOTE: 'discover' is intentionally NOT in the picker — worldwide latest
-// sessions now live in the Explore grid (the Search screen's default state).
-// The type is retained for the few internal `feedType === 'discover'` guards.
+// NOTE: 'discover' and 'boardroom' are intentionally NOT in the picker.
+// 'discover' lives in the Explore grid (Search screen). 'boardroom' is a
+// "See all" drill-down off the Nearby Shapers rail (back-arrow header). Both
+// types are retained for the internal `feedType === ...` guards / rendering.
 const FEED_OPTIONS: { value: FeedType; label: string; description: string; comingSoon?: boolean }[] = [
   { value: 'surfvault', label: 'SurfVault', description: 'Sessions, breaks & shapers near you' },
   { value: 'following', label: 'Following', description: 'Sessions from people you follow' },
   { value: 'favorites', label: 'Favorites', description: 'Sessions at your favorited breaks' },
-  { value: 'boardroom', label: 'Boardroom', description: 'Custom surfboards near you' },
 ];
 
 // Module-level so the offset survives any remount (tab detach/attach cycles).
@@ -90,6 +95,42 @@ let savedFeedType: FeedType = 'surfvault';
 // so a user's chosen location isn't lost when backing out of a pushed route.
 let savedAnchor: NearbyAnchor | null = null;
 
+// Radius presets — round numbers in the DISPLAYED unit (matches Settings). The
+// stored value is always km, so a tapped option is converted on write.
+const BREAK_RADIUS_PRESETS: Record<string, number[]> = { mi: [25, 50, 100, 150, 250], km: [50, 100, 200, 300, 500] };
+const PHOTOG_RADIUS_PRESETS: Record<string, number[]> = { mi: [10, 25, 50, 100, 150], km: [25, 50, 100, 200, 300] };
+
+// Inline radius selector for the nearby rail headers (logged-in only) — a
+// native menu, same pattern as the feed picker. Shows the current radius; tap
+// to pick a new one, which writes the preference (km) and re-fetches the rail.
+function RadiusMenu({
+  presets,
+  units,
+  valueKm,
+  onChange,
+}: {
+  presets: number[];
+  units: string;
+  valueKm: number;
+  onChange: (km: number) => void;
+}) {
+  const unitLabel = units === 'mi' ? 'mi' : 'km';
+  const current = Math.round(kmToUnit(valueKm, units as any));
+  const actions = presets.map((p) => ({
+    id: String(Math.round(unitToKm(p, units as any))),
+    title: `${p}${unitLabel}`,
+    state: p === current ? ('on' as const) : undefined,
+  }));
+  return (
+    <MenuView actions={actions} onPressAction={({ nativeEvent }) => onChange(Number(nativeEvent.event))}>
+      <View style={styles.radiusChip}>
+        <Text style={styles.radiusChipText}>{formatDistance(valueKm, units as any)}</Text>
+        <Ionicons name="chevron-down" size={12} color="#0ea5e9" style={{ marginLeft: 2 }} />
+      </View>
+    </MenuView>
+  );
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const trackedPush = useTrackedPush();
@@ -100,6 +141,17 @@ export default function HomeScreen() {
   const { isAuthenticated } = useAuth();
   const { setTabBarVisible } = useTabBar();
   const [updateUserRecentSearches] = useUpdateUserRecentSearchesMutation();
+  const [updatePreferences] = useUpdatePreferencesMutation();
+  // Write a nearby radius preference (optimistic via getSelf cache; rail
+  // re-fetches with the new radiusKm). Best-effort — never throws to the UI.
+  const setNearbyRadius = useCallback(
+    (key: 'breaksKm' | 'photographersKm', km: number) => {
+      updatePreferences({ preferences: { nearby: { [key]: km } } })
+        .unwrap()
+        .catch(() => {});
+    },
+    [updatePreferences]
+  );
 
   // Cache the top inset so it never drops to 0 mid-session (safe-area-context
   // can briefly report 0 during stack push/pop transitions, which makes the
@@ -161,7 +213,10 @@ export default function HomeScreen() {
   const hasNearbyAnchor = nearbyLat != null && nearbyLon != null;
   const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
     { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, radiusKm: nearbyPrefs.breaksKm },
-    { skip: !hasNearbyAnchor || !isSurfVault }
+    // Runs on SurfVault (rails) AND Boardroom — keeps `anchorBreakId` resolving
+    // to the nearest break on both so Boardroom's region filter is consistent
+    // (GPS-only users with no home break). Cached across both, no extra fetch.
+    { skip: !hasNearbyAnchor || (feedType !== 'surfvault' && feedType !== 'boardroom') }
   );
   // API returns `nearbyBreaks` (not `surfBreaks`) — see CLAUDE.md gotchas.
   const nearbyBreaks =
@@ -223,6 +278,63 @@ export default function HomeScreen() {
     setAdRailViewable(new Set(viewableItems.map((v) => v.key)));
   }).current;
   const railViewConfig = useRef({ itemVisiblePercentThreshold: 60 }).current;
+
+  // SurfVault page scroll drives two things:
+  //   (a) fade the anchor break name into the header as the location bar
+  //       scrolls out of sight, and
+  //   (b) gate rail autoplay to rails actually on-screen vertically — a
+  //       horizontal rail's own viewability can't tell it's been scrolled
+  //       off the top, so without this its clips would keep playing off-screen.
+  const surfScrollY = useRef(new Animated.Value(0)).current;
+  const surfScrollYNum = useRef(0);
+  const railLayoutsRef = useRef<Record<string, { y: number; h: number }>>({});
+  const surfViewportH = useRef(0);
+  const [railsInView, setRailsInView] = useState<Record<string, boolean>>({});
+  const recomputeRailsInView = useCallback((y: number) => {
+    const vh = surfViewportH.current;
+    if (!vh) return;
+    const top = y;
+    const bottom = y + vh;
+    setRailsInView((prev) => {
+      const layouts = railLayoutsRef.current;
+      let changed = false;
+      const next = { ...prev };
+      for (const k of Object.keys(layouts)) {
+        const l = layouts[k];
+        const vis = l.y < bottom && l.y + l.h > top;
+        if (next[k] !== vis) {
+          next[k] = vis;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+  const onSurfScroll = useMemo(
+    () =>
+      Animated.event([{ nativeEvent: { contentOffset: { y: surfScrollY } } }], {
+        useNativeDriver: true,
+        listener: (e: any) => {
+          const y = e.nativeEvent.contentOffset.y;
+          surfScrollYNum.current = y;
+          recomputeRailsInView(y);
+        },
+      }),
+    [recomputeRailsInView, surfScrollY]
+  );
+  // Anchor name is hidden while the location bar is visible, then fades into the
+  // header as you scroll past it (~location-bar height).
+  const headerCaptionOpacity = surfScrollY.interpolate({
+    inputRange: [40, 92],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const onRailLayout = (key: string) => (e: any) => {
+    const { y, height } = e.nativeEvent.layout;
+    railLayoutsRef.current[key] = { y, h: height };
+    // Settle the initial in-view state once positions are known (no scroll yet).
+    recomputeRailsInView(surfScrollYNum.current);
+  };
 
   // ---- Feed type (SurfVault / Discover / Following / Favorites / Boardroom) ----
   // `feedType` + `isSurfVault` are declared above (near the nearby queries).
@@ -417,16 +529,19 @@ export default function HomeScreen() {
   const handleFeedChange = useCallback((next: FeedType) => {
     if (next === feedType) return;
     resetFeedAccumulator();
+    // Reset the shared scroll value so the header caption starts hidden on the
+    // new feed (both SurfVault + Boardroom drive this for the anchor-name fade).
+    surfScrollY.setValue(0);
     savedFeedType = next;
     setFeedType(next);
-  }, [feedType, resetFeedAccumulator]);
+  }, [feedType, resetFeedAccumulator, surfScrollY]);
 
   const feedMenuActions = useMemo(() => {
     return [
       {
         id: 'surfvault' as FeedType,
         title: 'SurfVault',
-        subtitle: 'Near you',
+        subtitle: 'Nearby',
         state: feedType === 'surfvault' ? ('on' as const) : undefined,
       },
       {
@@ -440,11 +555,6 @@ export default function HomeScreen() {
         title: 'Favorites',
         state: feedType === 'favorites' ? ('on' as const) : undefined,
         attributes: !user?.id ? { disabled: true } : undefined,
-      },
-      {
-        id: 'boardroom' as FeedType,
-        title: 'Boardroom',
-        state: feedType === 'boardroom' ? ('on' as const) : undefined,
       },
     ];
   }, [feedType, user?.id]);
@@ -499,12 +609,10 @@ export default function HomeScreen() {
     savedAnchor = next;
     setManualAnchor(next);
     resetFeedAccumulator();
-    if (feedType !== 'surfvault') {
-      savedFeedType = 'surfvault';
-      setFeedType('surfvault');
-    }
+    // Stay on the current feed — the picker is reached from both the SurfVault
+    // and Boardroom location bars, and both consume the same anchor.
     closeLocationPicker();
-  }, [feedType, resetFeedAccumulator, closeLocationPicker]);
+  }, [resetFeedAccumulator, closeLocationPicker]);
 
   // Drop the manual pin — fall back to the GPS / home-break chain.
   const clearManualAnchor = useCallback(() => {
@@ -573,6 +681,29 @@ export default function HomeScreen() {
     { limit: 100 },
     { skip: !user?.id || feedType !== 'following' }
   );
+  // The favorites/following probes ONLY run once the session feed has resolved
+  // EMPTY — i.e. exactly when the empty-state message needs to disambiguate.
+  // For users who follow people / have favorites with sessions, these never
+  // fire (no wasted query in the common case).
+  const feedResolvedEmpty = !!sessionsCurrentData && sessions.length === 0;
+
+  // Favorites empty state: "no favorites yet" vs "favorites, but no sessions".
+  const { data: favoritesData, isLoading: favoritesProbing } = useGetUserFavoritesQuery(
+    {} as any,
+    { skip: !user?.id || feedType !== 'favorites' || !feedResolvedEmpty }
+  );
+  const favoritesCount = favoritesData?.results?.favorites?.length ?? 0;
+  // Following empty state: "not following anyone" vs "following, but no
+  // sessions". A limit-1 probe is enough to detect presence.
+  const { data: followingListData, isLoading: followingProbing } = useGetUserFollowingQuery(
+    { handle: (user as any)?.handle ?? '', filter: 'following', search: '', limit: 1 },
+    { skip: !user?.id || !(user as any)?.handle || feedType !== 'following' || !feedResolvedEmpty }
+  );
+  const followsAnyone = (followingListData?.results?.followStats?.length ?? 0) > 0;
+  // While the empty-state probe is in flight, keep showing the skeleton (not a
+  // spinner) so the disambiguated message appears only once it's known.
+  const probeLoading =
+    (feedType === 'favorites' && favoritesProbing) || (feedType === 'following' && followingProbing);
   // SurfVault "Nearby Shapers" — shapers tied to the anchor break's region (or
   // country fallback). This is genuinely location-scoped, so changing the pinned
   // location swaps the shaper set (or empties it). NOTE: deliberately NOT
@@ -763,6 +894,30 @@ export default function HomeScreen() {
   }, [navigateAndClose, recordSearch]);
 
   const isSearching = searchTerm.length >= 2 || hasTagFilter;
+
+  // Empty-state suggestions (mirrors web's no-recents / logged-out search):
+  //   People → recent users via the `suggest` param on /map/search.
+  //   Breaks → a shuffled slice of the catalog (the backend `suggest` is
+  //            users-only, so breaks use getSurfBreaks rather than location).
+  // Only when the input is focused, there's no query, and no recents to show.
+  const wantSuggestions = searchVisible && searchFocused && !isSearching && filteredRecents.length === 0;
+  const { data: suggestPeopleData } = useGetMapSearchContentQuery(
+    { search: '', type: 'user', suggest: 10, viewerId: user?.id },
+    { skip: !wantSuggestions || searchType !== 'user' || (isAuthenticated && !user?.id) }
+  );
+  const { data: suggestBreaksData } = useGetSurfBreaksQuery(
+    { limit: 24 },
+    { skip: !wantSuggestions || searchType !== 'surf_break' }
+  );
+  const suggestedItems = useMemo(() => {
+    if (searchType === 'user') return suggestPeopleData?.results?.searchContent ?? [];
+    const breaks = [...(suggestBreaksData?.results?.breaks ?? [])];
+    for (let i = breaks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [breaks[i], breaks[j]] = [breaks[j], breaks[i]];
+    }
+    return breaks.slice(0, 10);
+  }, [searchType, suggestPeopleData, suggestBreaksData]);
 
   // ---- Search overlay ----
   if (searchVisible) {
@@ -977,13 +1132,48 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {/* Empty state when no recents */}
+              {/* No recents → suggested list (mirrors web), else a prompt */}
               {filteredRecents.length === 0 && (
-                <View style={styles.centered}>
-                  <Text style={{ color: '#9ca3af', fontSize: 14 }}>
-                    Search for {searchType === 'user' ? 'people' : 'surf breaks'}
-                  </Text>
-                </View>
+                suggestedItems.length > 0 ? (
+                  <View style={styles.section}>
+                    <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                      {searchType === 'user' ? 'Suggested people' : 'Suggested surf breaks'}
+                    </Text>
+                    {suggestedItems.map((item: any) =>
+                      item.handle ? (
+                        <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item)} style={styles.resultRow}>
+                          <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} userType={item.user_type} />
+                          <View style={styles.resultInfo}>
+                            <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
+                              {item.name ?? item.handle}
+                            </Text>
+                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280', marginTop: 1 }]} numberOfLines={1}>
+                              @{item.handle}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      ) : (
+                        <Pressable key={item.id} onPress={() => navigateToBreak(item)} style={styles.resultRow}>
+                          <View style={[styles.resultIcon, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                            <Ionicons name="location-outline" size={20} color={isDark ? '#9ca3af' : '#6b7280'} />
+                          </View>
+                          <View style={styles.resultInfo}>
+                            <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>{item.name}</Text>
+                            <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                              {item.region ? `${String(item.region).replaceAll('_', ' ')} · ` : ''}{item.country_code ?? ''}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      )
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.centered}>
+                    <Text style={{ color: '#9ca3af', fontSize: 14 }}>
+                      Search for {searchType === 'user' ? 'people' : 'surf breaks'}
+                    </Text>
+                  </View>
+                )
               )}
             </>
           )}
@@ -1079,7 +1269,8 @@ export default function HomeScreen() {
   // and feed-switching (currentData becomes undefined during arg change).
   // (SurfVault has its own dedicated rails layout below, so it's excluded here.)
   const showSkeleton =
-    feedType !== 'boardroom' && feedType !== 'surfvault' && sessions.length === 0 && !sessionsCurrentData;
+    (feedType !== 'boardroom' && feedType !== 'surfvault' && sessions.length === 0 && !sessionsCurrentData) ||
+    probeLoading;
 
   // SurfVault rail data. `sessions` already holds break+date groups (grouped
   // feed), scoped to nearby breaks via the session query's surfBreakIds.
@@ -1088,9 +1279,38 @@ export default function HomeScreen() {
   const nearbyBusinessAds = (adsData?.results?.ads ?? []).slice(0, 12);
   const surfvaultLoading = isSurfVault && hasNearbyAnchor && nearbyBreaks.length === 0 && !nearbyBreaksData;
 
+  // Per-section loading flags — a section's query is in flight (no response
+  // yet) and not skipped. Lets each rail show a skeleton instead of just being
+  // absent while the breaks (which return first) are already on screen.
+  const photographersSkipped = isAuthenticated && !user?.id;
+  const sessionsLoading = nearbyBreakIds.length > 0 && !sessionsCurrentData;
+  const photographersLoading = hasNearbyAnchor && !photographersSkipped && !nearbyPhotographersData;
+  const shapersLoading = !!anchorBreakId && !surfvaultShapersData;
+  const businessLoading = !adsData;
+
   return (
     <View className="flex-1 bg-white dark:bg-black" style={{ paddingTop: topInset }}>
       <View style={styles.header}>
+        {feedType === 'boardroom' ? (
+          // Drill-down header: back to SurfVault + "Boardroom" title (Boardroom
+          // is reached via the Nearby Shapers "See all", not the picker).
+          <Pressable onPress={() => handleFeedChange('surfvault')} style={styles.headerLeft} hitSlop={8}>
+            <Ionicons name="chevron-back" size={26} color={isDark ? '#ffffff' : '#000000'} />
+            {/* Title + location stacked normally (no logo to center against, so
+                the SurfVault absolute-caption trick isn't needed here). */}
+            <View style={{ marginLeft: 2 }}>
+              <Text style={[styles.feedTriggerText, { color: isDark ? '#ffffff' : '#000000' }]}>Boardroom</Text>
+              {anchorName ? (
+                <Text
+                  style={[styles.boardroomCaption, { color: isDark ? '#9ca3af' : '#6b7280' }]}
+                  numberOfLines={1}
+                >
+                  {anchorName}
+                </Text>
+              ) : null}
+            </View>
+          </Pressable>
+        ) : (
         <View style={styles.headerLeft}>
           <Image
             source={isDark ? require('../../assets/surfvault-logo-dark.png') : require('../../assets/surfvault-logo.png')}
@@ -1117,33 +1337,33 @@ export default function HomeScreen() {
               {/* Caption is absolutely positioned so it hangs below without
                   affecting the row height — keeps the label vertically
                   centered with the logo + search icon across all feed types. */}
-              {feedType === 'boardroom' && typeof user?.surf_break_name === 'string' && user.surf_break_name ? (
-                <Text
-                  style={[styles.feedTriggerCaption, { color: isDark ? '#9ca3af' : '#6b7280' }]}
-                  numberOfLines={1}
-                >
-                  {user.surf_break_name as string}
-                </Text>
-              ) : feedType === 'surfvault' && anchorName ? (
-                <Text
-                  style={[styles.feedTriggerCaption, { color: isDark ? '#9ca3af' : '#6b7280' }]}
+              {feedType === 'surfvault' && anchorName ? (
+                // Fades in as the location bar scrolls out of view.
+                <Animated.Text
+                  style={[styles.feedTriggerCaption, { color: isDark ? '#9ca3af' : '#6b7280', opacity: headerCaptionOpacity }]}
                   numberOfLines={1}
                 >
                   {anchorName}
-                </Text>
+                </Animated.Text>
               ) : null}
             </View>
           </MenuView>
         </View>
-        <Pressable onPress={openSearch} hitSlop={8}>
-          <Ionicons name="search-outline" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
-        </Pressable>
+        )}
+        {feedType !== 'boardroom' && (
+          <Pressable onPress={openSearch} hitSlop={8}>
+            <Ionicons name="search-outline" size={24} color={isDark ? '#e5e7eb' : '#374151'} />
+          </Pressable>
+        )}
       </View>
 
       {feedType === 'surfvault' ? (
-        <ScrollView
+        <Animated.ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 40 }}
+          onScroll={onSurfScroll}
+          scrollEventThrottle={16}
+          onLayout={(e) => { surfViewportH.current = e.nativeEvent.layout.height; recomputeRailsInView(surfScrollYNum.current); }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
           {/* Location bar — pin/change the nearby anchor (mirrors web "Set location") */}
@@ -1188,11 +1408,21 @@ export default function HomeScreen() {
               {/* Nearby Surf Breaks */}
               {nearbyBreaks.length > 0 && (
                 <View style={styles.railSection}>
-                  <View style={styles.railHeader}>
-                    <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Surf Breaks</Text>
-                    <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                      Surf breaks within {formatDistance(nearbyPrefs.breaksKm, units)} of here
-                    </Text>
+                  <View style={[styles.railHeader, styles.railHeaderRow]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Surf Breaks</Text>
+                      <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                        Surf breaks within {formatDistance(nearbyPrefs.breaksKm, units)} of here
+                      </Text>
+                    </View>
+                    {user?.id ? (
+                      <RadiusMenu
+                        presets={BREAK_RADIUS_PRESETS[units] ?? BREAK_RADIUS_PRESETS.mi}
+                        units={units}
+                        valueKm={nearbyPrefs.breaksKm}
+                        onChange={(km) => setNearbyRadius('breaksKm', km)}
+                      />
+                    ) : null}
                   </View>
                   <FlatList
                     data={nearbyBreaks}
@@ -1206,8 +1436,8 @@ export default function HomeScreen() {
               )}
 
               {/* Nearby Sessions */}
-              {nearbySessions.length > 0 && (
-                <View style={styles.railSection}>
+              {nearbySessions.length > 0 ? (
+                <View style={styles.railSection} onLayout={onRailLayout('sessions')}>
                   <View style={styles.railHeader}>
                     <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Sessions</Text>
                     <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
@@ -1226,21 +1456,33 @@ export default function HomeScreen() {
                     renderItem={({ item }) => (
                       <NearbySessionRailCard
                         group={item}
-                        isViewable={feedFocused && sessionRailViewable.has(`${item.session_date}|${item.group_key}`)}
+                        isViewable={feedFocused && railsInView.sessions !== false && sessionRailViewable.has(`${item.session_date}|${item.group_key}`)}
                       />
                     )}
                   />
                 </View>
-              )}
+              ) : sessionsLoading ? (
+                <RailSkeleton title="Nearby Sessions" subtitle="The latest sessions shot at breaks near here." />
+              ) : null}
 
               {/* Nearby Photographers */}
-              {nearbyPhotographers.length > 0 && (
+              {nearbyPhotographers.length > 0 ? (
                 <View style={styles.railSection}>
-                  <View style={styles.railHeader}>
-                    <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Photographers</Text>
-                    <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                      Photographers within {formatDistance(nearbyPrefs.photographersKm, units)} of here
-                    </Text>
+                  <View style={[styles.railHeader, styles.railHeaderRow]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Photographers</Text>
+                      <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                        Photographers within {formatDistance(nearbyPrefs.photographersKm, units)} of here
+                      </Text>
+                    </View>
+                    {user?.id ? (
+                      <RadiusMenu
+                        presets={PHOTOG_RADIUS_PRESETS[units] ?? PHOTOG_RADIUS_PRESETS.mi}
+                        units={units}
+                        valueKm={nearbyPrefs.photographersKm}
+                        onChange={(km) => setNearbyRadius('photographersKm', km)}
+                      />
+                    ) : null}
                   </View>
                   <FlatList
                     data={nearbyPhotographers}
@@ -1281,16 +1523,24 @@ export default function HomeScreen() {
                     }}
                   />
                 </View>
-              )}
+              ) : photographersLoading ? (
+                <RailSkeleton title="Nearby Photographers" variant="avatar" />
+              ) : null}
 
               {/* Nearby Shapers */}
-              {nearbyShapers.length > 0 && (
-                <View style={styles.railSection}>
-                  <View style={styles.railHeader}>
-                    <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Shapers</Text>
-                    <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                      Tap a shaper to browse their boards.
-                    </Text>
+              {nearbyShapers.length > 0 ? (
+                <View style={styles.railSection} onLayout={onRailLayout('shapers')}>
+                  <View style={[styles.railHeader, styles.railHeaderRow]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Shapers</Text>
+                      <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                        Tap a shaper to browse their boards.
+                      </Text>
+                    </View>
+                    {/* Boardroom drill-down — the full shaper feed. */}
+                    <Pressable onPress={() => handleFeedChange('boardroom')} hitSlop={8} style={{ paddingLeft: 12 }}>
+                      <Text style={styles.seeAll}>See all ›</Text>
+                    </Pressable>
                   </View>
                   <FlatList
                     data={nearbyShapers}
@@ -1304,16 +1554,18 @@ export default function HomeScreen() {
                     renderItem={({ item }) => (
                       <NearbyShaperRailCard
                         shaper={item}
-                        isViewable={feedFocused && shaperRailViewable.has(item.id ?? item.handle)}
+                        isViewable={feedFocused && railsInView.shapers !== false && shaperRailViewable.has(item.id ?? item.handle)}
                       />
                     )}
                   />
                 </View>
-              )}
+              ) : shapersLoading ? (
+                <RailSkeleton title="Nearby Shapers" subtitle="Tap a shaper to browse their boards." />
+              ) : null}
 
               {/* Nearby Business */}
-              {nearbyBusinessAds.length > 0 && (
-                <View style={styles.railSection}>
+              {nearbyBusinessAds.length > 0 ? (
+                <View style={styles.railSection} onLayout={onRailLayout('business')}>
                   <View style={styles.railHeader}>
                     <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Business</Text>
                     <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
@@ -1333,19 +1585,25 @@ export default function HomeScreen() {
                       <NearbyBusinessRailCard
                         ad={item}
                         surfBreakId={anchorBreakId}
-                        isViewable={feedFocused && adRailViewable.has(item.id)}
+                        isViewable={feedFocused && railsInView.business !== false && adRailViewable.has(item.id)}
                       />
                     )}
                   />
                 </View>
-              )}
+              ) : businessLoading ? (
+                <RailSkeleton title="Nearby Business" subtitle="Businesses near you that support the surf community." />
+              ) : null}
 
-              {/* Anchor set, but nothing within range */}
+              {/* Anchor set, but nothing within range — only once everything settled */}
               {nearbyBreaks.length === 0 &&
                 nearbySessions.length === 0 &&
                 nearbyPhotographers.length === 0 &&
                 nearbyShapers.length === 0 &&
-                nearbyBusinessAds.length === 0 && (
+                nearbyBusinessAds.length === 0 &&
+                !sessionsLoading &&
+                !photographersLoading &&
+                !shapersLoading &&
+                !businessLoading && (
                   <View style={[styles.emptyStateWrap, { paddingVertical: 64 }]}>
                     <View style={[styles.boardroomIconWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
                       <Ionicons name="search-outline" size={36} color={isDark ? '#9ca3af' : '#6b7280'} />
@@ -1362,10 +1620,10 @@ export default function HomeScreen() {
                 )}
             </>
           )}
-        </ScrollView>
+        </Animated.ScrollView>
       ) : feedType === 'boardroom' ? (
-        <BoardroomFeed ref={boardroomRef} isDark={isDark} />
-      ) : showSkeleton ? <HomeSkeleton /> : (
+        <BoardroomFeed ref={boardroomRef} isDark={isDark} anchorBreakId={anchorBreakId} />
+      ) : showSkeleton ? <HomeSkeleton showNearby={false} /> : (
       <FlatList
         ref={feedListRef}
           data={feedRows}
@@ -1426,7 +1684,7 @@ export default function HomeScreen() {
                       feedType === 'following'
                         ? 'account-multiple-outline'
                         : feedType === 'favorites'
-                        ? 'star-outline'
+                        ? 'heart-outline'
                         : 'compass-outline'
                     }
                     size={36}
@@ -1434,13 +1692,25 @@ export default function HomeScreen() {
                   />
                 </View>
                 <Text style={[styles.boardroomTitle, { color: isDark ? '#ffffff' : '#111827' }]}>
-                  No sessions yet
+                  {feedType === 'favorites'
+                    ? favoritesCount > 0
+                      ? 'Nothing new yet'
+                      : 'No favorites yet'
+                    : feedType === 'following'
+                    ? followsAnyone
+                      ? 'Nothing new yet'
+                      : 'Not following anyone yet'
+                    : 'No sessions yet'}
                 </Text>
                 <Text style={[styles.boardroomBody, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
                   {feedType === 'following'
-                    ? 'Follow more photographers and surfers to see their latest sessions here.'
+                    ? followsAnyone
+                      ? 'No new sessions from people you follow yet. Check back soon.'
+                      : 'Follow photographers and surfers to see their sessions here.'
                     : feedType === 'favorites'
-                    ? 'Favorite a break to see its latest sessions here.'
+                    ? favoritesCount > 0
+                      ? 'No new sessions at your favorites yet. Check back soon.'
+                      : 'Favorite a break to see its latest sessions here.'
                     : 'Check back later for new sessions in your area.'}
                 </Text>
               </View>
@@ -1587,6 +1857,15 @@ const styles = StyleSheet.create({
     marginTop: 1,
     maxWidth: 220,
   },
+  // Boardroom caption — same look as feedTriggerCaption but in normal flow
+  // (stacked under the title), not absolutely positioned.
+  boardroomCaption: {
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.2,
+    marginTop: 2,
+    maxWidth: 220,
+  },
   locationHint: {
     fontSize: 13,
     lineHeight: 18,
@@ -1648,6 +1927,15 @@ const styles = StyleSheet.create({
   nearbySubtitle: { fontSize: 13, marginTop: 2 },
   railSection: { marginBottom: 28 },
   railHeader: { paddingHorizontal: 16, marginBottom: 4 },
+  railHeaderRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  seeAll: { fontSize: 13, fontWeight: '600', color: '#0ea5e9' },
+  radiusChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 12,
+    paddingBottom: 1,
+  },
+  radiusChipText: { fontSize: 13, fontWeight: '600', color: '#0ea5e9' },
   railContent: { paddingHorizontal: 16, paddingTop: 10 },
   photographerHandle: { fontSize: 11, fontWeight: '600', marginTop: 6, textAlign: 'center' },
   activeDot: { width: 8, height: 8, borderRadius: 4, marginTop: 3 },
