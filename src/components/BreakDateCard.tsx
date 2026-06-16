@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, FlatList, Platform, Share, useColorScheme, type LayoutChangeEvent, type ViewToken, type GestureResponderEvent } from 'react-native';
+import { View, Text, Pressable, StyleSheet, FlatList, Platform, useColorScheme, type LayoutChangeEvent, type ViewToken, type GestureResponderEvent } from 'react-native';
+import { safeShare } from '../helpers/share';
 import { Image } from 'expo-image';
 import AutoplayVideo from './AutoplayVideo';
 import { Ionicons } from '@expo/vector-icons';
@@ -264,7 +265,7 @@ export default function BreakDateCard({ group, isViewable = true }: { group: Bre
         icon: 'share-outline',
         onPress: () => {
           const url = `https://share.surf-vault.com/s/${solo.session_id}`;
-          Share.share(Platform.OS === 'ios' ? { url } : { message: url });
+          safeShare(Platform.OS === 'ios' ? { url } : { message: url });
         },
       }],
     });
@@ -423,7 +424,7 @@ export default function BreakDateCard({ group, isViewable = true }: { group: Bre
         label: 'Share',
         icon: 'share-outline',
         onPress: () => {
-          Share.share(Platform.OS === 'ios' ? { url: multiShareUrl } : { message: multiShareUrl });
+          safeShare(Platform.OS === 'ios' ? { url: multiShareUrl } : { message: multiShareUrl });
         },
       }],
     });

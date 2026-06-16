@@ -28,6 +28,7 @@ import PendingDeletionBanner from '../src/components/PendingDeletionBanner';
 import NotificationPrimingModal from '../src/components/NotificationPrimingModal';
 import ForceUpdateGate from '../src/components/ForceUpdateGate';
 import ThemeSync from '../src/components/ThemeSync';
+import ErrorBoundary from '../src/components/ErrorBoundary';
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
 Notifications.setNotificationHandler({
@@ -282,7 +283,9 @@ export default function RootLayout() {
                 <ActionSheetProvider useCustomActionSheet>
                   <UploadProvider>
                     <SaveProvider>
-                      <AppShell />
+                      <ErrorBoundary>
+                        <AppShell />
+                      </ErrorBoundary>
                     </SaveProvider>
                   </UploadProvider>
                 </ActionSheetProvider>

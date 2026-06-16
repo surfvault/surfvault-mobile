@@ -9,10 +9,10 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
-  Share,
   Platform,
   useColorScheme,
 } from 'react-native';
+import { safeShare } from '../../src/helpers/share';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Image } from 'expo-image';
@@ -238,7 +238,7 @@ export default function BoardDetailScreen() {
     if (!handle) return;
     const shareUrl = `https://app.surf-vault.com/${handle}/boards/${board.id}`;
     try {
-      await Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+      await safeShare(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
     } catch { /* user cancelled */ }
   }, [board]);
 

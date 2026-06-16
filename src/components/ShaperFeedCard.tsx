@@ -7,10 +7,10 @@ import {
   Dimensions,
   FlatList,
   Platform,
-  Share,
   useColorScheme,
   type ViewToken,
 } from 'react-native';
+import { safeShare } from '../helpers/share';
 import { Image } from 'expo-image';
 import AutoplayVideo from './AutoplayVideo';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -193,7 +193,7 @@ export default function ShaperFeedCard({ shaper, isViewable = true }: ShaperFeed
               icon: 'share-outline',
               onPress: () => {
                 const url = `https://app.surf-vault.com/${shaper.handle}`;
-                Share.share(Platform.OS === 'ios' ? { url } : { message: url });
+                safeShare(Platform.OS === 'ios' ? { url } : { message: url });
               },
             }],
           },

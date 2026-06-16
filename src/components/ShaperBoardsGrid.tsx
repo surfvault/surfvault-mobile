@@ -9,11 +9,11 @@ import {
   FlatList,
   Alert,
   Platform,
-  Share,
   useColorScheme,
   type LayoutChangeEvent,
   type ViewToken,
 } from 'react-native';
+import { safeShare } from '../helpers/share';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
@@ -144,7 +144,7 @@ export default function ShaperBoardsGrid({
   const handleShareBoard = useCallback(async (board: Board) => {
     const shareUrl = `https://app.surf-vault.com/${handle}/boards/${board.id}`;
     try {
-      await Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+      await safeShare(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
     } catch { /* user cancelled */ }
   }, [handle]);
 

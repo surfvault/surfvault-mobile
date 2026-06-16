@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -88,7 +89,7 @@ function MessageBody({ body, isOutbound, isDark, onNavigate }: { body: string; i
               <Text
                 key={i}
                 style={{ color: linkColor, textDecorationLine: 'underline' }}
-                onPress={() => Linking.openURL(part)}
+                onPress={() => Linking.openURL(part).catch(() => Alert.alert('Could not open link', part))}
               >
                 {part}
               </Text>
@@ -317,11 +318,19 @@ export default function ConversationDetailScreen() {
     }
     if (!conversationId) return;
     setMessage('');
-    await replyToConversation({ conversationId, message: trimmed });
-    // Scroll after send — multiple attempts to catch the data refetch
-    [300, 600, 1000].forEach((ms) => {
-      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), ms);
-    });
+    try {
+      await replyToConversation({ conversationId, message: trimmed }).unwrap();
+      // Scroll after send — multiple attempts to catch the data refetch
+      [300, 600, 1000].forEach((ms) => {
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), ms);
+      });
+    } catch (err) {
+      // Restore the typed text so a failed send isn't silently lost (mirrors
+      // the isNew branch above).
+      console.error('Failed to send message:', err);
+      setMessage(trimmed);
+      Alert.alert('Message not sent', 'Please try again.');
+    }
   }, [message, conversationId, replyToConversation, isNew, recipientUser, startConversationWithUser, router]);
 
   const renderItem = ({ item }: { item: any }) => {

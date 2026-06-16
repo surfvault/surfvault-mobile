@@ -7,10 +7,10 @@ import {
   Pressable,
   StyleSheet,
   useColorScheme,
-  Share,
   Platform,
   RefreshControl,
 } from 'react-native';
+import { safeShare } from '../../src/helpers/share';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -249,7 +249,7 @@ export default function SurfBreakDetailScreen() {
 
   const handleShare = useCallback(async () => {
     const shareUrl = `https://share.surf-vault.com/${country}/${region}/${surfBreak}`;
-    await Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+    await safeShare(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
   }, [country, region, surfBreak]);
 
   const resetPagination = useCallback(() => {

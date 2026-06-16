@@ -7,12 +7,12 @@ import {
   Linking,
   Alert,
   Platform,
-  Share,
   useColorScheme,
   FlatList,
   Dimensions,
   type ViewToken,
 } from 'react-native';
+import { safeShare } from '../helpers/share';
 import { Image } from 'expo-image';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
@@ -460,7 +460,7 @@ export default function SponsoredCard({
               icon: 'share-outline',
               onPress: () => {
                 const url = buildAdClickUrl(ad.id, { placement, surfBreakId, device: currentDevice() });
-                Share.share(Platform.OS === 'ios' ? { url } : { message: url });
+                safeShare(Platform.OS === 'ios' ? { url } : { message: url });
               },
             }],
           },

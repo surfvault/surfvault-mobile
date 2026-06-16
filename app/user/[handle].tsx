@@ -5,14 +5,12 @@ import {
   FlatList,
   Pressable,
   ActivityIndicator,
-  Share,
   StyleSheet,
   useColorScheme,
   Platform,
   Dimensions,
   RefreshControl,
   Alert,
-  Linking,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -48,6 +46,7 @@ import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import PaymentSheet, { hasPaymentChannels, acceptsDonations } from '../../src/components/PaymentSheet';
 import { formatSessionDate } from '../../src/helpers/dateTime';
+import { safeShare, openUrl } from '../../src/helpers/share';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -256,7 +255,7 @@ export default function UserProfileScreen() {
   // Share profile
   const handleShare = useCallback(async () => {
     const shareUrl = `https://app.surf-vault.com/${handle}`;
-    await Share.share(
+    await safeShare(
       Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl }
     );
   }, [handle]);
@@ -361,20 +360,20 @@ export default function UserProfileScreen() {
       label: 'Instagram',
       icon: 'logo-instagram' as const,
       iconColor: '#ec4899',
-      onPress: () => Linking.openURL(`https://instagram.com/${String(profile.instagram).replace(/^@/, '')}`),
+      onPress: () => openUrl(`https://instagram.com/${String(profile.instagram).replace(/^@/, '')}`),
     },
     profile?.youtube && {
       label: 'YouTube',
       icon: 'logo-youtube' as const,
       iconColor: '#ef4444',
-      onPress: () => Linking.openURL(`https://youtube.com/@${profile.youtube}`),
+      onPress: () => openUrl(`https://youtube.com/@${profile.youtube}`),
     },
     profile?.website && {
       label: 'Website',
       icon: 'link-outline' as const,
       iconColor: '#3b82f6',
       onPress: () =>
-        Linking.openURL(String(profile.website).startsWith('http') ? profile.website : `https://${profile.website}`),
+        openUrl(String(profile.website).startsWith('http') ? profile.website : `https://${profile.website}`),
     },
   ].filter(Boolean) as ActionSheetOption[];
 

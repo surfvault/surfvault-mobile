@@ -467,7 +467,7 @@ export default function SettingsScreen() {
         {/* System */}
         <SectionTitle c={c}>System</SectionTitle>
         <Card c={c}>
-          <LinkRow c={c} first label="Open device settings" icon="phone-portrait-outline" onPress={() => Linking.openSettings()} />
+          <LinkRow c={c} first label="Open device settings" icon="phone-portrait-outline" onPress={() => Linking.openSettings().catch(() => {})} />
         </Card>
         <Text style={[styles.footnote, { color: c.muted }]}>
           Manage OS-level permissions (notifications, photos, location) in the iOS Settings app.

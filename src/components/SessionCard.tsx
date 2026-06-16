@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, Share, useColorScheme, FlatList } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, Platform, Alert, useColorScheme, FlatList } from 'react-native';
+import { safeShare } from '../helpers/share';
 import type { ViewToken, LayoutChangeEvent, GestureResponderEvent } from 'react-native';
 import { Image } from 'expo-image';
 import AutoplayVideo from './AutoplayVideo';
@@ -335,7 +336,7 @@ export default function SessionCard({ session, hidePhotographer = false, showVie
       icon: 'share-outline',
       onPress: () => {
         const shareUrl = `https://share.surf-vault.com/s/${sessionId}`;
-        Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+        safeShare(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
       },
     }],
   });

@@ -9,7 +9,6 @@ import {
   useColorScheme,
   Alert,
   StyleSheet,
-  Share,
   Platform,
   ScrollView,
   TextInput,
@@ -21,6 +20,7 @@ import {
   Switch,
   Linking,
 } from 'react-native';
+import { safeShare } from '../../src/helpers/share';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
@@ -727,7 +727,7 @@ export default function SessionDetailScreen() {
       'Turn on notifications in Settings to get alerts when your request is approved and when photographers you follow post new sessions.',
       [
         { text: 'Not Now', style: 'cancel' },
-        { text: 'Open Settings', onPress: () => Linking.openSettings() },
+        { text: 'Open Settings', onPress: () => Linking.openSettings().catch(() => {}) },
       ],
     );
   }, [registerPushTokenNow]);
@@ -1025,7 +1025,7 @@ export default function SessionDetailScreen() {
     const activeGroup = groups.find((g: any) => g.id === activeGroupId);
     const query = activeGroup ? `?group=${encodeURIComponent(activeGroup.name)}` : '';
     const shareUrl = `https://share.surf-vault.com/s/${session.id}${query}`;
-    await Share.share(
+    await safeShare(
       Platform.OS === 'ios'
         ? { url: shareUrl }
         : { message: shareUrl }
@@ -1050,12 +1050,19 @@ export default function SessionDetailScreen() {
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images', 'videos'],
-      allowsMultipleSelection: true,
-      quality: 0.95,
-      exif: true,
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images', 'videos'],
+        allowsMultipleSelection: true,
+        quality: 0.95,
+        exif: true,
+      });
+    } catch (err) {
+      console.error('Failed to open photos:', err);
+      Alert.alert('Could not open photos', 'Something went wrong opening your library. Please try again.');
+      return;
+    }
 
     if (result.canceled || result.assets.length === 0) return;
 

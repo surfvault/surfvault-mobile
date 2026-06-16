@@ -224,6 +224,9 @@ function SessionOrBoardCreate() {
           return [...prev, ...unique];
         });
       }
+    } catch (err) {
+      console.error('Failed to pick photos:', err);
+      Alert.alert('Could not open photos', 'Something went wrong opening your library. Please try again.');
     } finally {
       clearTimeout(loaderTimer);
       setIsImporting(false);

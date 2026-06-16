@@ -118,27 +118,38 @@ export default function OnboardingScreen() {
 
   // --- Picture step ---
   const handlePickPicture = useCallback(async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      if (ImageManipulator?.manipulateAsync) {
-        const manipulated = await ImageManipulator.manipulateAsync(
-          asset.uri,
-          [{ resize: { width: 512, height: 512 } }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat?.JPEG ?? 'jpeg' }
-        );
-        setProfilePicUri(manipulated.uri);
-        setProfilePicFile(manipulated);
-      } else {
-        setProfilePicUri(asset.uri);
-        setProfilePicFile({ uri: asset.uri });
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow access to your photo library.');
+        return;
       }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        if (ImageManipulator?.manipulateAsync) {
+          const manipulated = await ImageManipulator.manipulateAsync(
+            asset.uri,
+            [{ resize: { width: 512, height: 512 } }],
+            { compress: 0.8, format: ImageManipulator.SaveFormat?.JPEG ?? 'jpeg' }
+          );
+          setProfilePicUri(manipulated.uri);
+          setProfilePicFile(manipulated);
+        } else {
+          setProfilePicUri(asset.uri);
+          setProfilePicFile({ uri: asset.uri });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to pick profile picture:', err);
+      Alert.alert('Could not pick photo', 'Something went wrong opening your photos. Please try again.');
     }
   }, []);
 

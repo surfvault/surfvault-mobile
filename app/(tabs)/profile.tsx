@@ -13,9 +13,9 @@ import {
   ActivityIndicator,
   Keyboard,
   Dimensions,
-  Share,
   Alert,
 } from 'react-native';
+import { safeShare } from '../../src/helpers/share';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useNavigation } from 'expo-router';
 import { useDispatch } from 'react-redux';
@@ -564,7 +564,7 @@ export default function ProfileScreen() {
           icon: 'share-outline',
           onPress: () => {
             const shareUrl = `https://app.surf-vault.com/${user?.handle}`;
-            Share.share(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
+            safeShare(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
           },
         },
         {
@@ -657,7 +657,7 @@ export default function ProfileScreen() {
           icon: 'share-outline' as const,
           onPress: () => {
             const sid = sessionSheetItem.session_id ?? sessionSheetItem.id;
-            Share.share(Platform.OS === 'ios' ? { url: `https://share.surf-vault.com/s/${sid}` } : { message: `https://share.surf-vault.com/s/${sid}` });
+            safeShare(Platform.OS === 'ios' ? { url: `https://share.surf-vault.com/s/${sid}` } : { message: `https://share.surf-vault.com/s/${sid}` });
           },
         },
         ...(sessionSheetItem.surf_break_is_favorited != null ? [{
