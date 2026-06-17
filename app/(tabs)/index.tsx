@@ -211,7 +211,10 @@ export default function HomeScreen() {
   const nearbyLat = manualAnchor?.lat ?? breakLat ?? userLat ?? coords?.lat ?? null;
   const nearbyLon = manualAnchor?.lon ?? breakLon ?? userLon ?? coords?.lon ?? null;
   const hasNearbyAnchor = nearbyLat != null && nearbyLon != null;
-  const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
+  // `currentData` (not `data`): clears the instant the location/anchor changes
+  // so the nearby rails fall back to skeletons instead of showing the previous
+  // location's stale breaks/sessions/etc. while the new ones load.
+  const { currentData: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
     { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, radiusKm: nearbyPrefs.breaksKm },
     // Runs on SurfVault (rails) AND Boardroom — keeps `anchorBreakId` resolving
     // to the nearest break on both so Boardroom's region filter is consistent
@@ -396,7 +399,10 @@ export default function HomeScreen() {
   const { data: sessionsData, currentData: sessionsCurrentData, isLoading, isFetching, refetch: refetchSessions } = useGetLatestSessionsQuery(
     {
       userId: user?.id,
-      limit: 10,
+      // 12 to match web's Nearby Sessions rail (which fetches limit:12). Also
+      // the page size for the vertical Discover/Following/Favorites feeds, which
+      // paginate via continuationToken — a slightly larger page is harmless.
+      limit: 12,
       continuationToken,
       feed: feedQueryArg,
       groupByBreakDate: useGroupedFeed,
@@ -624,7 +630,7 @@ export default function HomeScreen() {
 
   // Nearby photographers — anchored on the same resolved nearby point as the
   // breaks query above (which lives higher up so sessions can scope to it).
-  const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
+  const { currentData: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
     { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id, radiusKm: nearbyPrefs.photographersKm },
     { skip: !hasNearbyAnchor || !isSurfVault || (isAuthenticated && !user?.id) }
   );
@@ -656,7 +662,7 @@ export default function HomeScreen() {
   // Mobile has no sidebar rail, so we pull ALL eligible ads (no placement filter)
   // and render them all as post-style cards in the feed. This keeps "sidebar"
   // inventory from being wasted on mobile, which is where most traffic lands.
-  const { data: adsData } = useGetAdsQuery({
+  const { currentData: adsData } = useGetAdsQuery({
     feed: true,
     lat: hasCoords && userLat != null ? userLat : undefined,
     lon: hasCoords && userLon != null ? userLon : undefined,
@@ -709,7 +715,7 @@ export default function HomeScreen() {
   // location swaps the shaper set (or empties it). NOTE: deliberately NOT
   // getBoardroomShapers — that returns ALL shapers globally, just re-sorted by
   // distance, so the rail never visibly changed when the location moved.
-  const { data: surfvaultShapersData } = useGetShapersForSurfBreakQuery(
+  const { currentData: surfvaultShapersData } = useGetShapersForSurfBreakQuery(
     { breakId: anchorBreakId as string, limit: 20 },
     { skip: !isSurfVault || !anchorBreakId }
   );

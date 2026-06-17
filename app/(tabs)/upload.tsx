@@ -68,6 +68,14 @@ import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photo
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
+// M:SS for the clip-preview duration badge.
+const formatClipDuration = (seconds: number): string => {
+  const total = Math.max(0, Math.round(seconds));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+
 export default function CreateSessionScreen() {
   const { user } = useUser();
 
@@ -654,18 +662,36 @@ function SessionOrBoardCreate() {
           {/* Preview grid */}
           {files.length > 0 && (
             <View style={styles.previewGrid}>
-              {files.map((file, index) => (
-                <View key={`${file.name}_${index}`} style={styles.previewItem}>
-                  <Image
-                    source={{ uri: file.uri }}
-                    style={styles.previewImage}
-                    contentFit="cover"
-                  />
-                  <Pressable onPress={() => removeFile(index)} style={styles.removeBtn}>
-                    <Ionicons name="close-circle" size={20} color="#fff" />
-                  </Pressable>
-                </View>
-              ))}
+              {files.map((file, index) => {
+                // expo-image can't render a video URI as a still, so clips would
+                // show a blank tile. Detect them and render a play badge + the
+                // duration instead so the user can see the clip was picked.
+                const isVideo =
+                  file.durationSeconds != null || (file.type ?? '').startsWith('video');
+                return (
+                  <View key={`${file.name}_${index}`} style={styles.previewItem}>
+                    {isVideo ? (
+                      <View style={styles.previewVideo}>
+                        <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.92)" />
+                        {file.durationSeconds != null && (
+                          <Text style={styles.previewDuration}>
+                            {formatClipDuration(file.durationSeconds)}
+                          </Text>
+                        )}
+                      </View>
+                    ) : (
+                      <Image
+                        source={{ uri: file.uri }}
+                        style={styles.previewImage}
+                        contentFit="cover"
+                      />
+                    )}
+                    <Pressable onPress={() => removeFile(index)} style={styles.removeBtn}>
+                      <Ionicons name="close-circle" size={20} color="#fff" />
+                    </Pressable>
+                  </View>
+                );
+              })}
             </View>
           )}
         </View>
@@ -836,6 +862,16 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: '100%', height: '100%',
+  },
+  previewVideo: {
+    width: '100%', height: '100%', backgroundColor: '#1f2937',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  previewDuration: {
+    position: 'absolute', bottom: 4, right: 4,
+    color: '#fff', fontSize: 10, fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 4, paddingVertical: 1,
+    borderRadius: 4, overflow: 'hidden',
   },
   removeBtn: {
     position: 'absolute', top: 4, right: 4,

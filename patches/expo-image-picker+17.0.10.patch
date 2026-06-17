@@ -1,0 +1,131 @@
+diff --git a/node_modules/expo-image-picker/ios/MediaHandler.swift b/node_modules/expo-image-picker/ios/MediaHandler.swift
+index 6e4fbe1..2b32357 100644
+--- a/node_modules/expo-image-picker/ios/MediaHandler.swift
++++ b/node_modules/expo-image-picker/ios/MediaHandler.swift
+@@ -27,28 +27,39 @@ internal struct MediaHandler {
+ 
+   internal func handleMultipleMedia(_ selection: [PHPickerResult]) async throws -> [AssetInfo] {
+     // TODO: (@hirbod): Use withThrowingTaskGroup instead of asyncMap once iOS 15 support is dropped
+-    return try await asyncMap(selection) { selectedItem in
+-      let itemProvider = selectedItem.itemProvider
++    // Process each selected item independently and skip any that fail to load
++    // (e.g. an iCloud-offloaded asset that can't be downloaded) instead of
++    // rejecting the ENTIRE selection. Previously a single bad item threw out of
++    // asyncMap and dropped every photo/clip the user picked. Returning the
++    // assets that did succeed is far better UX than failing the whole batch.
++    let results: [AssetInfo?] = try await asyncMap(selection) { selectedItem in
++      do {
++        let itemProvider = selectedItem.itemProvider
++
++        if itemProvider.canLoadObject(ofClass: PHLivePhoto.self) && options.mediaTypes.contains(.livePhotos) {
++          return try await handleLivePhoto(from: selectedItem)
++        }
++        if itemProvider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
++          return try await handleImage(from: selectedItem)
++        }
++        if itemProvider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
++          return try await handleVideo(from: selectedItem)
++        }
+ 
+-      if itemProvider.canLoadObject(ofClass: PHLivePhoto.self) && options.mediaTypes.contains(.livePhotos) {
+-        return try await handleLivePhoto(from: selectedItem)
+-      }
+-      if itemProvider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+-        return try await handleImage(from: selectedItem)
+-      }
+-      if itemProvider.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+-        return try await handleVideo(from: selectedItem)
+-      }
++        // Fallback to capability-based detection when the provider reports no identifiers (iOS bug?).
++        // This can happen when files have been synced via AirDrop or iTunes and the file extension is not recognized.
++        if itemProvider.canLoadObject(ofClass: UIImage.self) {
++          return try await handleImage(from: selectedItem)
++        }
+ 
+-      // Fallback to capability-based detection when the provider reports no identifiers (iOS bug?).
+-      // This can happen when files have been synced via AirDrop or iTunes and the file extension is not recognized.
+-      if itemProvider.canLoadObject(ofClass: UIImage.self) {
+-        return try await handleImage(from: selectedItem)
++        // Default fallback – assume video when image cannot be loaded.
++        return try await handleVideo(from: selectedItem)
++      } catch {
++        log.error("ImagePicker: skipping an asset that failed to load: \(error.localizedDescription)")
++        return nil
+       }
+-
+-      // Default fallback – assume video when image cannot be loaded.
+-      return try await handleVideo(from: selectedItem)
+     }
++    return results.compactMap { $0 }
+   }
+ 
+   // MARK: - Image
+@@ -310,10 +321,14 @@ internal struct MediaHandler {
+         let fileExtension = getFileExtension(from: originalFilename)
+         let destinationUrl = try generateUrl(withFileExtension: fileExtension)
+ 
++        // Allow iCloud-offloaded videos to download instead of throwing.
++        let resourceOptions = PHAssetResourceRequestOptions()
++        resourceOptions.isNetworkAccessAllowed = true
++
+         try await PHAssetResourceManager.default().writeData(
+           for: resource,
+           toFile: destinationUrl,
+-          options: nil
++          options: resourceOptions
+         )
+ 
+         let mimeType = getMimeType(from: destinationUrl.pathExtension)
+@@ -382,23 +397,35 @@ internal struct MediaHandler {
+         let resources = PHAssetResource.assetResources(for: asset)
+         if let resource = resources.first(where: { $0.type == .fullSizeVideo }) ??
+           resources.first(where: { $0.type == .video }) {
+-          // Determine the file extension from the original filename so we preserve it (e.g. .MOV / .MP4)
+-          let originalFilename = resource.originalFilename
+-          let fileExtension = getFileExtension(from: originalFilename)
+-          let destinationUrl = try generateUrl(withFileExtension: fileExtension)
+-
+-          // Stream the resource into our cache directory. This API is asynchronous but doesn't require
+-          // a temporary file like `loadFileRepresentation`.
+-          try await PHAssetResourceManager.default().writeData(for: resource, toFile: destinationUrl, options: nil)
+-
+-          // Build and return the result using the helper.
+-          let mimeType = getMimeType(from: destinationUrl.pathExtension)
+-          return try buildVideoResult(
+-            for: destinationUrl,
+-            withName: originalFilename,
+-            mimeType: mimeType,
+-            assetId: assetId
+-          )
++          do {
++            // Determine the file extension from the original filename so we preserve it (e.g. .MOV / .MP4)
++            let originalFilename = resource.originalFilename
++            let fileExtension = getFileExtension(from: originalFilename)
++            let destinationUrl = try generateUrl(withFileExtension: fileExtension)
++
++            // Allow iCloud-offloaded videos ("Optimize iPhone Storage") to download
++            // instead of throwing — PHAssetResourceManager will NOT fetch from iCloud
++            // unless isNetworkAccessAllowed is set.
++            let resourceOptions = PHAssetResourceRequestOptions()
++            resourceOptions.isNetworkAccessAllowed = true
++
++            // Stream the resource into our cache directory. This API is asynchronous but doesn't require
++            // a temporary file like `loadFileRepresentation`.
++            try await PHAssetResourceManager.default().writeData(for: resource, toFile: destinationUrl, options: resourceOptions)
++
++            // Build and return the result using the helper.
++            let mimeType = getMimeType(from: destinationUrl.pathExtension)
++            return try buildVideoResult(
++              for: destinationUrl,
++              withName: originalFilename,
++              mimeType: mimeType,
++              assetId: assetId
++            )
++          } catch {
++            // Fast path failed (e.g. iCloud copy error) — DON'T throw, fall through to the
++            // slower loadFileRepresentation path below, which can also fetch from iCloud.
++            log.error("ImagePicker: fast-path video copy failed, falling back: \(error.localizedDescription)")
++          }
+         }
+       }
+       // If anything above fails we'll gracefully fall back to the existing (slower) path below.

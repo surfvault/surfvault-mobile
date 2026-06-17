@@ -85,7 +85,9 @@ function RailTile({
   topLeft?: React.ReactNode;
   topRight?: React.ReactNode;
   avatar?: React.ReactNode;
-  title: string;
+  // Optional: omitted entirely (no empty line) when falsy — e.g. break-page
+  // session tiles whose session has no name show just the subtitle.
+  title?: string;
   subtitle?: string | null;
   stackCount?: number;
   width?: number;
@@ -132,9 +134,11 @@ function RailTile({
         <View style={styles.footer}>
           {avatar ? <View style={{ marginRight: 7 }}>{avatar}</View> : null}
           <View style={{ flex: 1 }}>
-            <Text style={styles.title} numberOfLines={1}>
-              {title}
-            </Text>
+            {title ? (
+              <Text style={styles.title} numberOfLines={1}>
+                {title}
+              </Text>
+            ) : null}
             {subtitle ? (
               <Text style={styles.subtitle} numberOfLines={1}>
                 {subtitle}
@@ -215,7 +219,10 @@ export function SessionTile({
     const sid = (lead as any)?.session_id;
     if (sid) (onNavigate ?? trackedPush)(`/session/${sid}` as any);
   };
-  const onPress = showBreakInfo ? goToBreakOnDate : goToSession;
+  // Single session → open it directly. Multi-session day → open the break on
+  // that date (the full day's feed). Hidden-location days have no break to
+  // open, so always fall back to the lead session.
+  const onPress = sessions.length > 1 && showBreakInfo ? goToBreakOnDate : goToSession;
 
   if (!lead) return null;
 
@@ -267,29 +274,25 @@ export function SessionTile({
     </Chip>
   ) : null;
 
-  // Multi-photographer → overlapping avatar stack (up to 3 + "+N"). Single →
-  // one avatar with its type badge.
+  // Multi-photographer → lead avatar + a single "+N" pill (the count is also
+  // spelled out in the subtitle). Kept to two elements so the break-name title
+  // keeps its width on the narrow rail tile instead of being squeezed by a
+  // 3-deep stack. Single → one avatar with its type badge.
   const avatar = isMultiPhotographer ? (
     <View style={styles.avatarStack}>
-      {ordered.slice(0, 3).map((p, i) => (
-        <View key={p.handle} style={[styles.avatarRing, { marginLeft: i > 0 ? -10 : 0, zIndex: 3 - i }]}>
-          <UserAvatar uri={p.picture} name={p.name ?? p.handle} size={26} />
-        </View>
-      ))}
-      {ordered.length > 3 && (
-        <View style={[styles.avatarMore, { marginLeft: -10 }]}>
-          <Text style={styles.avatarMoreText}>+{ordered.length - 3}</Text>
-        </View>
-      )}
+      {/* +N sits BEHIND the lead avatar (avatar on top via zIndex) so it peeks
+          out to the right rather than covering the avatar. */}
+      <View style={[styles.avatarRing, { zIndex: 2 }]}>
+        <UserAvatar uri={ordered[0].picture} name={ordered[0].name ?? ordered[0].handle} size={26} />
+      </View>
+      <View style={[styles.avatarMore, { marginLeft: -10, zIndex: 1 }]}>
+        <Text style={styles.avatarMoreText}>+{ordered.length - 1}</Text>
+      </View>
     </View>
   ) : (
-    <UserAvatar
-      uri={lead0.user_picture}
-      name={lead0.user_name ?? lead0.user_handle}
-      size={26}
-      verified={lead0.user_verified}
-      userType={lead0.user_type}
-    />
+    // No type badge — the tile is already a session, so the photographer's
+    // camera badge is redundant and crowds the small avatar.
+    <UserAvatar uri={lead0.user_picture} name={lead0.user_name ?? lead0.user_handle} size={26} />
   );
 
   return (
@@ -308,6 +311,137 @@ export function SessionTile({
       style={style}
       videoUri={videoUri}
       active={isViewable}
+    />
+  );
+}
+
+// ──────────────── Break page: recent-session day tile ────────────────
+// Same-day sessions at this break are stacked into ONE tile (like home's
+// SessionTile), so a busy day reads as a single card with a depth-peek + an
+// albums count rather than N near-identical tiles. Title is the lead session's
+// NAME (blank when unset — the date is the top-left chip). Multi-session day →
+// tap opens that date in feed mode (`onOpenDate`); single session → opens it.
+export function BreakSessionTile({
+  sessions,
+  width,
+  style,
+  onOpenDate,
+  isViewable = false,
+}: {
+  sessions: any[];
+  width?: number;
+  style?: any;
+  onOpenDate?: (sessionDate: string) => void;
+  isViewable?: boolean;
+}) {
+  const trackedPush = useTrackedPush();
+  const lead = useMemo(() => sessions.find((s) => s?.thumbnail) || sessions[0], [sessions]);
+
+  // Distinct photographers, lead floated to the front — drives the avatar
+  // stack + the "@lead +N more" subtitle.
+  const ordered = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { handle: string; picture?: string; name?: string }[] = [];
+    const leadHandle = lead?.user_handle;
+    if (leadHandle) {
+      seen.add(leadHandle);
+      out.push({ handle: leadHandle, picture: lead?.user_picture, name: lead?.user_name });
+    }
+    for (const s of sessions) {
+      const h = s?.user_handle;
+      if (h && !seen.has(h)) {
+        seen.add(h);
+        out.push({ handle: h, picture: s?.user_picture, name: s?.user_name });
+      }
+    }
+    return out;
+  }, [sessions, lead]);
+
+  if (!lead) return null;
+
+  const sessionCount = sessions.length;
+  const isMultiSession = sessionCount > 1;
+  const isMultiPhotographer = ordered.length > 1;
+  const others = ordered.length - 1;
+  const subtitle = !lead.user_handle
+    ? null
+    : others === 0
+    ? `@${lead.user_handle}`
+    : `@${lead.user_handle} +${others} more`;
+
+  const vids = lead.video_count ?? 0;
+  const photos = Math.max(0, (lead.photo_count ?? 0) - vids);
+  const videoUri =
+    lead.thumbnail_media_type === 'video' && lead.thumbnail_preview_video_url
+      ? lead.thumbnail_preview_video_url
+      : null;
+
+  // Multi-session → session-count pill. Single → the lead's media count.
+  const topRight = isMultiSession ? (
+    <Chip>
+      <Ionicons name="albums-outline" size={10} color="#fff" />
+      <Text style={styles.chipText}>{sessionCount}</Text>
+    </Chip>
+  ) : photos > 0 || vids > 0 ? (
+    <Chip>
+      {photos > 0 && (
+        <>
+          <Ionicons name="images-outline" size={10} color="#fff" />
+          <Text style={styles.chipText}>{formatCount(photos)}</Text>
+        </>
+      )}
+      {photos > 0 && vids > 0 && <Text style={styles.chipText}> </Text>}
+      {vids > 0 && (
+        <>
+          <Ionicons name="videocam-outline" size={10} color="#fff" />
+          <Text style={styles.chipText}>{formatCount(vids)}</Text>
+        </>
+      )}
+    </Chip>
+  ) : null;
+
+  // Multi-photographer → lead avatar + a single "+N" pill. Single → one avatar
+  // (no type badge — the tile is already a session).
+  const avatar = isMultiPhotographer ? (
+    <View style={styles.avatarStack}>
+      {/* +N sits BEHIND the lead avatar (avatar on top via zIndex) so it peeks
+          out to the right rather than covering the avatar. */}
+      <View style={[styles.avatarRing, { zIndex: 2 }]}>
+        <UserAvatar uri={ordered[0].picture} name={ordered[0].name ?? ordered[0].handle} size={26} />
+      </View>
+      <View style={[styles.avatarMore, { marginLeft: -10, zIndex: 1 }]}>
+        <Text style={styles.avatarMoreText}>+{ordered.length - 1}</Text>
+      </View>
+    </View>
+  ) : (
+    <UserAvatar uri={lead.user_picture} name={lead.user_name ?? lead.user_handle} size={26} />
+  );
+
+  const onPress = () => {
+    if (isMultiSession && onOpenDate && lead.session_date) {
+      onOpenDate(String(lead.session_date).split('T')[0]);
+    } else {
+      const sid = lead.session_id ?? lead.id;
+      if (sid) trackedPush(`/session/${sid}` as any);
+    }
+  };
+
+  return (
+    <RailTile
+      onPress={onPress}
+      heroUri={lead.thumbnail}
+      videoUri={videoUri}
+      active={isViewable}
+      fallbackColor="#0c4a6e"
+      fallbackIcon={<Ionicons name="images-outline" size={28} color="#38bdf8" />}
+      topLeft={lead.session_date ? <Text style={styles.dateText}>{formatDate(lead.session_date)}</Text> : null}
+      topRight={topRight}
+      avatar={avatar}
+      title={lead.session_name ?? ''}
+      subtitle={subtitle}
+      stackCount={isMultiSession ? sessionCount : 0}
+      width={width}
+      style={style}
     />
   );
 }
@@ -346,7 +480,9 @@ export function ShaperTile({
           uri={shaper.picture}
           name={shaper.name ?? shaper.handle}
           size={26}
-          userType="shaper"
+          // Only badge verified shapers — unverified ones show a plain avatar
+          // (mirrors the Nearby Photographers rail's verified-only gating).
+          userType={shaper.verified ? 'shaper' : undefined}
           verified={!!shaper.verified}
         />
       }

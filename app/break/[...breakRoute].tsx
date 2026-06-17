@@ -3,6 +3,7 @@ import {
   View,
   Text,
   FlatList,
+  ScrollView,
   ActivityIndicator,
   Pressable,
   StyleSheet,
@@ -33,6 +34,7 @@ import SponsoredCard from '../../src/components/SponsoredCard';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
 import LocalsRail from '../../src/components/LocalsRail';
+import { BreakSessionTile, ShaperTile, BusinessTile } from '../../src/components/home/FeedTiles';
 import {
   // groupAdsByPartner intentionally not imported — Phase B retired
   // partner-level ad grouping; each ad is its own promo slot.
@@ -86,6 +88,11 @@ export default function SurfBreakDetailScreen() {
   });
   const [pickerDate, setPickerDate] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  // "See all" from the Recent Sessions rail enters feed mode without a date
+  // filter (all recent). A picked date also enters feed mode. Either way the
+  // page swaps the hub-of-rails for the vertical session feed.
+  const [seeAll, setSeeAll] = useState(false);
+  const feedMode = !!selectedDate || seeAll;
 
   const dateStr = selectedDate ? formatDateParam(selectedDate) : '';
 
@@ -277,18 +284,77 @@ export default function SurfBreakDetailScreen() {
     resetPagination();
   }, [pickerDate, resetPagination]);
 
-  const clearDate = useCallback(() => {
-    setSelectedDate(null);
+  // Chip ✕ in feed mode → return to the hub. Only the DATED path needs a
+  // reset/refetch: the undated "See all" feed shares the same `sessions` the
+  // hub's Recent rail reads, so wiping it would empty the hub until a refetch
+  // lands (and with no arg change, no refetch fires at all).
+  const exitFeedMode = useCallback(() => {
+    setSeeAll(false);
+    if (selectedDate) {
+      setSelectedDate(null);
+      resetPagination();
+    }
+  }, [selectedDate, resetPagination]);
+
+  // Hub rail: most-recent sessions for this break, grouped by day (same-day
+  // sessions stack into one tile) and capped — "See all" opens the full feed.
+  // Falls back to the query's current first page when the paged accumulator is
+  // momentarily empty (e.g. right after clearing a date, before the undated
+  // refetch effect repopulates `sessions`) so the rail never blanks. Map insert
+  // order preserves recency (sessions arrive most-recent first).
+  const recentSessionGroups = useMemo(() => {
+    const src = sessions.length ? sessions : initialSessions;
+    const byDate = new Map<string, any[]>();
+    for (const s of src) {
+      const d = String(s?.session_date ?? '').split('T')[0] || 'undated';
+      const list = byDate.get(d);
+      if (list) list.push(s);
+      else byDate.set(d, [s]);
+    }
+    return Array.from(byDate.entries())
+      .map(([date, list]) => ({ date, sessions: list }))
+      .slice(0, 12);
+  }, [sessions, initialSessions]);
+
+  // Tap a multi-session day tile → open that date in feed mode.
+  const handleOpenDate = useCallback((ymd: string) => {
+    const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(ymd);
+    if (!m) return;
+    setSelectedDate(new Date(+m[1], +m[2] - 1, +m[3], 12));
     resetPagination();
   }, [resetPagination]);
 
   const breakName = breakData?.name?.replaceAll('_', ' ') ?? surfBreak?.replaceAll('_', ' ') ?? '';
   const regionDisplay = breakData?.region?.replaceAll('_', ' ') ?? (region !== '0' ? region?.replaceAll('_', ' ') : '') ?? '';
   const countryDisplay = breakData?.country_code ?? country?.toUpperCase() ?? '';
+  // Title-cased region for sentence-style subtitles (stored region is uppercase,
+  // e.g. "FLORIDA"). The shapers feed is region-matched, so its subtitle names
+  // the region rather than a (nonexistent) radius.
+  const regionLabel = regionDisplay
+    ? regionDisplay.toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
+    : '';
 
   // Coordinates arrive as a JSONB { lat, lon } object (values may be strings).
   const heroLat = breakData?.coordinates?.lat != null ? parseFloat(String(breakData.coordinates.lat)) : null;
   const heroLon = breakData?.coordinates?.lon != null ? parseFloat(String(breakData.coordinates.lon)) : null;
+
+  const onDatePress = () => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); };
+  // Shared between the hub and feed-mode trees (only one renders at a time).
+  const heroNode = (
+    <BreakHero
+      breakName={breakName}
+      regionDisplay={regionDisplay}
+      countryDisplay={countryDisplay}
+      lat={heroLat}
+      lon={heroLon}
+      isDark={isDark}
+      topInset={insets.top}
+      feedMode={feedMode}
+      chipLabel={selectedDate ? formatDateLabel(selectedDate) : 'Recent'}
+      onDatePress={onDatePress}
+      onClearChip={exitFeedMode}
+    />
+  );
 
   return (
     <>
@@ -296,7 +362,7 @@ export default function SurfBreakDetailScreen() {
       <SafeAreaView style={[styles.container, { backgroundColor: isDark ? '#000000' : '#ffffff' }]} edges={[]}>
         {isLoading ? (
           <BreakSkeleton />
-        ) : (
+        ) : feedMode ? (
           <FlatList
             data={feedRows}
             keyExtractor={(row) => row.key}
@@ -323,25 +389,16 @@ export default function SurfBreakDetailScreen() {
             }}
             ListHeaderComponent={
               <View>
-                <BreakHero
-                  breakName={breakName}
-                  regionDisplay={regionDisplay}
-                  countryDisplay={countryDisplay}
-                  lat={heroLat}
-                  lon={heroLon}
-                  isDark={isDark}
-                  topInset={insets.top}
-                  selectedDate={selectedDate}
-                  dateLabel={selectedDate ? formatDateLabel(selectedDate) : ''}
-                  onDatePress={() => { setPickerDate(selectedDate ?? new Date()); setShowDatePicker(true); }}
-                  onClearDate={clearDate}
-                />
+                {heroNode}
                 {/* Negative margin tucks the content up into the hero's faded
-                    bottom so the page reads as one continuous surface. */}
+                    bottom so the page reads as one continuous surface. The
+                    secondary discovery rails live in the hub, not here — feed
+                    mode is the focused, comprehensive session list. */}
                 <View style={styles.belowHero}>
-                  {!selectedDate && <LocalsRail breakId={breakData?.id} />}
                   {feedRows.length > 0 && (
-                    <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Recent Sessions</Text>
+                    <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                      {selectedDate ? 'Sessions' : 'Recent sessions'}
+                    </Text>
                   )}
                 </View>
               </View>
@@ -389,6 +446,100 @@ export default function SurfBreakDetailScreen() {
               />
             }
           />
+        ) : (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor={isDark ? '#fff' : '#000'}
+                colors={[isDark ? '#ffffff' : '#000000']}
+                progressViewOffset={insets.top}
+              />
+            }
+          >
+            {heroNode}
+            <View style={styles.belowHero}>
+              <LocalsRail breakId={breakData?.id} />
+
+              {/* Recent Sessions — this break only, capped. The whole header row
+                  is tappable → opens the full vertical feed (no trailing tile,
+                  which read as "there's more" even on a single session). */}
+              {recentSessionGroups.length > 0 && (
+                <View style={styles.railSection}>
+                  <Pressable onPress={() => setSeeAll(true)} style={styles.railHeaderRow} hitSlop={8}>
+                    <Text style={[styles.railTitle, { color: isDark ? '#fff' : '#111827' }]}>Recent Sessions</Text>
+                    <Ionicons name="chevron-forward" size={26} color={isDark ? '#9ca3af' : '#6b7280'} />
+                  </Pressable>
+                  <FlatList
+                    horizontal
+                    data={recentSessionGroups}
+                    keyExtractor={(g: any) => String(g.date)}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.railContent}
+                    renderItem={({ item }) => (
+                      <BreakSessionTile sessions={item.sessions} onOpenDate={handleOpenDate} isViewable={screenFocused} />
+                    )}
+                  />
+                </View>
+              )}
+
+              {/* Shapers near this break */}
+              {breakShapers.length > 0 && (
+                <View style={styles.railSection}>
+                  <View style={styles.railHeaderRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.railTitle, { color: isDark ? '#fff' : '#111827' }]}>Local Shapers</Text>
+                      <Text style={[styles.railSubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                        {regionLabel ? `in ${regionLabel}` : 'near this break'}
+                      </Text>
+                    </View>
+                  </View>
+                  <FlatList
+                    horizontal
+                    data={breakShapers}
+                    keyExtractor={(s: any) => String(s.id ?? s.handle)}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.railContent}
+                    renderItem={({ item }) => <ShaperTile shaper={item} isViewable={screenFocused} />}
+                  />
+                </View>
+              )}
+
+              {/* Local business (paid ads scoped to this break) */}
+              {breakAds.length > 0 && (
+                <View style={styles.railSection}>
+                  <View style={styles.railHeaderRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.railTitle, { color: isDark ? '#fff' : '#111827' }]}>Local Business</Text>
+                      <Text style={[styles.railSubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Businesses near this break</Text>
+                    </View>
+                  </View>
+                  <FlatList
+                    horizontal
+                    data={breakAds}
+                    keyExtractor={(a: any) => String(a.id)}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.railContent}
+                    renderItem={({ item }) => (
+                      <BusinessTile ad={item} surfBreakId={breakData?.id} isViewable={screenFocused} />
+                    )}
+                  />
+                </View>
+              )}
+
+              {recentSessionGroups.length === 0 && breakShapers.length === 0 && breakAds.length === 0 && (
+                <View style={styles.emptyWrap}>
+                  <Ionicons name="camera-outline" size={48} color={isDark ? '#374151' : '#d1d5db'} />
+                  <Text style={[styles.emptyTitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                    {`Be the first to share ${breakName}`}
+                  </Text>
+                </View>
+              )}
+              <View style={{ height: 24 }} />
+            </View>
+          </ScrollView>
         )}
         {/* Floating controls — pinned over the hero map */}
         <View pointerEvents="box-none" style={[styles.controls, { paddingTop: insets.top + 6 }]}>
@@ -431,6 +582,18 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   belowHero: { marginTop: -28 },
   sectionTitle: { fontSize: 20, fontWeight: '700', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 6 },
+  // Hub rails
+  railSection: { marginTop: 18 },
+  railHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  railTitle: { fontSize: 18, fontWeight: '700' },
+  railSubtitle: { fontSize: 13, marginTop: 2 },
+  railContent: { paddingHorizontal: 12 },
   controls: {
     position: 'absolute',
     top: 0,

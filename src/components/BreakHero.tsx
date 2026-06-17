@@ -26,10 +26,13 @@ interface BreakHeroProps {
   lon: number | null;
   isDark: boolean;
   topInset: number;
-  selectedDate: Date | null;
-  dateLabel: string;
+  // Feed mode = a date is selected OR the user tapped "See all". The date pill
+  // becomes a removable chip; tapping it reopens the picker, the ✕ exits back
+  // to the hub. Hub mode shows the plain "Any date" picker button.
+  feedMode: boolean;
+  chipLabel: string;
   onDatePress: () => void;
-  onClearDate: () => void;
+  onClearChip: () => void;
 }
 
 function BreakHero({
@@ -40,10 +43,10 @@ function BreakHero({
   lon,
   isDark,
   topInset,
-  selectedDate,
-  dateLabel,
+  feedMode,
+  chipLabel,
   onDatePress,
-  onClearDate,
+  onClearChip,
 }: BreakHeroProps) {
   const hasCoords = lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon);
   const heroHeight = topInset + HERO_BODY;
@@ -137,20 +140,20 @@ function BreakHero({
         </View>
 
         <View style={styles.dateWrap}>
-          {selectedDate && (
-            <Pressable onPress={onClearDate} hitSlop={8} style={styles.clearBtn}>
-              <Ionicons name="close" size={16} color="#fff" />
-            </Pressable>
-          )}
           <Pressable
             onPress={onDatePress}
             style={({ pressed }) => [styles.dateBtn, { opacity: pressed ? 0.7 : 1 }]}
           >
             <View style={styles.dateInner}>
               <Ionicons name="calendar-outline" size={15} color="#fff" />
-              <Text style={styles.dateBtnText}>{selectedDate ? dateLabel : 'Any date'}</Text>
+              <Text style={styles.dateBtnText}>{feedMode ? chipLabel : 'Any date'}</Text>
             </View>
           </Pressable>
+          {feedMode && (
+            <Pressable onPress={onClearChip} hitSlop={8} style={styles.clearBtn}>
+              <Ionicons name="close" size={16} color="#fff" />
+            </Pressable>
+          )}
         </View>
       </View>
     </View>

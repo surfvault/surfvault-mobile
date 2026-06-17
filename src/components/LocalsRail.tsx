@@ -25,10 +25,10 @@ interface Props {
   breakId?: string | null;
 }
 
-// Combined photographers + shapers near this break. The two types are
-// interleaved + relevance-sorted server-side (see getLocalsAtBreak); the
-// avatar's type badge (camera vs board) distinguishes them, so no per-type
-// section header is needed.
+// Photographers near this break. The break page now has a dedicated Shapers
+// rail, so shapers are filtered out here to avoid showing them twice — this
+// rail is photographers-only. (The server endpoint still returns both types;
+// the filter is client-side.)
 export default function LocalsRail({ breakId }: Props) {
   const trackedPush = useTrackedPush();
   const isDark = useColorScheme() === 'dark';
@@ -41,12 +41,12 @@ export default function LocalsRail({ breakId }: Props) {
     { skip: !breakId || (isAuthenticated && !user?.id) }
   );
 
-  const locals = data?.results?.locals ?? [];
+  const locals = (data?.results?.locals ?? []).filter((p: any) => p.user_type !== 'shaper');
   if (locals.length === 0) return null;
 
   return (
     <View>
-      <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Locals</Text>
+      <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Local Photographers</Text>
       <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
         within {formatDistance(LOCALS_RADIUS_KM, units)} of this break
       </Text>
@@ -62,7 +62,10 @@ export default function LocalsRail({ breakId }: Props) {
               uri={p.picture}
               name={p.name ?? p.handle}
               size={AVATAR_SIZE}
-              userType={p.user_type}
+              // Only badge verified photographers — the rail is photographers-
+              // only now, so the camera badge is just verified-status signal
+              // (mirrors the Nearby Photographers rail's gating).
+              userType={p.verified ? p.user_type : undefined}
               verified={!!p.verified}
               active={!!p.active}
               hasStatusNote={isNoteActive(p.status_note_set_at) && !!p.status_note}
@@ -78,7 +81,7 @@ export default function LocalsRail({ breakId }: Props) {
 }
 
 const styles = StyleSheet.create({
-  sectionTitle: { fontSize: 20, fontWeight: '700', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 2 },
+  sectionTitle: { fontSize: 18, fontWeight: '700', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 2 },
   subtitle: { fontSize: 13, paddingHorizontal: 16, paddingBottom: 2 },
   wrap: { flexGrow: 0 },
   scroll: { paddingHorizontal: 8, paddingTop: 8, paddingBottom: 8, gap: 8 },
