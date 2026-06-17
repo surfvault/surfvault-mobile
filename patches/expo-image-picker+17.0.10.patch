@@ -1,3 +1,47 @@
+diff --git a/node_modules/expo-image-picker/android/src/main/java/expo/modules/imagepicker/MediaHandler.kt b/node_modules/expo-image-picker/android/src/main/java/expo/modules/imagepicker/MediaHandler.kt
+index 22076ad..76a4c74 100644
+--- a/node_modules/expo-image-picker/android/src/main/java/expo/modules/imagepicker/MediaHandler.kt
++++ b/node_modules/expo-image-picker/android/src/main/java/expo/modules/imagepicker/MediaHandler.kt
+@@ -5,6 +5,7 @@ import android.media.MediaMetadataRetriever
+ import android.net.Uri
+ import android.provider.OpenableColumns
+ import android.util.Base64
++import android.util.Log
+ import androidx.core.net.toUri
+ import expo.modules.imagepicker.contracts.MediaList
+ import expo.modules.imagepicker.exporters.CompressionImageExporter
+@@ -23,14 +24,23 @@ internal class MediaHandler(
+     bareResult: MediaList,
+     options: ImagePickerOptions
+   ): ImagePickerResponse {
+-    val results = bareResult.map { (mediaType, uri) ->
+-      when (mediaType) {
+-        MediaType.VIDEO -> handleVideo(uri)
+-        MediaType.IMAGE -> handleImage(uri, options)
+-        null -> ImagePickerAsset(
+-          type = null,
+-          uri = uri.toString()
+-        )
++    // Process each selected item independently and skip any that fail (e.g. a
++    // cloud-backed asset that can't be read, or a video whose metadata can't be
++    // extracted) instead of rejecting the ENTIRE selection. Previously a single
++    // bad item threw out of map() and dropped every photo/clip the user picked.
++    val results = bareResult.mapNotNull { (mediaType, uri) ->
++      try {
++        when (mediaType) {
++          MediaType.VIDEO -> handleVideo(uri)
++          MediaType.IMAGE -> handleImage(uri, options)
++          null -> ImagePickerAsset(
++            type = null,
++            uri = uri.toString()
++          )
++        }
++      } catch (e: Exception) {
++        Log.e("ExpoImagePicker", "Skipping an asset that failed to load: ${e.message}", e)
++        null
+       }
+     }
+ 
 diff --git a/node_modules/expo-image-picker/ios/MediaHandler.swift b/node_modules/expo-image-picker/ios/MediaHandler.swift
 index 6e4fbe1..2b32357 100644
 --- a/node_modules/expo-image-picker/ios/MediaHandler.swift
