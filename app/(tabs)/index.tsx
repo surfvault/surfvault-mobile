@@ -56,6 +56,8 @@ import {
   BusinessTile,
 } from '../../src/components/home/FeedTiles';
 import ExploreGrid from '../../src/components/home/ExploreGrid';
+import BoardsExploreGrid from '../../src/components/home/BoardsExploreGrid';
+import BoardIcon from '../../src/components/BoardIcon';
 import RailSkeleton from '../../src/components/home/RailSkeleton';
 import {
   // groupAdsByPartner intentionally not imported — Phase B retired
@@ -82,6 +84,17 @@ const FEED_OPTIONS: { value: FeedType; label: string; description: string; comin
   { value: 'surfvault', label: 'SurfVault', description: 'Sessions, breaks & shapers near you' },
   { value: 'following', label: 'Following', description: 'Sessions from people you follow' },
   { value: 'favorites', label: 'Favorites', description: 'Sessions at your favorited breaks' },
+];
+
+// Quick filter pills below the Discover search bar. The first three re-sort the
+// same session grid; 'boards' swaps in a location-independent grid of shaper
+// boards from across the vault.
+type ExploreTab = 'latest' | 'recent' | 'popular' | 'boards';
+const EXPLORE_TABS: { value: ExploreTab; label: string; icon?: string }[] = [
+  { value: 'latest', label: 'New' },
+  { value: 'recent', label: 'Recent' },
+  { value: 'popular', label: 'Popular', icon: 'flame' },
+  { value: 'boards', label: 'Boards' },
 ];
 
 // Module-level so the offset survives any remount (tab detach/attach cycles).
@@ -573,6 +586,9 @@ export default function HomeScreen() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchType, setSearchType] = useState<SearchType>('surf_break');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  // Active Explore pill — three session sorts + a boards mode. Driven by the
+  // pill row below the Discover search bar (browse state only).
+  const [exploreTab, setExploreTab] = useState<ExploreTab>('latest');
   const searchInputRef = useRef<TextInput>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1185,7 +1201,58 @@ export default function HomeScreen() {
           )}
         </ScrollView>
         ) : (
-          <ExploreGrid onNavigate={navigateAndClose} />
+          <View style={styles.flex}>
+            {/* Quick filter pills below the search bar — New / Recent / Popular
+                re-sort the session grid; Boards swaps in the shaper-board grid.
+                Persistent above the scrolling content. */}
+            <View style={styles.exploreSortRow}>
+              {EXPLORE_TABS.map((tab) => {
+                const active = exploreTab === tab.value;
+                return (
+                  <Pressable
+                    key={tab.value}
+                    onPress={() => setExploreTab(tab.value)}
+                    style={[
+                      styles.exploreSortChip,
+                      {
+                        backgroundColor: active ? '#0ea5e9' : 'transparent',
+                        borderColor: active ? '#0ea5e9' : isDark ? '#374151' : '#e5e7eb',
+                      },
+                    ]}
+                  >
+                    {tab.value === 'boards' ? (
+                      <BoardIcon
+                        size={15}
+                        color={active ? '#ffffff' : isDark ? '#9ca3af' : '#6b7280'}
+                        style={{ marginRight: 4 }}
+                      />
+                    ) : tab.icon ? (
+                      <Ionicons
+                        name={tab.icon as any}
+                        size={13}
+                        color={active ? '#ffffff' : isDark ? '#9ca3af' : '#6b7280'}
+                        style={{ marginRight: 4 }}
+                      />
+                    ) : null}
+                    <Text
+                      style={[
+                        styles.exploreSortText,
+                        { color: active ? '#ffffff' : isDark ? '#9ca3af' : '#4b5563' },
+                        active && { fontWeight: '600' },
+                      ]}
+                    >
+                      {tab.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {exploreTab === 'boards' ? (
+              <BoardsExploreGrid onNavigate={navigateAndClose} />
+            ) : (
+              <ExploreGrid onNavigate={navigateAndClose} sort={exploreTab} />
+            )}
+          </View>
         )}
       </View>
     );
@@ -1796,6 +1863,22 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   tagText: { fontSize: 13 },
+  exploreSortRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 10,
+  },
+  exploreSortChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  exploreSortText: { fontSize: 13 },
   resultsWrap: { paddingHorizontal: 16 },
   resultRow: {
     flexDirection: 'row',

@@ -69,6 +69,7 @@ const surfApi = rootApi.injectEndpoints({
         feed,
         groupByBreakDate,
         surfBreakIds,
+        sort,
       }: {
         userId?: string;
         country?: string;
@@ -83,10 +84,13 @@ const surfApi = rootApi.injectEndpoints({
         // scoped to these breaks server-side (= ANY(...)). Drives the
         // SurfVault landing feed (mirrors web Home).
         surfBreakIds?: string[];
+        // Explore grid sort pills: 'popular' = all-time views, 'recent' =
+        // session date. Default/omitted = upload recency.
+        sort?: 'latest' | 'popular' | 'recent';
       }) => {
         const ids = Array.isArray(surfBreakIds) && surfBreakIds.length ? surfBreakIds.join(',') : '';
         return {
-          url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}&groupByBreakDate=${groupByBreakDate ? 'true' : ''}&surfBreakIds=${ids}`,
+          url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}&groupByBreakDate=${groupByBreakDate ? 'true' : ''}&surfBreakIds=${ids}&sort=${sort && sort !== 'latest' ? sort : ''}`,
           method: 'GET',
         };
       },

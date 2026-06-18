@@ -5,6 +5,7 @@ import {
   FlatList,
   ActivityIndicator,
   Animated,
+  RefreshControl,
   useColorScheme,
   useWindowDimensions,
   StyleSheet,
@@ -86,12 +87,17 @@ function ExploreGridSkeleton({ cellW }: { cellW: number }) {
 export default function ExploreGrid({
   onNavigate,
   ListHeaderComponent,
+  sort = 'latest',
 }: {
   onNavigate: (path: string) => void;
   ListHeaderComponent?: React.ReactElement | null;
+  // Re-ranks the grid server-side: 'popular' = all-time views, 'recent' =
+  // session date, 'latest' = upload recency.
+  sort?: 'latest' | 'popular' | 'recent';
 }) {
   const { user } = useUser();
   const { isAuthenticated } = useAuth();
+  const isDark = useColorScheme() === 'dark';
   const { width } = useWindowDimensions();
   const cellW = Math.floor((width - PAD * 2 - GAP) / 2);
 
@@ -100,14 +106,26 @@ export default function ExploreGrid({
 
   const [groups, setGroups] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const seenRef = useRef(new Set<string>());
   const hasMoreRef = useRef(false);
   const fetchingMoreRef = useRef(false);
 
-  const { data, currentData, isFetching } = useGetLatestSessionsQuery(
-    { userId: user?.id, limit: 12, continuationToken, groupByBreakDate: true },
+  const { data, currentData, isFetching, refetch } = useGetLatestSessionsQuery(
+    { userId: user?.id, limit: 12, continuationToken, groupByBreakDate: true, sort },
     { skip: isAuthenticated && !user?.id }
   );
+
+  // Switching sort is a fresh feed: drop the accumulator + cursor so the grid
+  // rebuilds from page 1 of the new ordering. Changing `sort` also re-fires the
+  // query (it's a query arg), so the accumulator effect below repopulates.
+  useEffect(() => {
+    seenRef.current = new Set();
+    hasMoreRef.current = false;
+    fetchingMoreRef.current = false;
+    setGroups([]);
+    setContinuationToken('');
+  }, [sort]);
   const { data: adsData } = useGetAdsQuery({
     feed: true,
     lat: hasCoords && lat != null ? lat : undefined,
@@ -140,6 +158,39 @@ export default function ExploreGrid({
     fetchingMoreRef.current = true;
     setContinuationToken(next);
   }, [data]);
+
+  // Pull-to-refresh: rebuild the grid from page 1. If we're already at page 1
+  // (token === ''), the args don't change so the accumulator effect won't
+  // re-run — rebuild directly from the forced refetch. Otherwise reset the
+  // cursor and let the effect repopulate from the re-fired query.
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      if (continuationToken !== '') {
+        seenRef.current = new Set();
+        hasMoreRef.current = false;
+        fetchingMoreRef.current = false;
+        setGroups([]);
+        setContinuationToken('');
+        await refetch();
+      } else {
+        const res: any = await refetch().unwrap();
+        const incoming = Array.isArray(res?.results?.groups) ? res.results.groups : [];
+        seenRef.current = new Set();
+        const fresh: any[] = [];
+        for (const g of incoming) {
+          const key = `${g.session_date}|${g.group_key}`;
+          if (!key || seenRef.current.has(key)) continue;
+          seenRef.current.add(key);
+          fresh.push(g);
+        }
+        hasMoreRef.current = Boolean(res?.results?.continuationToken);
+        fetchingMoreRef.current = false;
+        setGroups(fresh);
+      }
+    } catch {}
+    setRefreshing(false);
+  }, [continuationToken, refetch]);
 
   const ads = adsData?.results?.ads ?? [];
   const shapers = shapersData?.results?.shapers ?? [];
@@ -237,6 +288,13 @@ export default function ExploreGrid({
       viewabilityConfig={viewabilityConfig}
       onEndReached={loadMore}
       onEndReachedThreshold={0.6}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          tintColor={isDark ? '#9ca3af' : '#6b7280'}
+        />
+      }
       ListEmptyComponent={
         stillLoading ? (
           <ExploreGridSkeleton cellW={cellW} />
