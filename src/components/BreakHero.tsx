@@ -33,6 +33,10 @@ interface BreakHeroProps {
   chipLabel: string;
   onDatePress: () => void;
   onClearChip: () => void;
+  // When provided, a big "+" CTA shows across from the title (above the date)
+  // that opens the create-session flow with this break preselected. Omitted for
+  // viewers who can't upload sessions here (shapers/advertisers).
+  onUploadPress?: () => void;
 }
 
 function BreakHero({
@@ -47,6 +51,7 @@ function BreakHero({
   chipLabel,
   onDatePress,
   onClearChip,
+  onUploadPress,
 }: BreakHeroProps) {
   const hasCoords = lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon);
   const heroHeight = topInset + HERO_BODY;
@@ -139,21 +144,32 @@ function BreakHero({
           )}
         </View>
 
-        <View style={styles.dateWrap}>
-          <Pressable
-            onPress={onDatePress}
-            style={({ pressed }) => [styles.dateBtn, { opacity: pressed ? 0.7 : 1 }]}
-          >
-            <View style={styles.dateInner}>
-              <Ionicons name="calendar-outline" size={15} color="#fff" />
-              <Text style={styles.dateBtnText}>{feedMode ? chipLabel : 'Any date'}</Text>
-            </View>
-          </Pressable>
-          {feedMode && (
-            <Pressable onPress={onClearChip} hitSlop={8} style={styles.clearBtn}>
-              <Ionicons name="close" size={16} color="#fff" />
+        <View style={styles.rightCol}>
+          {onUploadPress && (
+            <Pressable
+              onPress={onUploadPress}
+              style={({ pressed }) => [styles.uploadBtn, { opacity: pressed ? 0.85 : 1 }]}
+              accessibilityLabel="Share a session at this break"
+            >
+              <Ionicons name="add" size={30} color="#fff" />
             </Pressable>
           )}
+          <View style={styles.dateWrap}>
+            <Pressable
+              onPress={onDatePress}
+              style={({ pressed }) => [styles.dateBtn, { opacity: pressed ? 0.7 : 1 }]}
+            >
+              <View style={styles.dateInner}>
+                <Ionicons name="calendar-outline" size={15} color="#fff" />
+                <Text style={styles.dateBtnText}>{feedMode ? chipLabel : 'Any date'}</Text>
+              </View>
+            </Pressable>
+            {feedMode && (
+              <Pressable onPress={onClearChip} hitSlop={8} style={styles.clearBtn}>
+                <Ionicons name="close" size={16} color="#fff" />
+              </Pressable>
+            )}
+          </View>
         </View>
       </View>
     </View>
@@ -198,6 +214,23 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.45)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
+  },
+  rightCol: {
+    alignItems: 'flex-end',
+    gap: 16,
+  },
+  uploadBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#0ea5e9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   dateWrap: {
     flexDirection: 'row',

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { createVideoPlayer, type VideoThumbnail } from 'expo-video';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useUser } from '../../src/context/UserProvider';
 import { useAuth } from '../../src/context/AuthProvider';
@@ -31,6 +32,8 @@ import {
   useSaveSurfMediaMutation,
 } from '../../src/store';
 import { useUpload } from '../../src/context/UploadContext';
+import { useSelector, useDispatch } from 'react-redux';
+import { setPendingUploadBreak, type PendingUploadBreak } from '../../src/store/slices/surf';
 import {
   useCreateMyBoardMutation,
   useCreateMyBoardPhotosMutation,
@@ -112,11 +115,57 @@ function SessionOrBoardCreate() {
   const [selectedBreak, setSelectedBreak] = useState<any>(null);
   const [breakSearch, setBreakSearch] = useState('');
   const [showBreakSearch, setShowBreakSearch] = useState(false);
+
+  // Consume a break handed off by an "upload here" affordance (e.g. the + on a
+  // surf-break hero): preselect it once, then clear so it doesn't re-apply on a
+  // later visit or clobber a manual change.
+  const dispatch = useDispatch();
+  const pendingBreak = useSelector(
+    (s: any) => s.surf.pendingUploadBreak as PendingUploadBreak | null
+  );
+  useEffect(() => {
+    if (!pendingBreak) return;
+    setSelectedBreak(pendingBreak);
+    dispatch(setPendingUploadBreak(null));
+  }, [pendingBreak, dispatch]);
   const [sessionDate, setSessionDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [hideLocation, setHideLocation] = useState(false);
   const [notifyFollowers, setNotifyFollowers] = useState(true);
   const [files, setFiles] = useState<SelectedFile[]>([]);
+
+  // Poster frames for selected video clips. expo-image can't render a video URI
+  // as a still, so we extract one frame per clip via expo-video (already in the
+  // build — no native dep) and render that. VideoThumbnail is a SharedRef<'image'>
+  // expo-image accepts directly. Keyed by uri; generated once per clip.
+  const [videoThumbs, setVideoThumbs] = useState<Record<string, VideoThumbnail>>({});
+  const thumbGenRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const f of files) {
+        const isVid = f.durationSeconds != null || (f.type ?? '').startsWith('video');
+        if (!isVid || thumbGenRef.current.has(f.uri)) continue;
+        thumbGenRef.current.add(f.uri);
+        let player: ReturnType<typeof createVideoPlayer> | null = null;
+        try {
+          player = createVideoPlayer(f.uri);
+          // Grab a frame a hair past 0 — the very first frame is often black.
+          const t = f.durationSeconds != null ? Math.min(0.5, f.durationSeconds / 2) : 0.5;
+          const thumbs = await player.generateThumbnailsAsync(t, { maxWidth: 400 });
+          const thumb = Array.isArray(thumbs) ? thumbs[0] : (thumbs as any);
+          if (!cancelled && thumb) setVideoThumbs((prev) => ({ ...prev, [f.uri]: thumb }));
+        } catch {
+          // Generation can fail (e.g. iCloud-offloaded asset) — fall back to the
+          // plain clip badge; allow a retry on a later pass.
+          thumbGenRef.current.delete(f.uri);
+        } finally {
+          try { player?.release?.(); } catch {}
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [files]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Covers the gap between tapping "Add" in the native picker and thumbnails
   // appearing. expo-image-picker copies every selected asset into app cache
@@ -452,7 +501,7 @@ function SessionOrBoardCreate() {
         </Pressable>
       </View>
 
-      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {/* Board fields — shaper-only. */}
         {isShaper && (
           <>
@@ -663,22 +712,31 @@ function SessionOrBoardCreate() {
           {files.length > 0 && (
             <View style={styles.previewGrid}>
               {files.map((file, index) => {
-                // expo-image can't render a video URI as a still, so clips would
-                // show a blank tile. Detect them and render a play badge + the
-                // duration instead so the user can see the clip was picked.
                 const isVideo =
                   file.durationSeconds != null || (file.type ?? '').startsWith('video');
+                const thumb = isVideo ? videoThumbs[file.uri] : null;
                 return (
                   <View key={`${file.name}_${index}`} style={styles.previewItem}>
                     {isVideo ? (
-                      <View style={styles.previewVideo}>
-                        <Ionicons name="play-circle" size={28} color="rgba(255,255,255,0.92)" />
-                        {file.durationSeconds != null && (
-                          <Text style={styles.previewDuration}>
-                            {formatClipDuration(file.durationSeconds)}
-                          </Text>
+                      <>
+                        {thumb ? (
+                          // VideoThumbnail is a SharedRef<'image'> expo-image takes directly.
+                          <Image source={thumb} style={styles.previewImage} contentFit="cover" />
+                        ) : (
+                          // Frame not extracted yet — neutral fill until it lands.
+                          <View style={styles.previewVideo} />
                         )}
-                      </View>
+                        {/* Non-interactive "this is a clip" badge (not a play
+                            control — the preview isn't tappable to play). */}
+                        <View style={styles.clipBadge} pointerEvents="none">
+                          <Ionicons name="videocam" size={11} color="#fff" />
+                          {file.durationSeconds != null && (
+                            <Text style={styles.clipBadgeText}>
+                              {formatClipDuration(file.durationSeconds)}
+                            </Text>
+                          )}
+                        </View>
+                      </>
                     ) : (
                       <Image
                         source={{ uri: file.uri }}
@@ -867,12 +925,13 @@ const styles = StyleSheet.create({
     width: '100%', height: '100%', backgroundColor: '#1f2937',
     alignItems: 'center', justifyContent: 'center',
   },
-  previewDuration: {
-    position: 'absolute', bottom: 4, right: 4,
-    color: '#fff', fontSize: 10, fontWeight: '600',
-    backgroundColor: 'rgba(0,0,0,0.55)', paddingHorizontal: 4, paddingVertical: 1,
-    borderRadius: 4, overflow: 'hidden',
+  clipBadge: {
+    position: 'absolute', bottom: 4, left: 4,
+    flexDirection: 'row', alignItems: 'center', gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 5, paddingVertical: 2,
+    borderRadius: 5,
   },
+  clipBadgeText: { color: '#fff', fontSize: 10, fontWeight: '600' },
   removeBtn: {
     position: 'absolute', top: 4, right: 4,
     backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10,

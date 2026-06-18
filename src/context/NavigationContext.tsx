@@ -7,6 +7,7 @@ interface NavigationContextType {
   setActiveTab: (tab: string) => void;
   incrementDepth: () => void;
   decrementDepth: () => void;
+  setDepth: (n: number) => void;
 }
 
 const NavigationContext = createContext<NavigationContextType>({
@@ -15,6 +16,7 @@ const NavigationContext = createContext<NavigationContextType>({
   setActiveTab: () => {},
   incrementDepth: () => {},
   decrementDepth: () => {},
+  setDepth: () => {},
 });
 
 export function NavigationProvider({ children }: { children: React.ReactNode }) {
@@ -35,8 +37,12 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     depth.current = Math.max(0, depth.current - 1);
   }, []);
 
+  const setDepth = useCallback((n: number) => {
+    depth.current = Math.max(0, n);
+  }, []);
+
   return (
-    <NavigationContext.Provider value={{ lastActiveTab, depth, setActiveTab, incrementDepth, decrementDepth }}>
+    <NavigationContext.Provider value={{ lastActiveTab, depth, setActiveTab, incrementDepth, decrementDepth, setDepth }}>
       {children}
     </NavigationContext.Provider>
   );
@@ -45,6 +51,18 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
 export function useActiveTab() {
   const { lastActiveTab, setActiveTab } = useContext(NavigationContext);
   return { lastActiveTab, setActiveTab };
+}
+
+/**
+ * Imperatively set the stack depth. Used by overlay surfaces (e.g. the Discover
+ * search overlay, which lives INSIDE the home tab rather than as its own route):
+ * pushing content from the overlay sets depth to 2 so the pushed screen's
+ * smartBack pops (router.back) back to the still-mounted overlay instead of
+ * replacing — which would remount the tab and tear the overlay down.
+ */
+export function useSetNavDepth() {
+  const { setDepth } = useContext(NavigationContext);
+  return setDepth;
 }
 
 /**

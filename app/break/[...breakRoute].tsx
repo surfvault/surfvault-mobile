@@ -28,6 +28,8 @@ import {
   useGetAdsQuery,
   useGetShapersForSurfBreakQuery,
 } from '../../src/store';
+import { useDispatch } from 'react-redux';
+import { setPendingUploadBreak } from '../../src/store/slices/surf';
 import SessionCard from '../../src/components/SessionCard';
 import BreakHero from '../../src/components/BreakHero';
 import SponsoredCard from '../../src/components/SponsoredCard';
@@ -254,6 +256,28 @@ export default function SurfBreakDetailScreen() {
     await favoriteSurfBreak({ surfBreakId: breakData.id, action: isFavorited ? 'unfavorite' : 'favorite' });
   }, [requireAuth, breakData, isFavorited, favoriteSurfBreak]);
 
+  // "Share a session here" — stash this break for the create-session tab to
+  // preselect, then jump to it. Only surfers/photographers upload sessions
+  // (shapers upload boards, advertisers campaigns), so the CTA is gated below.
+  const dispatch = useDispatch();
+  const viewerType = (user as any)?.user_type;
+  const canUploadSession = !viewerType || viewerType === 'surfer' || viewerType === 'photographer';
+  const handleUploadHere = useCallback(() => {
+    if (!requireAuth()) return;
+    if (!breakData?.id) return;
+    dispatch(
+      setPendingUploadBreak({
+        // The break-detail endpoint returns surf_break_* aliases (not
+        // name/region/country_code) — match the create-session form's shape.
+        id: breakData.id,
+        name: breakData.surf_break_name,
+        region: breakData.surf_break_region,
+        country_code: breakData.surf_break_country,
+      })
+    );
+    router.push('/(tabs)/upload' as any);
+  }, [requireAuth, breakData, dispatch, router]);
+
   const handleShare = useCallback(async () => {
     const shareUrl = `https://share.surf-vault.com/${country}/${region}/${surfBreak}`;
     await safeShare(Platform.OS === 'ios' ? { url: shareUrl } : { message: shareUrl });
@@ -353,6 +377,7 @@ export default function SurfBreakDetailScreen() {
       chipLabel={selectedDate ? formatDateLabel(selectedDate) : 'Recent'}
       onDatePress={onDatePress}
       onClearChip={exitFeedMode}
+      onUploadPress={canUploadSession && breakData?.id ? handleUploadHere : undefined}
     />
   );
 

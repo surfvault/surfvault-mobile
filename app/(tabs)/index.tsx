@@ -16,7 +16,7 @@ import {
 import { MenuView } from '@react-native-menu/menu';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useNavigation, useFocusEffect } from 'expo-router';
-import { useTrackedPush } from '../../src/context/NavigationContext';
+import { useTrackedPush, useSetNavDepth } from '../../src/context/NavigationContext';
 import { Image } from 'expo-image';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSelector } from 'react-redux';
@@ -107,6 +107,14 @@ let savedFeedType: FeedType = 'surfvault';
 // Persisted manual anchor — survives the same remount cycles as the feed type
 // so a user's chosen location isn't lost when backing out of a pushed route.
 let savedAnchor: NearbyAnchor | null = null;
+// Persist the Discover overlay across home-tab remounts. Backing out of a
+// session/break opened from Explore can remount the tab (smartBack replaces),
+// which would otherwise drop the overlay and land on the feed. Seeding initial
+// state from these re-opens Discover on the same pill. (When smartBack instead
+// pops — depth ≥ 2 — the tab never remounts and the overlay/scroll are kept
+// natively; these stay in sync either way.)
+let savedSearchVisible = false;
+let savedExploreTab: ExploreTab = 'latest';
 
 // Radius presets — round numbers in the DISPLAYED unit (matches Settings). The
 // stored value is always km, so a tapped option is converted on write.
@@ -147,6 +155,7 @@ function RadiusMenu({
 export default function HomeScreen() {
   const router = useRouter();
   const trackedPush = useTrackedPush();
+  const setNavDepth = useSetNavDepth();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
@@ -579,7 +588,7 @@ export default function HomeScreen() {
   }, [feedType, user?.id]);
 
   // ---- Search overlay ----
-  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchVisible, setSearchVisible] = useState(savedSearchVisible);
   // Input focus drives whether the Breaks/People segments show. When the
   // overlay first opens (unfocused, empty) it shows the Explore grid instead.
   const [searchFocused, setSearchFocused] = useState(false);
@@ -588,7 +597,17 @@ export default function HomeScreen() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   // Active Explore pill — three session sorts + a boards mode. Driven by the
   // pill row below the Discover search bar (browse state only).
-  const [exploreTab, setExploreTab] = useState<ExploreTab>('latest');
+  const [exploreTab, setExploreTab] = useState<ExploreTab>(savedExploreTab);
+
+  // Keep the module-level mirrors in sync so a home-tab remount restores the
+  // overlay + pill exactly. Also hide the tab bar on a restore-into-Discover
+  // mount (the overlay is full-screen and owns its own chrome).
+  useEffect(() => { savedSearchVisible = searchVisible; }, [searchVisible]);
+  useEffect(() => { savedExploreTab = exploreTab; }, [exploreTab]);
+  useEffect(() => {
+    if (savedSearchVisible) setTabBarVisible(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const searchInputRef = useRef<TextInput>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -860,7 +879,10 @@ export default function HomeScreen() {
     setSearchTerm('');
     setSelectedTags([]);
     setSearchFocused(false);
-  }, [setTabBarVisible]);
+    // Back at the plain home tab — clear the depth we set while browsing the
+    // overlay so normal tab navigation behaves as usual.
+    setNavDepth(0);
+  }, [setTabBarVisible, setNavDepth]);
 
   // Leave search mode but stay in the overlay → back to the Explore grid.
   const exitSearchMode = useCallback(() => {
@@ -881,6 +903,21 @@ export default function HomeScreen() {
     setSearchFocused(false);
     router.push(path as any);
   }, [router, setTabBarVisible]);
+
+  // Navigate INTO content from the browse grid WITHOUT closing the Discover
+  // overlay. The overlay is a conditional render inside this (still-mounted)
+  // tab, so the pushed route stacks over it and backing out returns to the
+  // Explore grid with its scroll position + loaded tiles intact. (Typed-search
+  // results still use navigateAndClose — closing after a search is correct.)
+  const navigateKeepExplore = useCallback((path: string) => {
+    Keyboard.dismiss();
+    // Treat the open overlay as depth 1 and the pushed screen as depth 2, so its
+    // smartBack pops (router.back) to the still-mounted overlay instead of
+    // replacing the tab (which remounts it and drops the overlay). Set (not
+    // increment) so repeated taps stay at 2 with no drift.
+    setNavDepth(2);
+    router.push(path as any);
+  }, [router, setNavDepth]);
 
   // Record a tapped search result into the user's recent-search history.
   // Invalidates the User tag so getSelf refetches with the item bumped to top.
@@ -1248,9 +1285,9 @@ export default function HomeScreen() {
               })}
             </View>
             {exploreTab === 'boards' ? (
-              <BoardsExploreGrid onNavigate={navigateAndClose} />
+              <BoardsExploreGrid onNavigate={navigateKeepExplore} />
             ) : (
-              <ExploreGrid onNavigate={navigateAndClose} sort={exploreTab} />
+              <ExploreGrid onNavigate={navigateKeepExplore} sort={exploreTab} />
             )}
           </View>
         )}
