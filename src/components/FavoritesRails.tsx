@@ -72,7 +72,11 @@ export default function FavoritesRails({ isDark: isDarkProp }: { isDark?: boolea
     isFetching: sessFetching,
     refetch: refetchSessions,
   } = useGetLatestSessionsQuery(
-    { userId: user?.id, limit: 60, continuationToken: '', feed: 'favorites', groupByBreakDate: true },
+    // `sort: 'recent'` makes the backend page by SESSION DATE (when the surf
+    // happened), not upload time — so the loaded cards are each favorite's most
+    // recent *surf* sessions, not the most recently uploaded. limit 100 (up from
+    // 60) so a busy break can't crowd a quieter favorite out of the window.
+    { userId: user?.id, limit: 100, continuationToken: '', feed: 'favorites', groupByBreakDate: true, sort: 'recent' },
     { skip: !user?.id },
   );
   // Grouped feeds return `groups` (fallback `sessions`) — see home index.tsx.
@@ -93,14 +97,21 @@ export default function FavoritesRails({ isDark: isDarkProp }: { isDark?: boolea
   }, [groups]);
 
   // Split favorites (already in custom order) into rails (have sessions) and
-  // empties (no sessions yet → compact bottom section).
+  // empties (no sessions yet → compact bottom section). Within a rail, sort the
+  // day-cards by SESSION DATE (when the surf happened), newest first — NOT the
+  // feed's upload/created-at recency order. `session_date` is ISO/`YYYY-MM-DD`,
+  // so a string compare sorts chronologically.
   const { rails, empties } = useMemo(() => {
     const railsOut: { fav: Favorite; groups: BreakDateGroup[] }[] = [];
     const emptiesOut: Favorite[] = [];
     for (const fav of favorites) {
       const gs = groupsByBreak.get(fav.surf_break_id);
-      if (gs && gs.length) railsOut.push({ fav, groups: gs });
-      else emptiesOut.push(fav);
+      if (gs && gs.length) {
+        const sorted = [...gs].sort((a, b) =>
+          String(b.session_date ?? '').localeCompare(String(a.session_date ?? '')),
+        );
+        railsOut.push({ fav, groups: sorted });
+      } else emptiesOut.push(fav);
     }
     return { rails: railsOut, empties: emptiesOut };
   }, [favorites, groupsByBreak]);
