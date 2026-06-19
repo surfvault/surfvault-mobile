@@ -17,6 +17,7 @@ export type MapNearbyItem =
       lat: number;
       lon: number;
       thumbnailUrl?: string | null;
+      active?: boolean; // a photographer is shooting here right now
     }
   | {
       kind: 'ad';
@@ -41,6 +42,7 @@ interface Props {
 
 export default function MapNearbyCard({ item, isDark, onPress, width }: Props) {
   const isAd = item.kind === 'ad';
+  const isActiveBreak = item.kind === 'break' && !!item.active;
   const bg = isDark ? '#1f2937' : '#ffffff';
   const border = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
   const subColor = isDark ? '#9ca3af' : '#6b7280';
@@ -49,7 +51,12 @@ export default function MapNearbyCard({ item, isDark, onPress, width }: Props) {
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.card, { backgroundColor: bg, borderColor: border, width }]}
+      style={[
+        styles.card,
+        { backgroundColor: bg, borderColor: border, width },
+        // OPTION 2: green accent bar down the left edge when active.
+        isActiveBreak && { borderLeftWidth: 4, borderLeftColor: '#22c55e' },
+      ]}
     >
       {/* Thumbnail / icon */}
       <View
@@ -109,9 +116,18 @@ export default function MapNearbyCard({ item, isDark, onPress, width }: Props) {
               {item.distanceLabel ? `${item.distanceLabel} · ` : ''}
               {item.subtitle}
             </Text>
-            <Text style={styles.breakCta} numberOfLines={1}>
-              View Sessions →
-            </Text>
+            {/* OPTION 1: ACTIVE tag on the right, across from the CTA. */}
+            <View style={styles.ctaRow}>
+              <Text style={[styles.breakCta, { flexShrink: 1 }]} numberOfLines={1}>
+                View Sessions →
+              </Text>
+              {isActiveBreak && (
+                <View style={styles.activeTag}>
+                  <View style={styles.activeTagDot} />
+                  <Text style={styles.activeTagText}>ACTIVE</Text>
+                </View>
+              )}
+            </View>
           </>
         )}
       </View>
@@ -151,6 +167,15 @@ const styles = StyleSheet.create({
   adTitleLine: { fontSize: 14, fontWeight: '600' },
   title: { fontSize: 15, fontWeight: '700' },
   sub: { fontSize: 12, marginTop: 2 },
+  // OPTION 1 — ACTIVE tag sits on the CTA row, opposite "View Sessions".
+  ctaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 4 },
+  activeTag: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#22c55e', borderRadius: 999,
+    paddingHorizontal: 6, paddingVertical: 1.5,
+  },
+  activeTagDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#fff' },
+  activeTagText: { color: '#fff', fontSize: 8, fontWeight: '800', letterSpacing: 0.4 },
   breakCta: { fontSize: 12, fontWeight: '700', color: '#0ea5e9', marginTop: 4 },
   adCta: { fontSize: 12, fontWeight: '700', color: '#f59e0b', marginTop: 4 },
 });

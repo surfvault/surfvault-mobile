@@ -12,7 +12,9 @@ export default function RailSkeleton({
   subtitle,
   variant = 'tile',
 }: {
-  title: string;
+  // Omit to render a pulsing title block instead of text — used when the rail
+  // titles aren't known yet (e.g. Favorites rails loading before break names).
+  title?: string;
   subtitle?: string;
   variant?: 'tile' | 'avatar';
 }) {
@@ -35,7 +37,11 @@ export default function RailSkeleton({
   return (
     <View style={styles.section}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: isDark ? '#fff' : '#111827' }]}>{title}</Text>
+        {title ? (
+          <Text style={[styles.title, { color: isDark ? '#fff' : '#111827' }]}>{title}</Text>
+        ) : (
+          <Animated.View style={{ width: 150, height: 18, borderRadius: 6, backgroundColor: block, opacity: pulse }} />
+        )}
         {subtitle ? <Text style={[styles.subtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>{subtitle}</Text> : null}
       </View>
       <View style={styles.row}>

@@ -67,7 +67,9 @@ export default function LocalsRail({ breakId }: Props) {
               // (mirrors the Nearby Photographers rail's gating).
               userType={p.verified ? p.user_type : undefined}
               verified={!!p.verified}
-              active={!!p.active}
+              // Active ONLY when shooting at THIS break — `active` alone would
+              // light up a photographer active at a different nearby break.
+              active={!!p.active_at_break}
               hasStatusNote={isNoteActive(p.status_note_set_at) && !!p.status_note}
             />
             <Text numberOfLines={1} style={[styles.handle, { color: isDark ? '#e5e7eb' : '#374151' }]}>

@@ -41,6 +41,7 @@ import { useUserPreferences, formatDistance, kmToUnit, unitToKm } from '../../sr
 import { useAuth } from '../../src/context/AuthProvider';
 import { useTabBar } from '../../src/context/TabBarContext';
 import SessionCard from '../../src/components/SessionCard';
+import FavoritesRails from '../../src/components/FavoritesRails';
 import BreakDateCard, { type BreakDateGroup } from '../../src/components/BreakDateCard';
 import SurfBreakCard from '../../src/components/SurfBreakCard';
 import PhotographerCard from '../../src/components/PhotographerCard';
@@ -437,9 +438,12 @@ export default function HomeScreen() {
       // SurfVault waits for a nearby anchor + resolved breaks; with none, the
       // empty state prompts the user to set a location.
       skip:
+        // boardroom + favorites render their own components (BoardroomFeed /
+        // FavoritesRails) which fetch their own data — don't double-fetch here.
         feedType === 'boardroom'
+        || feedType === 'favorites'
         || (isAuthenticated && !user?.id)
-        || ((feedType === 'following' || feedType === 'favorites') && !user?.id)
+        || (feedType === 'following' && !user?.id)
         || (isSurfVault && nearbyBreakIds.length === 0),
     }
   );
@@ -1618,7 +1622,16 @@ export default function HomeScreen() {
                               uri={item.picture}
                               name={item.name ?? item.handle}
                               size={AVATAR}
-                              verified={item.verified}
+                              // `active` drives the ACTIVE pill + badge-hide;
+                              // `noRing` suppresses UserAvatar's own border so
+                              // the GradientRing stays the only ring (no doubled
+                              // green border).
+                              active={!!item.active}
+                              noRing
+                              // Drop the pill onto the GradientRing's bottom
+                              // edge (it sits ~5px outside the borderless avatar).
+                              activeBadgeOffset={5}
+                              verified={!!item.verified}
                               userType={item.verified ? (item.user_type ?? 'photographer') : undefined}
                             />
                           </View>
@@ -1733,6 +1746,11 @@ export default function HomeScreen() {
         </Animated.ScrollView>
       ) : feedType === 'boardroom' ? (
         <BoardroomFeed ref={boardroomRef} isDark={isDark} anchorBreakId={anchorBreakId} />
+      ) : feedType === 'favorites' ? (
+        // Favorites renders as per-break RAILS (ordered by the user's favorites
+        // order), not the chronological feed — see FavoritesRails. It fetches
+        // its own favorites + grouped sessions.
+        <FavoritesRails isDark={isDark} />
       ) : showSkeleton ? <HomeSkeleton showNearby={false} /> : (
       <FlatList
         ref={feedListRef}
@@ -1790,23 +1808,13 @@ export default function HomeScreen() {
               <View style={styles.emptyStateWrap}>
                 <View style={[styles.boardroomIconWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
                   <MaterialCommunityIcons
-                    name={
-                      feedType === 'following'
-                        ? 'account-multiple-outline'
-                        : feedType === 'favorites'
-                        ? 'heart-outline'
-                        : 'compass-outline'
-                    }
+                    name={feedType === 'following' ? 'account-multiple-outline' : 'compass-outline'}
                     size={36}
                     color={isDark ? '#9ca3af' : '#6b7280'}
                   />
                 </View>
                 <Text style={[styles.boardroomTitle, { color: isDark ? '#ffffff' : '#111827' }]}>
-                  {feedType === 'favorites'
-                    ? favoritesCount > 0
-                      ? 'Nothing new yet'
-                      : 'No favorites yet'
-                    : feedType === 'following'
+                  {feedType === 'following'
                     ? followsAnyone
                       ? 'Nothing new yet'
                       : 'Not following anyone yet'
@@ -1817,10 +1825,6 @@ export default function HomeScreen() {
                     ? followsAnyone
                       ? 'No new sessions from people you follow yet. Check back soon.'
                       : 'Follow photographers and surfers to see their sessions here.'
-                    : feedType === 'favorites'
-                    ? favoritesCount > 0
-                      ? 'No new sessions at your favorites yet. Check back soon.'
-                      : 'Favorite a break to see its latest sessions here.'
                     : 'Check back later for new sessions in your area.'}
                 </Text>
               </View>

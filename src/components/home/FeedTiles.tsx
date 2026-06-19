@@ -162,6 +162,7 @@ export function SessionTile({
   width,
   style,
   noStack = false,
+  hideBreakName = false,
   onNavigate,
   isViewable = false,
 }: {
@@ -170,6 +171,10 @@ export function SessionTile({
   style?: any;
   // Grid mode disables the depth-peek stack (it would overflow the cell).
   noStack?: boolean;
+  // Drop the break-name title from the footer — used when the tile already
+  // sits under a break-named header (e.g. Favorites rails), so the footer shows
+  // just the photographer avatar + @handle subtitle.
+  hideBreakName?: boolean;
   // When set (e.g. inside the Explore overlay), used instead of trackedPush so
   // the caller can close the overlay before navigating.
   onNavigate?: (path: string) => void;
@@ -304,7 +309,7 @@ export function SessionTile({
       topLeft={group.session_date ? <Text style={styles.dateText}>{formatDate(group.session_date)}</Text> : null}
       topRight={topRight}
       avatar={avatar}
-      title={breakName}
+      title={hideBreakName ? undefined : breakName}
       subtitle={subtitle}
       stackCount={!noStack && isMultiSession ? sessionCount : 0}
       width={width}

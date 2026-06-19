@@ -312,7 +312,9 @@ const MapNearbySheet = React.forwardRef<BottomSheet, Props>(function MapNearbySh
 export default MapNearbySheet;
 
 const styles = StyleSheet.create({
-  carouselContent: { paddingHorizontal: 16, paddingVertical: 8 },
+  // Extra bottom padding so the cards aren't flush with the sheet's bottom edge
+  // at the half-snap (the cards stretch to fill the rail height).
+  carouselContent: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 22 },
   sectionsWrap: { paddingTop: 4, gap: 18 },
   areaTitle: {
     fontSize: 22,

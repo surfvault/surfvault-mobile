@@ -11,6 +11,15 @@ interface UserAvatarProps {
   verified?: boolean;
   userType?: UserTypeBadgeType | string | null;
   hasStatusNote?: boolean;
+  /** Suppress UserAvatar's own ring/border — used when the caller already draws
+   *  a ring around the avatar (e.g. the GradientRing on the nearby rails). The
+   *  ACTIVE pill + badge-hide still apply, so the caller gets the badge without
+   *  a doubled-up green border. */
+  noRing?: boolean;
+  /** Extra px to push the ACTIVE pill further down — e.g. when a caller draws
+   *  its own ring outside the avatar (GradientRing), the pill needs to drop to
+   *  sit on that ring instead of floating inside it. */
+  activeBadgeOffset?: number;
   /** Background color of the cut-out around the type badge. Defaults to the
    *  app surface (white in light mode, near-black in dark) so the badge
    *  reads as notched into the avatar instead of pasted on top. Override
@@ -45,15 +54,22 @@ export default function UserAvatar({
   verified = false,
   userType,
   hasStatusNote = false,
+  noRing = false,
+  activeBadgeOffset = 0,
   badgeBackgroundColor,
 }: UserAvatarProps) {
   const isDark = useColorScheme() === 'dark';
   const cutoutColor = badgeBackgroundColor ?? (isDark ? '#000' : '#fff');
   const initial = name?.[0]?.toUpperCase() ?? '?';
   const [imgError, setImgError] = useState(false);
-  const borderWidth = active ? 3 : hasStatusNote ? 2 : 0;
+  const borderWidth = noRing ? 0 : active ? 3 : hasStatusNote ? 2 : 0;
   const borderColor = active ? '#22c55e' : hasStatusNote ? '#38bdf8' : 'transparent';
   const showImage = !!uri && !imgError;
+  // The ACTIVE pill sits bottom-center; the type badge sits bottom-right — they
+  // collide. When the pill is actually shown (only at size >= 44), suppress the
+  // badge so the active state reads cleanly. (Small avatars show no pill, so the
+  // badge stays as the only photographer/verified signal there.)
+  const showActivePill = active && size >= 44;
 
   return (
     <View
@@ -101,7 +117,7 @@ export default function UserAvatar({
       ) : (
         <InitialPlaceholder initial={initial} size={size} />
       )}
-      {(userType === 'surfer' || userType === 'photographer' || userType === 'shaper') && (() => {
+      {!showActivePill && (userType === 'surfer' || userType === 'photographer' || userType === 'shaper') && (() => {
         const badgeSize = Math.max(15, size * 0.36);
         const cutoutSize = badgeSize + 0.5;
         // Position so the cutout overlaps the avatar edge by ~40% of its
@@ -133,14 +149,14 @@ export default function UserAvatar({
       {/* Instagram-style ACTIVE pill — overlaps the bottom edge of the
           ring. Hidden on small avatars (the green ring alone reads as
           "active" when the label would be unreadable). */}
-      {active && size >= 44 && (
+      {showActivePill && (
         <View
           pointerEvents="none"
           style={{
             position: 'absolute',
             left: 0,
             right: 0,
-            bottom: -7,
+            bottom: -3 - activeBadgeOffset,
             alignItems: 'center',
           }}
         >
@@ -150,8 +166,6 @@ export default function UserAvatar({
               borderRadius: 999,
               paddingHorizontal: 6,
               paddingVertical: 1,
-              borderWidth: 1.5,
-              borderColor: '#fff',
             }}
           >
             <Text

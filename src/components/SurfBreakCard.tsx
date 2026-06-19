@@ -18,6 +18,8 @@ interface SurfBreakCardProps {
     coordinates?: { lat?: number | string; lon?: number | string } | null;
     lat?: number | string | null;
     lon?: number | string | null;
+    // A photographer is currently active (shooting) at this break.
+    has_active_photographer?: boolean;
   };
   compact?: boolean;
 }
@@ -63,6 +65,33 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
   const lat = parseCoord(surfBreak.lat ?? surfBreak.coordinates?.lat);
   const lon = parseCoord(surfBreak.lon ?? surfBreak.coordinates?.lon);
   const hasCoords = lat != null && lon != null;
+  const isActive = !!surfBreak.has_active_photographer;
+
+  // "Active" pill — a photographer is shooting at this break right now. Solid
+  // green with a soft glow so it reads as live. Reused in both card variants.
+  const ActiveBadge = () => (
+    <View
+      style={{
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: '#22c55e',
+        borderRadius: 999,
+        paddingHorizontal: 7,
+        paddingVertical: 2,
+        shadowColor: '#22c55e',
+        shadowOpacity: 0.6,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 0 },
+      }}
+    >
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
+      <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800', letterSpacing: 0.4 }}>ACTIVE</Text>
+    </View>
+  );
 
   if (compact) {
     return (
@@ -148,13 +177,14 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
               <Ionicons name="location" size={28} color="#38bdf8" />
             </View>
           )}
+          {isActive && <ActiveBadge />}
         </View>
         <Text className="text-sm font-semibold text-gray-900 dark:text-white mt-1.5" numberOfLines={1}>
           {surfBreak.name}
         </Text>
         {surfBreak.region && (
           <Text className="text-xs text-gray-500 dark:text-gray-400" numberOfLines={1}>
-            {surfBreak.region}{surfBreak.country_code ? `, ${surfBreak.country_code}` : ''}
+            {surfBreak.region.replaceAll('_', ' ')}{surfBreak.country_code ? `, ${surfBreak.country_code}` : ''}
           </Text>
         )}
         {/* Hide distance when this break IS the user's anchor — "0m away"
@@ -189,13 +219,28 @@ export default function SurfBreakCard({ surfBreak, compact = false }: SurfBreakC
             <Text className="text-gray-400 text-xl">🏄</Text>
           </View>
         )}
+        {isActive && (
+          <View
+            style={{
+              position: 'absolute',
+              top: 5,
+              right: 5,
+              width: 12,
+              height: 12,
+              borderRadius: 6,
+              backgroundColor: '#22c55e',
+              borderWidth: 2,
+              borderColor: '#fff',
+            }}
+          />
+        )}
       </View>
       <View className="flex-1 ml-3">
         <Text className="text-base font-semibold text-gray-900 dark:text-white" numberOfLines={1}>
           {surfBreak.name}
         </Text>
         <Text className="text-sm text-gray-500 dark:text-gray-400" numberOfLines={1}>
-          {surfBreak.region}{surfBreak.country ? `, ${surfBreak.country}` : ''}
+          {surfBreak.region?.replaceAll('_', ' ')}{surfBreak.country ? `, ${surfBreak.country}` : ''}
         </Text>
         {surfBreak.distance != null && (
           <Text className="text-xs text-sky-500 mt-0.5">

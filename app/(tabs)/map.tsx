@@ -36,103 +36,52 @@ import React from 'react';
 
 type FilterType = 'all' | 'favorites' | 'mine';
 
-// Plain break pin. The selection halo is NOT drawn here — see SelectedBreakHalo
-// below. iOS + the New Architecture do not reliably re-snapshot an
-// already-mounted custom marker view when its children change (toggling
-// `tracksViewChanges` isn't enough), so swapping a dot for a halo in-place
-// rendered in React but never painted on the native map. Instead, every pin
-// stays a stable dot and a separate, freshly-mounted marker draws the halo
-// over the selected one — a fresh mount always paints.
+// Pre-rendered dot-marker PNGs (generated in assets/markers). Keyed by color;
+// `_LG` is the enlarged variant used for the SELECTED break (replaces the old
+// halo ring). Density variants (@2x/@3x) are resolved by Metro automatically.
+const PIN: Record<string, any> = {
+  sky: require('../../assets/markers/pin-sky.png'),
+  red: require('../../assets/markers/pin-red.png'),
+  violet: require('../../assets/markers/pin-violet.png'),
+  green: require('../../assets/markers/pin-green.png'),
+};
+const PIN_LG: Record<string, any> = {
+  sky: require('../../assets/markers/pin-sky-lg.png'),
+  red: require('../../assets/markers/pin-red-lg.png'),
+  violet: require('../../assets/markers/pin-violet-lg.png'),
+  green: require('../../assets/markers/pin-green-lg.png'),
+};
+
+// Break pin as an IMAGE marker (a pre-rendered dot PNG), NOT a custom `<View>`.
+// iOS + the New Architecture drop custom-view markers whenever the map's
+// children change (another marker mounting, the selection halo toggling, a
+// commit) — that was the root of the crash / blank-pin / vanish-on-select bugs.
+// Image markers render natively from the bitmap and are immune to that entire
+// class (the ad `pinColor` markers never broke for the same reason). Selection
+// is a pure IMAGE PROP SWAP to the larger PNG — no separate halo marker is
+// mounted/unmounted, so nothing ever disturbs the other pins.
 const SurfBreakMarker = React.memo(({
   sb,
-  markerColor,
+  image,
   onMarkerPress,
 }: {
   sb: any;
-  markerColor: string;
+  image: any;
   onMarkerPress: (sb: any) => void;
 }) => {
-  // iOS/Android snapshot the custom marker view to a bitmap; track briefly on
-  // mount and on color change (filter switch) so the dot actually paints, then
-  // stop tracking to keep the marker cheap. Painting on fresh data is handled by
-  // the parent's two-phase remount (markers always fresh-mount when the break
-  // membership changes), so no per-commit re-track is needed here.
-  const [tracks, setTracks] = useState(true);
-  useEffect(() => {
-    setTracks(true);
-    const t = setTimeout(() => setTracks(false), 500);
-    return () => clearTimeout(t);
-  }, [markerColor]);
-
   const handlePress = useCallback(() => onMarkerPress(sb), [sb, onMarkerPress]);
-
   return (
     <Marker
       coordinate={{
         latitude: parseFloat(sb.coordinates?.lat) || 0,
         longitude: parseFloat(sb.coordinates?.lon) || 0,
       }}
-      tracksViewChanges={tracks}
+      image={image}
+      anchor={{ x: 0.5, y: 0.5 }}
       onPress={handlePress}
+      tracksViewChanges={false}
       stopPropagation
-      // Explicit center anchor: iOS defaults custom-view markers to center but
-      // Android defaults to bottom-center, so without this the dot (and the
-      // selection halo) register at slightly different points across platforms
-      // and read as "off". Pin both to the geometric center of the hit box.
-      anchor={{ x: 0.5, y: 0.5 }}
-      centerOffset={{ x: 0, y: 0 }}
-    >
-      {/* The visible dot is small, but the tappable view is much larger and
-          transparent — react-native-maps snapshots the whole view bounds into
-          the annotation, so a padded wrapper directly enlarges the touch target
-          (the 12px dot alone was far too small to reliably hit). */}
-      <View style={styles.markerHit}>
-        <View style={[styles.marker, { backgroundColor: markerColor }]} />
-      </View>
-    </Marker>
-  );
-});
-
-// Selection halo, drawn as its own marker over the selected break's pin. The
-// PARENT keys this by `selectedBreak.id`, so changing selection unmounts the
-// old halo and mounts a new one — a fresh mount reliably paints on iOS where
-// an in-place child swap does not. `tracksViewChanges` is true just long
-// enough for the initial bitmap snapshot, then turns off.
-const SelectedBreakHalo = React.memo(({
-  sb,
-  color,
-  onPress,
-}: {
-  sb: any;
-  color: string;
-  onPress: () => void;
-}) => {
-  const [tracks, setTracks] = useState(true);
-  useEffect(() => {
-    setTracks(true);
-    const t = setTimeout(() => setTracks(false), 600);
-    return () => clearTimeout(t);
-  }, []);
-  const lat = parseFloat(sb.coordinates?.lat);
-  const lon = parseFloat(sb.coordinates?.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-  return (
-    <Marker
-      coordinate={{ latitude: lat, longitude: lon }}
-      tracksViewChanges={tracks}
-      onPress={onPress}
-      stopPropagation
-      zIndex={9999}
-      // Match the base pin's center anchor so the halo sits exactly over the
-      // dot on both platforms (see SurfBreakMarker note).
-      anchor={{ x: 0.5, y: 0.5 }}
-      centerOffset={{ x: 0, y: 0 }}
-    >
-      <View style={styles.selectedHaloWrap}>
-        <View style={[styles.selectedHalo, { backgroundColor: color }]} />
-        <View style={[styles.selectedCore, { backgroundColor: color }]} />
-      </View>
-    </Marker>
+    />
   );
 });
 
@@ -408,7 +357,11 @@ export default function MapScreen() {
       const x = String(a.id), y = String(b.id);
       return x < y ? -1 : x > y ? 1 : 0;
     });
-    const sig = sorted.map((b) => b.id).join(',');
+    // Signature includes the active flag (not just id) so a break going
+    // active/inactive repaints the green pin even when the break SET is
+    // unchanged. Active toggles are rare, so the crash-protective membership
+    // stability still holds for ordinary panning.
+    const sig = sorted.map((b) => `${b.id}:${b.has_active_photographer ? 1 : 0}`).join(',');
     if (sig === surfBreaksRef.current.sig) return surfBreaksRef.current.arr;
     surfBreaksRef.current = { sig, arr: sorted };
     return sorted;
@@ -612,6 +565,7 @@ export default function MapScreen() {
     lat: parseFloat(b.coordinates?.lat ?? b.lat ?? 0),
     lon: parseFloat(b.coordinates?.lon ?? b.lon ?? 0),
     thumbnailUrl: b.thumbnail ?? b.thumbnailUrl ?? b.thumbnail_url ?? null,
+    active: !!b.has_active_photographer,
   }), [units]);
 
   const adToItem = useCallback((a: any): MapNearbyItem => ({
@@ -795,31 +749,36 @@ export default function MapScreen() {
     setSelectedBreak(null);
   }, []);
 
-  const markerColor = filter === 'favorites' ? '#ef4444' : filter === 'mine' ? '#8b5cf6' : '#0ea5e9';
+  // Color KEY (not hex) → indexes the PIN / PIN_LG image maps.
+  const markerColorKey = filter === 'favorites' ? 'red' : filter === 'mine' ? 'violet' : 'sky';
 
-  // Stable array — does NOT depend on selectedBreak, so the marker list passed
-  // to <MapView> is identical across selection changes and the native subview
-  // list never receives spurious insert/remove ops. Selection is drawn by a
-  // separate <SelectedBreakHalo> marker layered on top, not by mutating these.
+  // Break markers. Each picks a dot IMAGE by color (active → green, else filter
+  // color) and the LARGER image when it's the selected break. The KEY includes
+  // `-sel` for the selected break so it REMOUNTS on (de)selection: iOS rn-maps
+  // does not reliably re-render a marker when only its `image` prop changes, so
+  // an in-place swap left non-active pins small. Remounting forces the new image
+  // to paint. Safe now that these are image markers — remounting one pin doesn't
+  // drop its neighbours (the custom-view-era vanish bug). Only the 1–2 pins
+  // whose selection changed remount; the rest keep stable keys.
   const markers = useMemo(() => renderedBreaks.map((sb: any) => {
     // Skip breaks with missing/unparseable coordinates rather than dropping a
     // pin at (0,0) off West Africa.
     const lat = parseFloat(sb.coordinates?.lat);
     const lon = parseFloat(sb.coordinates?.lon);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+    const ck = sb.has_active_photographer ? 'green' : markerColorKey;
+    const isSelected = String(selectedBreak?.id ?? '') === String(sb.id);
     return (
       <SurfBreakMarker
-        key={`brk-${sb.id}`}
+        key={`brk-${sb.id}${isSelected ? '-sel' : ''}`}
         sb={sb}
-        markerColor={markerColor}
+        image={isSelected ? PIN_LG[ck] : PIN[ck]}
         onMarkerPress={handleMarkerPress}
       />
     );
-    // Dense array — no `null` holes. A null that later becomes a real marker
-    // (coords flipping valid on refetch) would be a mid-array insert, which is
-    // exactly what trips AIRMap's `insertReactSubview:atIndex:` on the new
-    // architecture (NSRangeException). Filtering keeps the child list dense.
-  }).filter(Boolean), [renderedBreaks, markerColor, handleMarkerPress]);
+    // Dense array — no `null` holes (kept from the custom-view era; harmless and
+    // still avoids any mid-array gaps).
+  }).filter(Boolean), [renderedBreaks, markerColorKey, selectedBreak, handleMarkerPress]);
 
   // Ad venue pins. Amber default, red when selected. Tap → impression + open
   // sheet to ad mode. Inline rendering (no wrapper component) because the
@@ -849,41 +808,10 @@ export default function MapScreen() {
   // list. ORDER MATTERS: the stable, few ad pins come FIRST and the volatile
   // break markers come LAST, so the two-phase clear/repopulate of breaks (see
   // `renderedBreaks`) is always a pure TAIL remove-all then append-all — the
-  // safest possible mutation for AIRMap's interop subview path. The halo and the
-  // admin pending-pin sit after the breaks (also tail toggles).
-  const selectedHaloCoords = useMemo(() => {
-    if (!selectedBreak) return null;
-    const lat = parseFloat(selectedBreak.coordinates?.lat);
-    const lon = parseFloat(selectedBreak.coordinates?.lon);
-    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
-  }, [selectedBreak]);
-
-  const mapChildren = useMemo(() => {
-    const out: React.ReactNode[] = [...adMarkers, ...markers];
-    if (selectedBreak && selectedHaloCoords) {
-      out.push(
-        <SelectedBreakHalo
-          key={`sel-${selectedBreak.id}`}
-          sb={selectedBreak}
-          color={markerColor}
-          onPress={() => handleMarkerPress(selectedBreak)}
-        />
-      );
-    }
-    if (pendingBreakCoord) {
-      out.push(
-        <Marker
-          key="pending-break"
-          coordinate={pendingBreakCoord}
-          tracksViewChanges={true}
-          anchor={{ x: 0.5, y: 1 }}
-        >
-          <Ionicons name="location" size={36} color="#22c55e" />
-        </Marker>
-      );
-    }
-    return out;
-  }, [markers, adMarkers, selectedBreak, selectedHaloCoords, markerColor, handleMarkerPress, pendingBreakCoord]);
+  // safest possible mutation for AIRMap's interop subview path. The admin
+  // pending-pin sits after the breaks (also a tail toggle). There is NO separate
+  // selection halo anymore — selection is an image swap on the break marker.
+  const baseMarkers = useMemo(() => [...adMarkers, ...markers], [adMarkers, markers]);
 
   const handleMapPress = useCallback((e: any) => {
     // Android sets action === 'marker-press' on the map onPress that follows a
@@ -972,7 +900,20 @@ export default function MapScreen() {
         onPress={handleMapPress}
         onLongPress={isSuperAdmin ? handleMapLongPress : undefined}
       >
-        {mapChildren}
+        {/* Ad pins + break image-dots. Selection is an image swap inside this
+            array (no separate halo marker), so nothing toggles a sibling that
+            could disturb the pins. */}
+        {baseMarkers}
+        {pendingBreakCoord && (
+          <Marker
+            key="pending-break"
+            coordinate={pendingBreakCoord}
+            tracksViewChanges={true}
+            anchor={{ x: 0.5, y: 1 }}
+          >
+            <Ionicons name="location" size={36} color="#22c55e" />
+          </Marker>
+        )}
       </MapView>
 
       {/* Loading */}
