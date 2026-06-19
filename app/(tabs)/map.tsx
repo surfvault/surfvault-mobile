@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   ScrollView,
   Keyboard,
-  InteractionManager,
   Platform,
   Alert,
   Linking,
@@ -30,12 +29,9 @@ import { useUser } from '../../src/context/UserProvider';
 import { useUserPreferences, formatDistance } from '../../src/helpers/preferences';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
-import { useGetMapSurfBreaksQuery, useGetMapAdsQuery, useGetSurfBreaksQuery, useGetNearbySurfBreaksQuery, useGetNearbyPhotographersQuery, useCreateSurfBreakMutation, useRecordAdImpressionMutation } from '../../src/store';
+import { useGetMapSurfBreaksQuery, useGetMapAdsQuery, useGetSurfBreaksQuery, useGetMapSearchContentQuery, useUpdateUserRecentSearchesMutation, useCreateSurfBreakMutation, useRecordAdImpressionMutation } from '../../src/store';
 import { buildAdClickUrl, currentDevice } from '../../src/helpers/adTracking';
-import UserAvatar from '../../src/components/UserAvatar';
 import AddSurfBreakSheet from '../../src/components/AddSurfBreakSheet';
-import GradientRing, { ACTIVE_STOPS, NOTE_STOPS } from '../../src/components/GradientRing';
-import { FlatList } from 'react-native';
 import React from 'react';
 
 type FilterType = 'all' | 'favorites' | 'mine';
@@ -58,11 +54,13 @@ const SurfBreakMarker = React.memo(({
 }) => {
   // iOS/Android snapshot the custom marker view to a bitmap; track briefly on
   // mount and on color change (filter switch) so the dot actually paints, then
-  // stop tracking to keep the marker cheap.
+  // stop tracking to keep the marker cheap. Painting on fresh data is handled by
+  // the parent's two-phase remount (markers always fresh-mount when the break
+  // membership changes), so no per-commit re-track is needed here.
   const [tracks, setTracks] = useState(true);
   useEffect(() => {
     setTracks(true);
-    const t = setTimeout(() => setTracks(false), 400);
+    const t = setTimeout(() => setTracks(false), 500);
     return () => clearTimeout(t);
   }, [markerColor]);
 
@@ -77,8 +75,20 @@ const SurfBreakMarker = React.memo(({
       tracksViewChanges={tracks}
       onPress={handlePress}
       stopPropagation
+      // Explicit center anchor: iOS defaults custom-view markers to center but
+      // Android defaults to bottom-center, so without this the dot (and the
+      // selection halo) register at slightly different points across platforms
+      // and read as "off". Pin both to the geometric center of the hit box.
+      anchor={{ x: 0.5, y: 0.5 }}
+      centerOffset={{ x: 0, y: 0 }}
     >
-      <View style={[styles.marker, { backgroundColor: markerColor }]} />
+      {/* The visible dot is small, but the tappable view is much larger and
+          transparent — react-native-maps snapshots the whole view bounds into
+          the annotation, so a padded wrapper directly enlarges the touch target
+          (the 12px dot alone was far too small to reliably hit). */}
+      <View style={styles.markerHit}>
+        <View style={[styles.marker, { backgroundColor: markerColor }]} />
+      </View>
     </Marker>
   );
 });
@@ -113,6 +123,10 @@ const SelectedBreakHalo = React.memo(({
       onPress={onPress}
       stopPropagation
       zIndex={9999}
+      // Match the base pin's center anchor so the halo sits exactly over the
+      // dot on both platforms (see SurfBreakMarker note).
+      anchor={{ x: 0.5, y: 0.5 }}
+      centerOffset={{ x: 0, y: 0 }}
     >
       <View style={styles.selectedHaloWrap}>
         <View style={[styles.selectedHalo, { backgroundColor: color }]} />
@@ -151,7 +165,7 @@ export default function MapScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const { user } = useUser();
-  const { units, nearby: nearbyPrefs } = useUserPreferences();
+  const { units } = useUserPreferences();
   const { isAuthenticated } = useAuth();
   const requireAuth = useRequireAuth();
   const dispatch = useDispatch();
@@ -361,73 +375,114 @@ export default function MapScreen() {
     Linking.openURL(trackUrl).catch(() => { /* noop */ });
   }, []);
 
-  // Only commit new markers when region is stable AND all animations are done
+  // Commit new markers once the region is stable. We commit DIRECTLY in the
+  // render cycle rather than via InteractionManager.runAfterInteractions: a
+  // custom-view marker that mounts inside that deferred idle callback often
+  // fails to snapshot on iOS + Fabric, so the dot never paints (the break
+  // shows in the sheet but has no pin) until a later interaction. `regionStable`
+  // (plus the animation-reset gating in handleRegionChange) already guarantees
+  // we're not mid-gesture, so the idle defer was redundant. Painting of the
+  // committed pins is handled by the two-phase remount below (`renderedBreaks`).
   useEffect(() => {
     if (isZoomedTooFarOut) {
       setCommittedBreaks([]);
       return;
     }
     if (!regionStable) return;
-    const handle = InteractionManager.runAfterInteractions(() => {
-      if (regionStable) {
-        setCommittedBreaks(latestBreaks);
-      }
-    });
-    return () => handle.cancel();
+    setCommittedBreaks(latestBreaks);
   }, [latestBreaks, regionStable, isZoomedTooFarOut]);
 
-  // Cap markers to prevent the clustering library from crashing with too
-  // many. 200 is a reasonable upper bound on the iOS / Android map renderers
-  // before performance degrades. Memoized so the array reference stays stable
-  // across unrelated parent re-renders.
-  const surfBreaks = useMemo(
-    () => (committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks),
-    [committedBreaks],
-  );
+  // Cap markers (200) AND render them in a STABLE id order. The backend now
+  // orders breaks by proximity to the viewport center, so the same breaks come
+  // back in a *different array order* every time the center moves — which would
+  // make React reorder marker subviews (remove+insert), the exact interleaved
+  // mutation that crashes AIRMap's `insertReactSubview:atIndex:` on Fabric.
+  // Sorting by id makes the order independent of the fetch, so membership
+  // changes are pure inserts/removes, never reorders. We also return the SAME
+  // array reference when the set of ids is unchanged (panning within the same
+  // breaks), so the two-phase commit below doesn't needlessly blink the pins.
+  const surfBreaksRef = useRef<{ sig: string; arr: any[] }>({ sig: '', arr: [] });
+  const surfBreaks = useMemo(() => {
+    const capped = committedBreaks.length > 200 ? committedBreaks.slice(0, 200) : committedBreaks;
+    const sorted = [...capped].sort((a, b) => {
+      const x = String(a.id), y = String(b.id);
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+    const sig = sorted.map((b) => b.id).join(',');
+    if (sig === surfBreaksRef.current.sig) return surfBreaksRef.current.arr;
+    surfBreaksRef.current = { sig, arr: sorted };
+    return sorted;
+  }, [committedBreaks]);
 
-  const { data: searchData, isFetching: searchLoading } = useGetSurfBreaksQuery(
-    { search: debouncedTerm, limit: 8, continuationToken: '' },
-    { skip: debouncedTerm.length < 2 }
+  // Two-phase marker commit (THE fix for the `-[AIRMap insertReactSubview:
+  // atIndex:]` NSRangeException on zoom-out/refetch). When the break membership
+  // changes we first render ZERO break markers, then repopulate on the next
+  // frame. Going A→[]→B splits the change into two separate mount transactions:
+  // a pure "remove all" then a pure "append into empty" — neither contains the
+  // interleaved remove+insert that makes AIRMap compute an out-of-bounds insert
+  // index and crash. The requestAnimationFrame guarantees the two setState calls
+  // land in DIFFERENT React commits (a synchronous pair would batch into one
+  // transaction and reintroduce the crash). Because `surfBreaks` is reference-
+  // stable for unchanged membership, this only fires — and only blinks the pins —
+  // when breaks actually enter or leave the viewport.
+  const [renderedBreaks, setRenderedBreaks] = useState<any[]>([]);
+  useEffect(() => {
+    setRenderedBreaks([]);
+    const raf = requestAnimationFrame(() => setRenderedBreaks(surfBreaks));
+    return () => cancelAnimationFrame(raf);
+  }, [surfBreaks]);
+
+  // Search uses /map/search (getMapSearchContent) rather than the plain
+  // surf-break search so it can be SCOPED to the active map filter — when
+  // Favorites or My Spots is on, the backend restricts results to that scope
+  // (matches web's MapControlStack). We keep it breaks-only by passing
+  // `type: 'surf_break'` and guarding on `surf_break_identifier`.
+  const { data: searchData, isFetching: searchLoading } = useGetMapSearchContentQuery(
+    {
+      search: debouncedTerm,
+      type: 'surf_break',
+      viewerId: user?.id,
+      favorites: filter === 'favorites',
+      mine: filter === 'mine',
+    },
+    { skip: debouncedTerm.length < 2 || (isAuthenticated && !user?.id) }
   );
-  const rawSearchResults = searchData?.results?.breaks ?? searchData?.results?.surfBreaks ?? [];
+  const rawSearchResults = (searchData?.results?.searchContent ?? []).filter(
+    (item: any) => item?.surf_break_identifier
+  );
   const searchResults = rawSearchResults.filter((item: any, index: number, arr: any[]) => {
     const key = `${item.name}:${item.region ?? ''}:${item.country_code ?? ''}`;
     return arr.findIndex((i: any) => `${i.name}:${i.region ?? ''}:${i.country_code ?? ''}` === key) === index;
   });
 
-  // Nearby — local override or user's current break coordinates
-  const [nearbyOverride, setNearbyOverride] = useState<{ name: string; lat: number; lon: number } | null>(null);
-  const [showNearbyBreakPicker, setShowNearbyBreakPicker] = useState(false);
-  const [nearbyBreakSearch, setNearbyBreakSearch] = useState('');
-  const [debouncedNearbySearch, setDebouncedNearbySearch] = useState('');
-  const nearbyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const userBreakCoords = (user as any)?.surf_break_coordinates;
-  const userCoords = (user as any)?.coordinates;
-  const userBreakName = (user as any)?.surf_break_name ?? (user as any)?.surfBreakName;
-
-  // Try: 1) nearby override, 2) user's break coordinates, 3) user's device coordinates
-  const resolvedLat = nearbyOverride?.lat
-    ?? (userBreakCoords?.lat ? parseFloat(String(userBreakCoords.lat)) : null)
-    ?? (userCoords?.lat ? parseFloat(String(userCoords.lat)) : null);
-  const resolvedLon = nearbyOverride?.lon
-    ?? (userBreakCoords?.lon ? parseFloat(String(userBreakCoords.lon)) : null)
-    ?? (userCoords?.lon ? parseFloat(String(userCoords.lon)) : null);
-  const nearbyLat = (resolvedLat != null && !isNaN(resolvedLat)) ? resolvedLat : null;
-  const nearbyLon = (resolvedLon != null && !isNaN(resolvedLon)) ? resolvedLon : null;
-  const currentNearbyName = nearbyOverride?.name ?? userBreakName;
-  const hasNearbyCoords = nearbyLat != null && nearbyLon != null;
-
-  const { data: nearbyBreaksData } = useGetNearbySurfBreaksQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, radiusKm: nearbyPrefs.breaksKm },
-    { skip: !hasNearbyCoords }
+  // Recent break searches (server-synced via the user's recentSearches) and a
+  // suggested fallback — together they replace the old "nearby" lists that
+  // duplicated Home + the map's own "In This Area" sheet. Only breaks are kept
+  // since map search is breaks-only.
+  const [updateUserRecentSearches] = useUpdateUserRecentSearchesMutation();
+  const recentBreaks = useMemo(
+    () =>
+      ((user as any)?.recentSearches ?? [])
+        .filter((r: any) => r.itemType === 'surf_break' && r.surfBreak)
+        .map((r: any) => r.surfBreak),
+    [user]
   );
-  const { data: nearbyPhotographersData } = useGetNearbyPhotographersQuery(
-    { lat: nearbyLat ?? 0, long: nearbyLon ?? 0, viewerId: user?.id, radiusKm: nearbyPrefs.photographersKm },
-    { skip: !hasNearbyCoords || (isAuthenticated && !user?.id) }
+  // Suggested breaks: a shuffled slice of the catalog. The backend `suggest`
+  // mode is users-only, so breaks fall back to getSurfBreaks (mirrors Home).
+  // Only fetched when the panel is open with no query AND no recents to show.
+  const wantSuggestions = searchOpen && debouncedTerm.length < 2 && recentBreaks.length === 0;
+  const { data: suggestBreaksData } = useGetSurfBreaksQuery(
+    { limit: 24 },
+    { skip: !wantSuggestions }
   );
-  const nearbyBreaks = nearbyBreaksData?.results?.nearbyBreaks ?? nearbyBreaksData?.results?.surfBreaks ?? [];
-  const nearbyPhotographers = nearbyPhotographersData?.results?.nearbyPhotographers ?? nearbyPhotographersData?.results?.photographers ?? [];
+  const suggestedBreaks = useMemo(() => {
+    const breaks = [...(suggestBreaksData?.results?.breaks ?? suggestBreaksData?.results?.surfBreaks ?? [])];
+    for (let i = breaks.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [breaks[i], breaks[j]] = [breaks[j], breaks[i]];
+    }
+    return breaks.slice(0, 10);
+  }, [suggestBreaksData]);
 
   // Map bottom-sheet visibility threshold. Peek appears when the user is
   // zoomed in to at least state/coast level (latitudeDelta <= 2 ≈ ~200km
@@ -436,31 +491,6 @@ export default function MapScreen() {
   // a whole hemisphere. Zooming further out auto-closes.
   const SHEET_ZOOM_THRESHOLD = 2.0;
   const sheetInZoomRange = region.latitudeDelta <= SHEET_ZOOM_THRESHOLD;
-
-  // Nearby break picker search
-  const { data: nearbyPickerData, isFetching: nearbyPickerLoading } = useGetSurfBreaksQuery(
-    { search: debouncedNearbySearch, limit: 8, continuationToken: '' },
-    { skip: debouncedNearbySearch.length < 2 }
-  );
-  const nearbyPickerResults = nearbyPickerData?.results?.breaks ?? nearbyPickerData?.results?.surfBreaks ?? [];
-
-  const handleNearbySearchInput = useCallback((text: string) => {
-    setNearbyBreakSearch(text);
-    if (nearbyDebounceRef.current) clearTimeout(nearbyDebounceRef.current);
-    nearbyDebounceRef.current = setTimeout(() => setDebouncedNearbySearch(text), 400);
-  }, []);
-
-  const handleSelectNearbyBreak = useCallback((brk: any) => {
-    const lat = parseFloat(brk.coordinates?.lat);
-    const lon = parseFloat(brk.coordinates?.lon);
-    if (!isNaN(lat) && !isNaN(lon)) {
-      setNearbyOverride({ name: brk.name, lat, lon });
-    }
-    setShowNearbyBreakPicker(false);
-    setNearbyBreakSearch('');
-    setDebouncedNearbySearch('');
-    Keyboard.dismiss();
-  }, []);
 
   const handleRegionChange = useCallback((newRegion: Region) => {
     if (regionDebounceRef.current) clearTimeout(regionDebounceRef.current);
@@ -472,10 +502,19 @@ export default function MapScreen() {
     // animation settled), the timer clears the flag.
     if (isAnimatingRef.current) {
       setRegion(newRegion);
+      // Suppress marker commits for the duration of the fly-to. Android emits
+      // a region-change event per animation frame; if we leave `regionStable`
+      // true the commit effect re-runs the surf-break query bounds on every
+      // intermediate frame and swaps the whole marker set in/out the entire
+      // way (pins churn/disappear, then pop to the final set). Hold markers
+      // steady, then commit ONCE when the trailing timer confirms the camera
+      // has settled.
+      setRegionStable(false);
       if (animationResetTimerRef.current) clearTimeout(animationResetTimerRef.current);
       animationResetTimerRef.current = setTimeout(() => {
         isAnimatingRef.current = false;
         animationResetTimerRef.current = null;
+        setRegionStable(true);
       }, 400);
       return;
     }
@@ -572,7 +611,7 @@ export default function MapScreen() {
         : null,
     lat: parseFloat(b.coordinates?.lat ?? b.lat ?? 0),
     lon: parseFloat(b.coordinates?.lon ?? b.lon ?? 0),
-    thumbnailUrl: b.thumbnailUrl ?? b.thumbnail_url ?? null,
+    thumbnailUrl: b.thumbnail ?? b.thumbnailUrl ?? b.thumbnail_url ?? null,
   }), [units]);
 
   const adToItem = useCallback((a: any): MapNearbyItem => ({
@@ -627,10 +666,14 @@ export default function MapScreen() {
     );
   }, []);
 
+  // Build the sheet list from `surfBreaks` (the 200-capped set actually
+  // rendered as pins), NOT the uncapped `committedBreaks`. Otherwise a carousel
+  // card past the cap has no pin on the map — swiping to it selects a break
+  // with nothing to highlight, so the sheet and map silently disagree.
   const sheetBreaks = useMemo<MapNearbyItem[]>(() => {
-    const items = (committedBreaks as any[]).map(breakToItem);
+    const items = (surfBreaks as any[]).map(breakToItem);
     return sortBySpatialSweep(items);
-  }, [committedBreaks, breakToItem, sortBySpatialSweep]);
+  }, [surfBreaks, breakToItem, sortBySpatialSweep]);
 
   const sheetAds = useMemo<MapNearbyItem[]>(() => {
     const items = (mapAds as any[]).map(adToItem);
@@ -654,27 +697,27 @@ export default function MapScreen() {
       } else {
         const currentId = selectedBreak?.id;
         if (String(currentId ?? '') === item.id) return;
-        const next = committedBreaks.find((b: any) => String(b.id) === item.id);
+        const next = surfBreaks.find((b: any) => String(b.id) === item.id);
         if (next) setSelectedBreak(next);
       }
     },
-    [selectedBreak, selectedAd, mapAds, committedBreaks],
+    [selectedBreak, selectedAd, mapAds, surfBreaks],
   );
 
   // Tap a card in the sheet → navigate (breaks) or open click URL (ads). Look
-  // up in `committedBreaks` (the same source that populates the sheet + map),
-  // NOT the home-anchored `nearbyBreaks` from the search panel.
+  // up in `surfBreaks` — the same capped, viewport-bounded set that populates
+  // both the sheet carousel and the map pins.
   const handleSheetPressItem = useCallback(
     (item: MapNearbyItem) => {
       if (item.kind === 'break') {
-        const sb = committedBreaks.find((b: any) => String(b.id) === item.id);
+        const sb = surfBreaks.find((b: any) => String(b.id) === item.id);
         if (sb) navigateToBreakPage(sb);
       } else {
         const ad = mapAds.find((a: any) => String(a.id) === item.id);
         if (ad) openAdClick(ad);
       }
     },
-    [committedBreaks, mapAds, navigateToBreakPage, openAdClick],
+    [surfBreaks, mapAds, navigateToBreakPage, openAdClick],
   );
 
   // Zoom-driven sheet visibility. When the user zooms in past the regional
@@ -705,9 +748,6 @@ export default function MapScreen() {
       setSearchOpen(false);
       setSearchTerm('');
       setDebouncedTerm('');
-      setShowNearbyBreakPicker(false);
-      setNearbyBreakSearch('');
-      setDebouncedNearbySearch('');
       Keyboard.dismiss();
     } else {
       setSearchOpen(true);
@@ -716,6 +756,12 @@ export default function MapScreen() {
   }, [searchOpen]);
 
   const navigateToBreakOnMap = useCallback((sb: any) => {
+    // Record the pick into the user's recent searches (server-synced) so it
+    // surfaces in the empty-state list next time. Best-effort; only for signed-
+    // in users with a real break id.
+    if (user?.id && sb?.id) {
+      updateUserRecentSearches({ payload: { recentSearch: { type: 'surf_break', data: { id: sb.id } } } });
+    }
     const lat = parseFloat(sb.coordinates?.lat);
     const lon = parseFloat(sb.coordinates?.lon);
     if (!isNaN(lat) && !isNaN(lon)) {
@@ -729,12 +775,21 @@ export default function MapScreen() {
         longitudeDelta: 0.02,
       }, 800);
       setSelectedBreak(sb);
+    } else if (sb?.surf_break_identifier) {
+      // Recent-search records carry no coordinates (only id/identifier/region/
+      // country), so we can't fly the camera — open the break page instead.
+      setSearchOpen(false);
+      setSearchTerm('');
+      setDebouncedTerm('');
+      Keyboard.dismiss();
+      navigateToBreakPage(sb);
+      return;
     }
     setSearchOpen(false);
     setSearchTerm('');
     setDebouncedTerm('');
     Keyboard.dismiss();
-  }, []);
+  }, [user?.id, updateUserRecentSearches, navigateToBreakPage]);
 
   const dismissSelection = useCallback(() => {
     setSelectedBreak(null);
@@ -746,7 +801,7 @@ export default function MapScreen() {
   // to <MapView> is identical across selection changes and the native subview
   // list never receives spurious insert/remove ops. Selection is drawn by a
   // separate <SelectedBreakHalo> marker layered on top, not by mutating these.
-  const markers = useMemo(() => surfBreaks.map((sb: any) => {
+  const markers = useMemo(() => renderedBreaks.map((sb: any) => {
     // Skip breaks with missing/unparseable coordinates rather than dropping a
     // pin at (0,0) off West Africa.
     const lat = parseFloat(sb.coordinates?.lat);
@@ -754,13 +809,17 @@ export default function MapScreen() {
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
     return (
       <SurfBreakMarker
-        key={sb.id}
+        key={`brk-${sb.id}`}
         sb={sb}
         markerColor={markerColor}
         onMarkerPress={handleMarkerPress}
       />
     );
-  }), [surfBreaks, markerColor, handleMarkerPress]);
+    // Dense array — no `null` holes. A null that later becomes a real marker
+    // (coords flipping valid on refetch) would be a mid-array insert, which is
+    // exactly what trips AIRMap's `insertReactSubview:atIndex:` on the new
+    // architecture (NSRangeException). Filtering keeps the child list dense.
+  }).filter(Boolean), [renderedBreaks, markerColor, handleMarkerPress]);
 
   // Ad venue pins. Amber default, red when selected. Tap → impression + open
   // sheet to ad mode. Inline rendering (no wrapper component) because the
@@ -782,7 +841,49 @@ export default function MapScreen() {
         onPress={() => handleAdMarkerPress(ad)}
       />
     );
-  }), [mapAds, handleAdMarkerPress, selectedAd]);
+  }).filter(Boolean), [mapAds, handleAdMarkerPress, selectedAd]);
+
+  // Single, dense, keyed children array for <MapView>. Passing ONE flat list
+  // (rather than multiple sibling arrays interleaved with conditional markers)
+  // keeps the native subview list in lockstep with one React-reconciled key
+  // list. ORDER MATTERS: the stable, few ad pins come FIRST and the volatile
+  // break markers come LAST, so the two-phase clear/repopulate of breaks (see
+  // `renderedBreaks`) is always a pure TAIL remove-all then append-all — the
+  // safest possible mutation for AIRMap's interop subview path. The halo and the
+  // admin pending-pin sit after the breaks (also tail toggles).
+  const selectedHaloCoords = useMemo(() => {
+    if (!selectedBreak) return null;
+    const lat = parseFloat(selectedBreak.coordinates?.lat);
+    const lon = parseFloat(selectedBreak.coordinates?.lon);
+    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+  }, [selectedBreak]);
+
+  const mapChildren = useMemo(() => {
+    const out: React.ReactNode[] = [...adMarkers, ...markers];
+    if (selectedBreak && selectedHaloCoords) {
+      out.push(
+        <SelectedBreakHalo
+          key={`sel-${selectedBreak.id}`}
+          sb={selectedBreak}
+          color={markerColor}
+          onPress={() => handleMarkerPress(selectedBreak)}
+        />
+      );
+    }
+    if (pendingBreakCoord) {
+      out.push(
+        <Marker
+          key="pending-break"
+          coordinate={pendingBreakCoord}
+          tracksViewChanges={true}
+          anchor={{ x: 0.5, y: 1 }}
+        >
+          <Ionicons name="location" size={36} color="#22c55e" />
+        </Marker>
+      );
+    }
+    return out;
+  }, [markers, adMarkers, selectedBreak, selectedHaloCoords, markerColor, handleMarkerPress, pendingBreakCoord]);
 
   const handleMapPress = useCallback((e: any) => {
     // Android sets action === 'marker-press' on the map onPress that follows a
@@ -871,25 +972,7 @@ export default function MapScreen() {
         onPress={handleMapPress}
         onLongPress={isSuperAdmin ? handleMapLongPress : undefined}
       >
-        {markers}
-        {selectedBreak && (
-          <SelectedBreakHalo
-            key={`sel-${selectedBreak.id}`}
-            sb={selectedBreak}
-            color={markerColor}
-            onPress={() => handleMarkerPress(selectedBreak)}
-          />
-        )}
-        {adMarkers}
-        {pendingBreakCoord && (
-          <Marker
-            coordinate={pendingBreakCoord}
-            tracksViewChanges={true}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <Ionicons name="location" size={36} color="#22c55e" />
-          </Marker>
-        )}
+        {mapChildren}
       </MapView>
 
       {/* Loading */}
@@ -953,45 +1036,24 @@ export default function MapScreen() {
               })}
             </ScrollView>
 
-            {showNearbyBreakPicker ? (
-              /* Nearby break picker — inline */
-              <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                <View style={[styles.nearbyPickerSearch, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-                  <Ionicons name="search-outline" size={16} color={isDark ? '#6b7280' : '#9ca3af'} />
-                  <TextInput
-                    value={nearbyBreakSearch}
-                    onChangeText={handleNearbySearchInput}
-                    placeholder="Search a location..."
-                    placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
-                    autoFocus
-                    style={[styles.nearbyPickerInput, { color: isDark ? '#fff' : '#111827' }]}
-                  />
-                  <Pressable onPress={() => { setShowNearbyBreakPicker(false); setNearbyBreakSearch(''); setDebouncedNearbySearch(''); }} hitSlop={8}>
-                    <Ionicons name="close" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
-                  </Pressable>
+            {debouncedTerm.length >= 2 ? (
+              /* Search results — scoped to the active All / Favorites / My Spots filter */
+              <ScrollView style={{ maxHeight: 320 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+                {/* Scope pill — mirrors web: tells the user the search is
+                    restricted to whatever pin filter is active. */}
+                <View style={styles.scopeRow}>
+                  <Text style={[styles.scopeEyebrow, { color: isDark ? '#6b7280' : '#9ca3af' }]}>SEARCHING</Text>
+                  <View style={[styles.scopePill, {
+                    backgroundColor: filter === 'favorites' ? 'rgba(239,68,68,0.15)' : filter === 'mine' ? 'rgba(139,92,246,0.15)' : 'rgba(14,165,233,0.15)',
+                  }]}>
+                    <Text style={[styles.scopePillText, {
+                      color: filter === 'favorites' ? '#ef4444' : filter === 'mine' ? '#8b5cf6' : '#0ea5e9',
+                    }]}>
+                      {filter === 'favorites' ? 'Favorites' : filter === 'mine' ? 'My Spots' : 'All'}
+                    </Text>
+                  </View>
                 </View>
-                {nearbyPickerLoading && <ActivityIndicator size="small" style={{ marginVertical: 12 }} />}
-                {nearbyPickerResults.map((brk: any) => (
-                  <Pressable key={brk.id} onPress={() => handleSelectNearbyBreak(brk)} style={styles.nearbyRow}>
-                    <Ionicons name="location-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
-                    <View style={{ marginLeft: 8, flex: 1 }}>
-                      <Text style={[styles.nearbyName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{brk.name}</Text>
-                      <Text style={{ fontSize: 11, color: isDark ? '#6b7280' : '#9ca3af' }}>
-                        {brk.region?.replaceAll('_', ' ')} · {brk.country_code}
-                      </Text>
-                    </View>
-                  </Pressable>
-                ))}
-                {debouncedNearbySearch.length < 2 && !nearbyPickerLoading && (
-                  <Text style={{ color: isDark ? '#4b5563' : '#9ca3af', textAlign: 'center', paddingVertical: 16, fontSize: 13 }}>
-                    Search for a break to explore nearby
-                  </Text>
-                )}
-              </ScrollView>
-            ) : debouncedTerm.length >= 2 ? (
-              /* Search results */
-              <ScrollView style={{ maxHeight: 300 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                {searchLoading ? (
+                {searchLoading && searchResults.length === 0 ? (
                   <View style={{ paddingVertical: 20, alignItems: 'center' }}>
                     <ActivityIndicator size="small" />
                   </View>
@@ -1004,104 +1066,56 @@ export default function MapScreen() {
                           {sb.name}
                         </Text>
                         <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-                          {sb.region ? `${sb.region.replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
+                          {sb.region ? `${String(sb.region).replaceAll('_', ' ')} · ` : ''}{sb.country_code ?? ''}
                         </Text>
                       </View>
                     </Pressable>
                   ))
                 ) : (
                   <Text style={{ color: '#9ca3af', textAlign: 'center', paddingVertical: 20, fontSize: 14 }}>
-                    No breaks found
+                    {filter === 'favorites' ? 'No favorited breaks match.' : filter === 'mine' ? 'None of your spots match.' : 'No breaks found'}
                   </Text>
                 )}
               </ScrollView>
             ) : (
-              /* Nearby section — default view */
-              <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-                {/* Location pill */}
-                <Pressable onPress={() => setShowNearbyBreakPicker(true)} style={styles.nearbyLocationRow}>
-                  <Ionicons name="navigate-outline" size={14} color="#0ea5e9" />
-                  <Text style={[styles.nearbyLocationText, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={1}>
-                    {currentNearbyName ? `Near ${currentNearbyName}` : 'Set a location'}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={14} color={isDark ? '#6b7280' : '#9ca3af'} />
-                </Pressable>
-
-                {/* Nearby Photographers — horizontal */}
-                {nearbyPhotographers.length > 0 && (
+              /* Empty state — recent searches, then suggested breaks, then a
+                 prompt. Replaces the old nearby lists (which duplicated Home +
+                 the map's own "In This Area" sheet). */
+              <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {recentBreaks.length > 0 ? (
                   <View style={styles.nearbySection}>
-                    <Text style={[styles.nearbySectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
-                      Photographers
-                    </Text>
-                    <FlatList
-                      data={nearbyPhotographers}
-                      horizontal
-                      showsHorizontalScrollIndicator={false}
-                      keyExtractor={(p: any) => p.id ?? p.handle}
-                      contentContainerStyle={{ paddingHorizontal: 8, gap: 12, paddingVertical: 4 }}
-                      renderItem={({ item: p }) => {
-                        const noteActive =
-                          !!p.status_note &&
-                          Date.now() - new Date(p.status_note_set_at).getTime() <
-                            7 * 24 * 60 * 60 * 1000;
-                        const stops = p.active ? ACTIVE_STOPS : noteActive ? NOTE_STOPS : null;
-                        const AVATAR = 44;
-                        const RING_STROKE = 3;
-                        const RING_GAP = 2;
-                        const RING_TOTAL = AVATAR + (RING_STROKE + RING_GAP) * 2;
-                        return (
-                          <Pressable
-                            onPress={() => trackedPush(`/user/${p.handle}`)}
-                            style={styles.nearbyPhotographer}
-                          >
-                            <View style={{ width: RING_TOTAL, height: RING_TOTAL, alignItems: 'center', justifyContent: 'center' }}>
-                              {stops && <GradientRing size={RING_TOTAL} strokeWidth={RING_STROKE} stops={stops} />}
-                              <UserAvatar
-                                uri={p.picture}
-                                name={p.name ?? p.handle}
-                                size={AVATAR}
-                                verified={p.verified}
-                                userType={p.verified ? (p.user_type ?? 'photographer') : undefined}
-                                badgeBackgroundColor={isDark ? 'rgba(17,24,39,0.95)' : 'rgba(255,255,255,0.95)'}
-                              />
-                            </View>
-                            <Text style={[styles.nearbyPhotographerHandle, { color: isDark ? '#d1d5db' : '#374151' }]} numberOfLines={1}>
-                              @{p.handle}
-                            </Text>
-                          </Pressable>
-                        );
-                      }}
-                    />
-                  </View>
-                )}
-
-                {/* Nearby Surf Breaks — vertical list */}
-                {nearbyBreaks.length > 0 && (
-                  <View style={styles.nearbySection}>
-                    <Text style={[styles.nearbySectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
-                      Surf Breaks
-                    </Text>
-                    {nearbyBreaks.slice(0, 8).map((sb: any) => (
-                      <Pressable key={sb.id} onPress={() => navigateToBreakOnMap(sb)} style={styles.nearbyRow}>
-                        <Ionicons name="location-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
+                    <Text style={[styles.nearbySectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Recent</Text>
+                    {recentBreaks.slice(0, 8).map((sb: any) => (
+                      <Pressable key={`recent-${sb.id}`} onPress={() => navigateToBreakOnMap(sb)} style={styles.nearbyRow}>
+                        <Ionicons name="time-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
                         <View style={{ marginLeft: 8, flex: 1 }}>
-                          <Text style={[styles.nearbyName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                            {sb.name}
-                          </Text>
+                          <Text style={[styles.nearbyName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{sb.name}</Text>
                           <Text style={{ fontSize: 11, color: isDark ? '#6b7280' : '#9ca3af' }}>
-                            {sb.distance > 0 ? `${formatDistance(sb.distance, units)} · ` : ''}
-                            {sb.region ? sb.region.replaceAll('_', ' ') : ''}{sb.country_code ? ` · ${sb.country_code}` : ''}
+                            {sb.region ? String(sb.region).replaceAll('_', ' ') : ''}{sb.country_code ? ` · ${sb.country_code}` : ''}
                           </Text>
                         </View>
                       </Pressable>
                     ))}
                   </View>
-                )}
-
-                {!currentNearbyName && nearbyBreaks.length === 0 && (
-                  <View style={{ paddingVertical: 16, paddingHorizontal: 12 }}>
+                ) : suggestedBreaks.length > 0 ? (
+                  <View style={styles.nearbySection}>
+                    <Text style={[styles.nearbySectionTitle, { color: isDark ? '#fff' : '#111827' }]}>Suggested</Text>
+                    {suggestedBreaks.map((sb: any) => (
+                      <Pressable key={`sugg-${sb.id}`} onPress={() => navigateToBreakOnMap(sb)} style={styles.nearbyRow}>
+                        <Ionicons name="location-outline" size={16} color={isDark ? '#9ca3af' : '#6b7280'} />
+                        <View style={{ marginLeft: 8, flex: 1 }}>
+                          <Text style={[styles.nearbyName, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{sb.name}</Text>
+                          <Text style={{ fontSize: 11, color: isDark ? '#6b7280' : '#9ca3af' }}>
+                            {sb.region ? String(sb.region).replaceAll('_', ' ') : ''}{sb.country_code ? ` · ${sb.country_code}` : ''}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ paddingVertical: 18, paddingHorizontal: 12 }}>
                     <Text style={{ color: isDark ? '#6b7280' : '#9ca3af', fontSize: 13, textAlign: 'center' }}>
-                      Set a location on your profile to see nearby breaks and photographers
+                      Search for a surf break to jump there on the map.
                     </Text>
                   </View>
                 )}
@@ -1213,6 +1227,14 @@ const styles = StyleSheet.create({
   adCalloutTitle: { fontSize: 13, fontWeight: '700', color: '#111827' },
   adCalloutSub: { fontSize: 11, color: '#6b7280', marginTop: 1 },
   adCalloutCta: { fontSize: 12, fontWeight: '600', color: '#0284c7', marginTop: 3 },
+  // Transparent padded box around the visible dot. Enlarges the tappable
+  // annotation (rn-maps snapshots the whole view) without changing how the pin
+  // looks. ~30px is a comfortable touch target while still letting adjacent
+  // pins be distinguished.
+  markerHit: {
+    width: 30, height: 30,
+    alignItems: 'center', justifyContent: 'center',
+  },
   marker: {
     width: 12, height: 12, borderRadius: 6,
     borderWidth: 2, borderColor: '#fff',
@@ -1290,6 +1312,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 10, paddingHorizontal: 4,
   },
+  scopeRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 4, paddingTop: 8, paddingBottom: 2,
+  },
+  scopeEyebrow: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+  scopePill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  scopePillText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.4, textTransform: 'uppercase' },
   resultName: { fontSize: 14, fontWeight: '600' },
   resultSub: { fontSize: 12, marginTop: 1 },
   nearbyLocationRow: {

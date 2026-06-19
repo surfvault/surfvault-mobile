@@ -12,6 +12,8 @@ const mapApi = rootApi.injectEndpoints({
         tags,
         viewerId,
         suggest,
+        favorites,
+        mine,
       }: {
         search: string;
         type?: string;
@@ -20,8 +22,12 @@ const mapApi = rootApi.injectEndpoints({
         // > 0 returns N suggested users (recent, block-filtered) for the empty
         // search state — mirrors web. Backend supports this for users only.
         suggest?: number;
+        // Scope the (break) search to the viewer's favorited breaks / own spots.
+        // Gated server-side on the trusted authorizer id. Mirrors web map search.
+        favorites?: boolean;
+        mine?: boolean;
       }) => ({
-        url: `/map/search?term=${search}&type=${type ?? 'all'}&tags=${(tags ?? []).join(',')}&viewerId=${viewerId ?? ''}&suggest=${suggest ?? 0}`,
+        url: `/map/search?term=${search}&type=${type ?? 'all'}&tags=${(tags ?? []).join(',')}&viewerId=${viewerId ?? ''}&suggest=${suggest ?? 0}&favorites=${favorites ? 'true' : 'false'}&mine=${mine ? 'true' : 'false'}`,
         method: 'GET',
       }),
     }),
