@@ -58,6 +58,32 @@ export type {
 } from './apis/endpoints/boardroom';
 
 export {
+  useGetLatestFilmsQuery,
+  useGetFilmsNearQuery,
+  useGetFilmsForSurfBreakQuery,
+  useGetFilmsForUserQuery,
+  useGetFilmQuery,
+  useCreateFilmMutation,
+  useUpdateFilmMutation,
+  useDeleteFilmMutation,
+  useTagFilmParticipantMutation,
+  useConfirmFilmParticipantMutation,
+  useTagFilmSurfBreakMutation,
+  useTagFilmBoardMutation,
+  useTagFilmSessionMutation,
+  useReportFilmMutation,
+} from './apis/endpoints/films';
+export type {
+  Film,
+  FilmBreak,
+  FilmRegion,
+  FilmParticipant,
+  FilmBoardTag,
+  FilmSessionTag,
+  FilmDetailResult,
+} from './apis/endpoints/films';
+
+export {
   useGetMapSearchContentQuery,
   useGetMapSurfBreaksQuery,
   useGetMapAdsQuery,

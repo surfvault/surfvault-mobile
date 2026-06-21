@@ -15,12 +15,13 @@ import {
   useGetLatestSessionsQuery,
   useGetAdsQuery,
   useGetLatestShapersQuery,
+  useGetFilmsNearQuery,
 } from '../../store';
 import { useUser } from '../../context/UserProvider';
 import { useAuth } from '../../context/AuthProvider';
 import { useUserCoords } from '../../hooks/useUserCoords';
 import SponsoredCard from '../SponsoredCard';
-import { SessionTile, ShaperTile } from './FeedTiles';
+import { SessionTile, ShaperTile, FilmTile } from './FeedTiles';
 
 /**
  * The "Discover" feed re-cast as a browsable 2-column Explore grid — lives as
@@ -35,11 +36,13 @@ import { SessionTile, ShaperTile } from './FeedTiles';
 const PAD = 12; // outer horizontal padding
 const GAP = 10; // gap between the two columns
 const SHAPER_EVERY = 5; // a shaper tile after every N session tiles
+const FILM_EVERY = 7; // a film tile after every N session tiles (offset from shapers)
 const AD_EVERY_ROWS = 2; // a full-width ad after every N grid rows (≈ every 4 tiles)
 
 type Tile =
   | { kind: 'session'; key: string; data: any }
-  | { kind: 'shaper'; key: string; data: any };
+  | { kind: 'shaper'; key: string; data: any }
+  | { kind: 'film'; key: string; data: any };
 type Row =
   | { type: 'pair'; key: string; items: Tile[] }
   | { type: 'ad'; key: string; ad: any };
@@ -133,6 +136,11 @@ export default function ExploreGrid({
     limit: 30,
   });
   const { data: shapersData } = useGetLatestShapersQuery({ limit: 50 });
+  const { data: filmsData } = useGetFilmsNearQuery({
+    lat: hasCoords && lat != null ? lat : undefined,
+    lon: hasCoords && lon != null ? lon : undefined,
+    limit: 30,
+  });
 
   // Accumulate grouped sessions across pages (dedup by date|group_key).
   useEffect(() => {
@@ -194,12 +202,14 @@ export default function ExploreGrid({
 
   const ads = adsData?.results?.ads ?? [];
   const shapers = shapersData?.results?.shapers ?? [];
+  const films = filmsData?.results?.films ?? [];
 
   // Build the grid rows: session tiles + interleaved shaper tiles, paired into
   // 2-col rows, with full-width ad rows injected at cadence.
   const rows = useMemo<Row[]>(() => {
     const tiles: Tile[] = [];
     let si = 0;
+    let fi = 0;
     // Only groups the session tile can render (needs at least one session).
     // Hidden-location groups DO render now (region/country label), so they're
     // kept — this just drops any empty group so every 2-col row stays full.
@@ -209,6 +219,10 @@ export default function ExploreGrid({
       if ((i + 1) % SHAPER_EVERY === 0 && si < shapers.length) {
         const sh = shapers[si++];
         tiles.push({ kind: 'shaper', key: `sh-${sh.id ?? sh.handle}`, data: sh });
+      }
+      if ((i + 1) % FILM_EVERY === 0 && fi < films.length) {
+        const fm = films[fi++];
+        tiles.push({ kind: 'film', key: `fm-${fm.id}`, data: fm });
       }
     });
 
@@ -227,7 +241,7 @@ export default function ExploreGrid({
       }
     }
     return out;
-  }, [groups, shapers, ads]);
+  }, [groups, shapers, films, ads]);
 
   // Viewability — only autoplay the ad whose row is on screen.
   const [viewableKeys, setViewableKeys] = useState<Set<string>>(new Set());
@@ -253,6 +267,8 @@ export default function ExploreGrid({
             <View key={t.key} style={{ marginRight: idx === 0 ? GAP : 0 }}>
               {t.kind === 'session' ? (
                 <SessionTile group={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+              ) : t.kind === 'film' ? (
+                <FilmTile film={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} />
               ) : (
                 <ShaperTile shaper={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
               )}

@@ -27,6 +27,7 @@ import {
   useUpdateUserFavoritesMutation,
   useGetAdsQuery,
   useGetShapersForSurfBreakQuery,
+  useGetFilmsForSurfBreakQuery,
 } from '../../src/store';
 import { useDispatch } from 'react-redux';
 import { setPendingUploadBreak } from '../../src/store/slices/surf';
@@ -36,7 +37,7 @@ import SponsoredCard from '../../src/components/SponsoredCard';
 import ShaperFeedCard from '../../src/components/ShaperFeedCard';
 import BreakSkeleton from '../../src/components/BreakSkeleton';
 import LocalsRail from '../../src/components/LocalsRail';
-import { BreakSessionTile, ShaperTile, BusinessTile } from '../../src/components/home/FeedTiles';
+import { BreakSessionTile, ShaperTile, BusinessTile, FilmTile } from '../../src/components/home/FeedTiles';
 import {
   // groupAdsByPartner intentionally not imported — Phase B retired
   // partner-level ad grouping; each ad is its own promo slot.
@@ -142,6 +143,17 @@ export default function SurfBreakDetailScreen() {
   const breakShapers = useMemo(
     () => shapersData?.results?.shapers ?? [],
     [shapersData]
+  );
+
+  // Surf films at / near this break (backend applies spot protection — only
+  // revealed exact breaks or region matches).
+  const { data: filmsData } = useGetFilmsForSurfBreakQuery(
+    { breakId: breakData?.id ?? '', limit: 20 },
+    { skip: !breakData?.id }
+  );
+  const breakFilms = useMemo(
+    () => filmsData?.results?.films ?? [],
+    [filmsData]
   );
 
   const feedAds = useMemo(
@@ -532,6 +544,26 @@ export default function SurfBreakDetailScreen() {
                 </View>
               )}
 
+              {/* Surf films filmed at / near this break */}
+              {breakFilms.length > 0 && (
+                <View style={styles.railSection}>
+                  <View style={styles.railHeaderRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.railTitle, { color: isDark ? '#fff' : '#111827' }]}>Surf Films</Text>
+                      <Text style={[styles.railSubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>Filmed at this break</Text>
+                    </View>
+                  </View>
+                  <FlatList
+                    horizontal
+                    data={breakFilms}
+                    keyExtractor={(f: any) => String(f.id)}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.railContent}
+                    renderItem={({ item }) => <FilmTile film={item} />}
+                  />
+                </View>
+              )}
+
               {/* Local business (paid ads scoped to this break) */}
               {breakAds.length > 0 && (
                 <View style={styles.railSection}>
@@ -554,7 +586,7 @@ export default function SurfBreakDetailScreen() {
                 </View>
               )}
 
-              {recentSessionGroups.length === 0 && breakShapers.length === 0 && breakAds.length === 0 && (
+              {recentSessionGroups.length === 0 && breakShapers.length === 0 && breakFilms.length === 0 && breakAds.length === 0 && (
                 <View style={styles.emptyWrap}>
                   <Ionicons name="camera-outline" size={48} color={isDark ? '#374151' : '#d1d5db'} />
                   <Text style={[styles.emptyTitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>

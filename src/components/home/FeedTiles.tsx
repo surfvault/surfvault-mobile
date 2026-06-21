@@ -11,7 +11,7 @@ import { pickThumbnailPhoto } from '../ShaperBoardsGrid';
 import { useRecordAdImpressionMutation } from '../../store';
 import { buildAdClickUrl, currentDevice } from '../../helpers/adTracking';
 import type { BreakDateGroup } from '../BreakDateCard';
-import type { BoardroomShaper } from '../../store';
+import type { BoardroomShaper, Film } from '../../store';
 
 /**
  * Compact horizontal-rail tiles for the SurfVault (nearby) landing — mirrors
@@ -492,6 +492,52 @@ export function ShaperTile({
         />
       }
       title={shaper.name ?? `@${shaper.handle}`}
+      subtitle={subtitle}
+      width={width}
+      style={style}
+    />
+  );
+}
+
+// ─────────────────────────── Surf Films ───────────────────────────
+// External YouTube records. Poster fills the tile with a play badge; tapping
+// opens the film detail page (embed). Subtitle prefers a revealed break name,
+// else region, else the creator.
+export function FilmTile({
+  film,
+  width,
+  style,
+  onNavigate,
+}: {
+  film: Film;
+  width?: number;
+  style?: any;
+  onNavigate?: (path: string) => void;
+}) {
+  const trackedPush = useTrackedPush();
+  const firstBreak = film.breaks?.[0];
+  const firstRegion = film.regions?.[0];
+  const creatorLabel =
+    film.creator_display_name || (film.creator_handle ? `@${film.creator_handle}` : film.creator_name);
+  const subtitle =
+    (firstBreak?.name ? firstBreak.name.replace(/_/g, ' ') : null) ||
+    firstRegion?.region ||
+    firstRegion?.country ||
+    creatorLabel ||
+    'Surf film';
+
+  return (
+    <RailTile
+      onPress={() => (onNavigate ?? trackedPush)(`/film/${film.id}` as any)}
+      heroUri={film.poster_url}
+      fallbackColor="#0c4a6e"
+      fallbackIcon={<Ionicons name="film-outline" size={28} color="#38bdf8" />}
+      topRight={
+        <Chip>
+          <Ionicons name="play" size={10} color="#fff" />
+        </Chip>
+      }
+      title={film.title || 'Surf film'}
       subtitle={subtitle}
       width={width}
       style={style}

@@ -49,6 +49,7 @@ import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
+import CreateFilmSheet from '../../src/components/CreateFilmSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 import { fetchAccountBadge, type AccountBadge } from '../../src/helpers/accountBadges';
@@ -75,6 +76,7 @@ export default function ProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [createFilmVisible, setCreateFilmVisible] = useState(false);
   const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
   const { accounts: linkedAccounts, activeUserId, switchTo: switchLinkedAccount, patchAccount, getFreshToken } =
     useLinkedAccounts();
@@ -576,6 +578,14 @@ export default function ProfileScreen() {
     },
     {
       options: [
+        {
+          label: 'Add a Film',
+          icon: 'film-outline',
+          onPress: () => {
+            setMenuVisible(false);
+            setCreateFilmVisible(true);
+          },
+        },
         {
           label: 'Manage Favorites',
           icon: 'heart-outline',
@@ -1240,6 +1250,8 @@ export default function ProfileScreen() {
         }}
         onClose={() => setMenuVisible(false)}
       />
+
+      <CreateFilmSheet visible={createFilmVisible} onClose={() => setCreateFilmVisible(false)} />
 
       {/* Quick switcher — active account (with checkmark) + siblings + manage entry. */}
       <ActionSheet

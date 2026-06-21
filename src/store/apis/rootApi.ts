@@ -17,6 +17,7 @@ export const ApiTag = {
   AdPartners: 'AdPartners',
   AccessRequest: 'AccessRequest',
   Boardroom: 'Boardroom',
+  Film: 'Film',
   LinkedAccount: 'LinkedAccount',
   Block: 'Block',
 } as const;
