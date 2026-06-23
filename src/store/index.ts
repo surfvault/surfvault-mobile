@@ -61,8 +61,11 @@ export {
   useGetLatestFilmsQuery,
   useGetFilmsNearQuery,
   useGetFilmsForSurfBreakQuery,
+  useGetFilmsFromFollowingQuery,
   useGetFilmsForUserQuery,
   useGetFilmQuery,
+  useGetFilmCandidateSessionsQuery,
+  useLazyCheckFilmByVideoIdQuery,
   useCreateFilmMutation,
   useUpdateFilmMutation,
   useDeleteFilmMutation,
@@ -71,6 +74,10 @@ export {
   useTagFilmSurfBreakMutation,
   useTagFilmBoardMutation,
   useTagFilmSessionMutation,
+  useConfirmFilmSessionMutation,
+  useClaimFilmCreatorMutation,
+  useVerifyFilmCheckMutation,
+  useVerifyFilmApplyMutation,
   useReportFilmMutation,
 } from './apis/endpoints/films';
 export type {
@@ -115,6 +122,7 @@ export {
 export {
   useCreateSurfSessionBookingMutation,
   useCreateBoardViewReportMutation,
+  useCreateFilmViewReportMutation,
   useCreateSurfSessionViewReportMutation,
   useDeleteSurfSessionBookingMutation,
   useGetBookingSearchContentQuery,
@@ -146,6 +154,7 @@ export {
   useGetMyCampaignsQuery,
   useReportAdMutation,
   useGetLatestSessionsQuery,
+  useGetExploreFeedQuery,
   useGetSessionGroupsQuery,
   useGetSessionPhotosQuery,
   useGetSessionQuery,

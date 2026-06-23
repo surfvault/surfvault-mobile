@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet, Platform, Dimensions } from 'react-n
 import MapView, { Marker, PROVIDER_DEFAULT, PROVIDER_GOOGLE, Region } from 'react-native-maps';
 import Svg, { Defs, LinearGradient, Stop, Rect } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
+import ActionSheet, { type ActionSheetOption } from './ActionSheet';
 
 const HERO_BODY = 285;
 const SCRIM_HEIGHT = 195;
@@ -33,10 +34,13 @@ interface BreakHeroProps {
   chipLabel: string;
   onDatePress: () => void;
   onClearChip: () => void;
-  // When provided, a big "+" CTA shows across from the title (above the date)
-  // that opens the create-session flow with this break preselected. Omitted for
-  // viewers who can't upload sessions here (shapers/advertisers).
+  // When provided, a big "+" CTA shows across from the title (above the date).
+  // With both upload + film actions it opens a choice menu (Upload a session /
+  // Add a surf film); with only one it fires that action directly. Upload is
+  // omitted for viewers who can't upload sessions (shapers/advertisers); film
+  // is omitted for logged-out viewers.
   onUploadPress?: () => void;
+  onFilmPress?: () => void;
 }
 
 function BreakHero({
@@ -52,7 +56,22 @@ function BreakHero({
   onDatePress,
   onClearChip,
   onUploadPress,
+  onFilmPress,
 }: BreakHeroProps) {
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  // Single create entry-point: both actions → choice menu; one → fire directly.
+  const createActions: ActionSheetOption[] = [
+    onUploadPress
+      ? { label: 'Upload a session', icon: 'cloud-upload-outline' as const, onPress: onUploadPress }
+      : null,
+    onFilmPress
+      ? { label: 'Add a surf film', icon: 'logo-youtube' as const, iconColor: '#dc2626', onPress: onFilmPress }
+      : null,
+  ].filter(Boolean) as ActionSheetOption[];
+  const onCreatePress = () => {
+    if (createActions.length === 1) createActions[0].onPress();
+    else if (createActions.length > 1) setCreateMenuOpen(true);
+  };
   const hasCoords = lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon);
   const heroHeight = topInset + HERO_BODY;
 
@@ -73,6 +92,7 @@ function BreakHero({
   const subtitle = `${regionDisplay}${regionDisplay && countryDisplay ? ' · ' : ''}${countryDisplay}`;
 
   return (
+    <>
     <View style={[styles.hero, { height: heroHeight }]}>
       {/* Map background — pointerEvents none so the list scrolls over it (and
           pull-to-refresh fires when the gesture starts on the hero). The flag
@@ -145,11 +165,11 @@ function BreakHero({
         </View>
 
         <View style={styles.rightCol}>
-          {onUploadPress && (
+          {createActions.length > 0 && (
             <Pressable
-              onPress={onUploadPress}
+              onPress={onCreatePress}
               style={({ pressed }) => [styles.uploadBtn, { opacity: pressed ? 0.85 : 1 }]}
-              accessibilityLabel="Share a session at this break"
+              accessibilityLabel="Add a session or surf film at this break"
             >
               <Ionicons name="add" size={30} color="#fff" />
             </Pressable>
@@ -173,6 +193,13 @@ function BreakHero({
         </View>
       </View>
     </View>
+    <ActionSheet
+      visible={createMenuOpen}
+      onClose={() => setCreateMenuOpen(false)}
+      title="Add to this break"
+      sections={[{ options: createActions.map((a) => ({ ...a, onPress: () => { setCreateMenuOpen(false); a.onPress(); } })) }]}
+    />
+    </>
   );
 }
 

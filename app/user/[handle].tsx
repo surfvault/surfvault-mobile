@@ -43,11 +43,13 @@ import { AccessBanner, PrivateGalleryCard, BlockedGalleryCard } from '../../src/
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
+import ProfileFilmsGrid from '../../src/components/ProfileFilmsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import FilmsGrid from '../../src/components/FilmsGrid';
 import PaymentSheet, { hasPaymentChannels, acceptsDonations } from '../../src/components/PaymentSheet';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 import { safeShare, openUrl } from '../../src/helpers/share';
+import { youtubeUrl } from '../../src/helpers/socialLinks';
 
 export default function UserProfileScreen() {
   const { handle } = useLocalSearchParams<{ handle: string }>();
@@ -60,7 +62,7 @@ export default function UserProfileScreen() {
   const { viewabilityConfig, onViewableItemsChanged, isItemViewable, screenFocused } = useViewableItems();
   const isDark = colorScheme === 'dark';
 
-  const [activeTab, setActiveTab] = useState<'grid' | 'list'>('grid');
+  const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'films'>('grid');
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -367,7 +369,7 @@ export default function UserProfileScreen() {
       label: 'YouTube',
       icon: 'logo-youtube' as const,
       iconColor: '#ef4444',
-      onPress: () => openUrl(`https://youtube.com/@${profile.youtube}`),
+      onPress: () => { const u = youtubeUrl(profile.youtube as string); if (u) openUrl(u); },
     },
     profile?.website && {
       label: 'Website',
@@ -420,7 +422,7 @@ export default function UserProfileScreen() {
             renderItem={() => (
               <ShaperBoardsGrid
                 handle={handle ?? ''}
-                mode={activeTab}
+                mode={activeTab === 'films' ? 'grid' : activeTab}
                 isSelf={!!currentUser?.handle && handle === currentUser.handle}
               />
             )}
@@ -450,7 +452,7 @@ export default function UserProfileScreen() {
             renderItem={() => (
               <AdvertiserAdsGrid
                 handle={handle ?? ''}
-                mode={activeTab}
+                mode={activeTab === 'films' ? 'grid' : activeTab}
                 isSelf={!!currentUser?.handle && handle === currentUser.handle}
               />
             )}
@@ -471,7 +473,7 @@ export default function UserProfileScreen() {
           />
         ) : (
           <FlatList
-            data={isBlocked || isLocked ? [] : sessions}
+            data={isBlocked || isLocked || activeTab === 'films' ? [] : sessions}
             keyExtractor={(item) => item.session_id ?? item.id}
             onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
@@ -572,9 +574,20 @@ export default function UserProfileScreen() {
                     <Pressable onPress={() => setActiveTab('list')} style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}>
                       <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
                     </Pressable>
+                    <Pressable onPress={() => setActiveTab('films')} style={[styles.tabBtn, activeTab === 'films' && styles.tabBtnActive]}>
+                      <Ionicons name={activeTab === 'films' ? 'videocam' : 'videocam-outline'} size={22} color={activeTab === 'films' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+                    </Pressable>
                   </View>
                 )}
                 <AccessBanner isPrivate={isPrivate} accessRequest={accessRequest} scope="profile" />
+                {activeTab === 'films' && !isLocked && !isBlocked && handle ? (
+                  <ProfileFilmsGrid
+                    handle={handle}
+                    scope={isSelf ? 'mine' : undefined}
+                    verifiedOnly={!isSelf}
+                    emptyText="No films yet."
+                  />
+                ) : null}
               </>
             }
             ListEmptyComponent={

@@ -47,6 +47,7 @@ import UserTypeBadge from '../../src/components/UserTypeBadge';
 import SessionCard from '../../src/components/SessionCard';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
+import ProfileFilmsGrid from '../../src/components/ProfileFilmsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import CreateFilmSheet from '../../src/components/CreateFilmSheet';
@@ -74,7 +75,7 @@ export default function ProfileScreen() {
   const [updateMeta] = useUpdateUserMetaDataMutation();
   const { setTabBarVisible } = useTabBar();
 
-  const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'tagged' | 'favorites'>('grid');
+  const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'films' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
   const [createFilmVisible, setCreateFilmVisible] = useState(false);
   const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
@@ -731,6 +732,9 @@ export default function ProfileScreen() {
         <Pressable onPress={() => setActiveTab('list')} style={[s.tabBtn, activeTab === 'list' && s.tabBtnActive]}>
           <Ionicons name={activeTab === 'list' ? 'list' : 'list-outline'} size={22} color={activeTab === 'list' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
+        <Pressable onPress={() => setActiveTab('films')} style={[s.tabBtn, activeTab === 'films' && s.tabBtnActive]}>
+          <Ionicons name={activeTab === 'films' ? 'videocam' : 'videocam-outline'} size={22} color={activeTab === 'films' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
+        </Pressable>
         <Pressable onPress={() => setActiveTab('tagged')} style={[s.tabBtn, activeTab === 'tagged' && s.tabBtnActive]}>
           <Ionicons name={activeTab === 'tagged' ? 'pricetag' : 'pricetag-outline'} size={20} color={activeTab === 'tagged' ? (isDark ? '#fff' : '#111827') : (isDark ? '#6b7280' : '#9ca3af')} />
         </Pressable>
@@ -816,6 +820,26 @@ export default function ProfileScreen() {
           {listHeader}
           {user?.handle ? (
             <AdvertiserAdsGrid handle={user.handle} isSelf mode={activeTab === 'list' ? 'list' : 'grid'} />
+          ) : null}
+        </ScrollView>
+      ) : activeTab === 'films' ? (
+        // Films tab — surf films the user created/catalogued (scope='mine'
+        // includes their unverified entries). Mirror of the web profile Films tab.
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 24 }}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {listHeader}
+          {user?.handle ? (
+            <ProfileFilmsGrid
+              handle={user.handle}
+              scope="mine"
+              emptyText="No films yet — add one from a surf break or Home."
+            />
           ) : null}
         </ScrollView>
       ) : (

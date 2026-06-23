@@ -14,12 +14,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import ActionSheet, { type ActionSheetOption } from './ActionSheet';
 import UserAvatar from './UserAvatar';
 import { useUser } from '../context/UserProvider';
 import {
   useGetMapSearchContentQuery,
   useGetSurfBreaksQuery,
-  useGetUserSessionsQuery,
+  useGetFilmCandidateSessionsQuery,
   useTagFilmParticipantMutation,
   useTagFilmSurfBreakMutation,
   useTagFilmSessionMutation,
@@ -48,6 +49,7 @@ export default function FilmTagSheet({
   participants = [],
   suggestedBreaks = [],
   linkedSessions = [],
+  viewerCanReveal = false,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -56,22 +58,33 @@ export default function FilmTagSheet({
   participants?: FilmParticipant[];
   suggestedBreaks?: SuggestedBreak[];
   linkedSessions?: FilmSessionTag[];
+  // Verified creator / admin → may flip a break's visibility (reveal/hide).
+  viewerCanReveal?: boolean;
 }) {
   const isDark = useColorScheme() === 'dark';
   const { user } = useUser();
   const [userSearch, setUserSearch] = useState('');
   const [breakSearch, setBreakSearch] = useState('');
+  // Which tagged break's manage sheet (reveal/hide · remove) is open.
+  const [breakSheet, setBreakSheet] = useState<any | null>(null);
 
   const [tagParticipant] = useTagFilmParticipantMutation();
   const [tagBreak] = useTagFilmSurfBreakMutation();
   const [tagSession] = useTagFilmSessionMutation();
 
-  // The picker lists the linker's OWN sessions (no global session search).
-  const { data: sessionsData, isFetching: sessionsLoading } = useGetUserSessionsQuery(
-    { handle: selfHandle ?? '', selfFlag: true, limit: 50, continuationToken: '' },
-    { skip: !visible || !selfHandle }
+  const taggedBreakIds = new Set(suggestedBreaks.map((b) => b.id));
+  const hasBreaks = suggestedBreaks.length > 0;
+  const hasParticipants = participants.length > 0;
+
+  // Session picker pulls from a backend candidate list: sessions AT the film's
+  // tagged breaks owned by the film's CONFIRMED participants — not a blind
+  // self-list. So a session only appears once both its break and its
+  // photographer/surfer are tagged and that person has accepted.
+  const { data: sessionsData, isFetching: sessionsLoading } = useGetFilmCandidateSessionsQuery(
+    { filmId },
+    { skip: !visible || !hasBreaks || !hasParticipants }
   );
-  const mySessions: any[] = sessionsData?.results?.sessions ?? [];
+  const candidateSessions: any[] = sessionsData?.results?.sessions ?? [];
   const linkedSessionIds = new Set(linkedSessions.map((s) => s.id));
 
   const { data: userData, isFetching: usersLoading } = useGetMapSearchContentQuery(
@@ -87,7 +100,6 @@ export default function FilmTagSheet({
   const breakResults: any[] = breakData?.results?.breaks ?? [];
 
   const taggedUserIds = new Set(participants.map((p) => p.id));
-  const taggedBreakIds = new Set(suggestedBreaks.map((b) => b.id));
 
   const bg = isDark ? '#000' : '#fff';
   const text = isDark ? '#fff' : '#0f172a';
@@ -108,66 +120,27 @@ export default function FilmTagSheet({
           </Pressable>
         </View>
 
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
-          {/* People */}
-          <Text style={[styles.sectionTitle, { color: text }]}>Surfers & filmers</Text>
-          {participants.length > 0 && (
-            <View style={styles.tagWrap}>
-              {participants.map((p) => (
-                <View key={p.id} style={[styles.tag, { backgroundColor: inputBg }]}>
-                  <UserAvatar uri={p.picture} name={p.name ?? p.handle} size={20} />
-                  <Text style={[styles.tagText, { color: text }]}>@{p.handle}</Text>
-                  {!p.confirmed && <Text style={styles.pending}>pending</Text>}
-                  <Pressable onPress={() => run(() => tagParticipant({ filmId, userId: p.id, action: 'remove' }).unwrap(), 'Failed to remove')} hitSlop={6}>
-                    <Ionicons name="close-circle" size={16} color={sub} />
-                  </Pressable>
-                </View>
-              ))}
-            </View>
-          )}
-          <TextInput
-            value={userSearch}
-            onChangeText={setUserSearch}
-            placeholder="Search people…"
-            placeholderTextColor={sub}
-            style={[styles.input, { backgroundColor: inputBg, color: text }]}
-          />
-          {userSearch.trim().length >= 2 && (
-            <View style={styles.results}>
-              {usersLoading ? (
-                <ActivityIndicator style={{ margin: 12 }} />
-              ) : userResults.length === 0 ? (
-                <Text style={[styles.noResults, { color: sub }]}>No people found.</Text>
-              ) : userResults.map((u) => (
-                <Pressable
-                  key={u.id}
-                  disabled={taggedUserIds.has(u.id)}
-                  onPress={() => run(() => tagParticipant({ filmId, userId: u.id, action: 'add' }).unwrap(), 'Failed to tag')}
-                  style={[styles.resultRow, taggedUserIds.has(u.id) && { opacity: 0.4 }]}
-                >
-                  <UserAvatar uri={u.picture} name={u.name ?? u.handle} size={26} />
-                  <Text style={[styles.resultText, { color: text }]}>@{u.handle}</Text>
-                  {!taggedUserIds.has(u.id) && <Ionicons name="add" size={18} color="#0ea5e9" />}
-                </Pressable>
-              ))}
-            </View>
-          )}
-
-          {/* Breaks */}
-          <Text style={[styles.sectionTitle, { color: text, marginTop: 24 }]}>Surf breaks</Text>
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+          {/* Breaks — first: sessions are pulled from the film's tagged breaks. */}
+          <Text style={[styles.sectionTitle, { color: text }]}>Surf breaks</Text>
           <Text style={[styles.hint, { color: sub }]}>
             Breaks you add stay private until the film's verified creator reveals them — this protects hidden spots.
           </Text>
           {suggestedBreaks.length > 0 && (
             <View style={styles.tagWrap}>
               {suggestedBreaks.map((b) => (
-                <View key={b.id} style={[styles.tag, { backgroundColor: inputBg }]}>
+                <Pressable
+                  key={b.id}
+                  onPress={() => setBreakSheet(b)}
+                  style={[styles.tag, { backgroundColor: inputBg }]}
+                >
                   <Text style={[styles.tagText, { color: text }]}>{b.name?.replace(/_/g, ' ')}</Text>
-                  {!b.is_public && <Text style={styles.pending}>hidden</Text>}
-                  <Pressable onPress={() => run(() => tagBreak({ filmId, surfBreakId: b.id, action: 'remove' }).unwrap(), 'Failed to remove')} hitSlop={6}>
-                    <Ionicons name="close-circle" size={16} color={sub} />
-                  </Pressable>
-                </View>
+                  <Ionicons
+                    name={b.is_public ? 'eye-outline' : 'eye-off-outline'}
+                    size={16}
+                    color={b.is_public ? '#10b981' : '#f59e0b'}
+                  />
+                </Pressable>
               ))}
             </View>
           )}
@@ -202,56 +175,143 @@ export default function FilmTagSheet({
             </View>
           )}
 
-          {/* Sessions — link your own SurfVault sessions (no global search). */}
-          {selfHandle ? (
-            <>
-              <Text style={[styles.sectionTitle, { color: text, marginTop: 24 }]}>Your sessions</Text>
-              {linkedSessions.length > 0 && (
-                <View style={styles.tagWrap}>
-                  {linkedSessions.map((s) => (
-                    <View key={s.id} style={[styles.tag, { backgroundColor: inputBg }]}>
-                      <Text style={[styles.tagText, { color: text }]} numberOfLines={1}>
-                        {s.session_name || s.surf_break_name?.replace(/_/g, ' ') || 'Session'}
-                      </Text>
-                      <Pressable onPress={() => run(() => tagSession({ filmId, sessionId: s.id, action: 'remove' }).unwrap(), 'Failed to unlink')} hitSlop={6}>
-                        <Ionicons name="close-circle" size={16} color={sub} />
-                      </Pressable>
-                    </View>
-                  ))}
-                </View>
-              )}
-              <View style={styles.results}>
-                {sessionsLoading ? (
-                  <ActivityIndicator style={{ margin: 12 }} />
-                ) : mySessions.length === 0 ? (
-                  <Text style={[styles.noResults, { color: sub }]}>You have no sessions to link.</Text>
-                ) : mySessions.map((s) => (
-                  <Pressable
-                    key={s.id}
-                    disabled={linkedSessionIds.has(s.id)}
-                    onPress={() => run(() => tagSession({ filmId, sessionId: s.id, action: 'add' }).unwrap(), 'Failed to link session')}
-                    style={[styles.resultRow, linkedSessionIds.has(s.id) && { opacity: 0.4 }]}
-                  >
-                    {s.thumbnail ? (
-                      <Image source={{ uri: s.thumbnail }} style={styles.sessionThumb} contentFit="cover" />
-                    ) : (
-                      <View style={[styles.sessionThumb, { backgroundColor: inputBg, alignItems: 'center', justifyContent: 'center' }]}>
-                        <Ionicons name="images-outline" size={14} color={sub} />
-                      </View>
-                    )}
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.resultText, { color: text }]} numberOfLines={1}>
-                        {s.session_name || s.surf_break_name?.replace(/_/g, ' ') || 'Session'}
-                      </Text>
-                      {s.session_date ? <Text style={{ color: sub, fontSize: 11 }}>{String(s.session_date)}</Text> : null}
-                    </View>
-                    {!linkedSessionIds.has(s.id) && <Ionicons name="add" size={18} color="#0ea5e9" />}
+          {/* People & brands — search returns every user type (surfer,
+              photographer, advertiser, shaper). */}
+          <Text style={[styles.sectionTitle, { color: text, marginTop: 24 }]}>Surfers, filmers & brands</Text>
+          {participants.length > 0 && (
+            <View style={styles.tagWrap}>
+              {participants.map((p) => (
+                <View key={p.id} style={[styles.tag, { backgroundColor: inputBg }]}>
+                  <UserAvatar uri={p.picture} name={p.name ?? p.handle} size={20} />
+                  <Text style={[styles.tagText, { color: text }]}>@{p.handle}</Text>
+                  {!p.confirmed && <Text style={styles.pending}>pending</Text>}
+                  <Pressable onPress={() => run(() => tagParticipant({ filmId, userId: p.id, action: 'remove' }).unwrap(), 'Failed to remove')} hitSlop={6}>
+                    <Ionicons name="close-circle" size={16} color={sub} />
                   </Pressable>
-                ))}
-              </View>
-            </>
-          ) : null}
+                </View>
+              ))}
+            </View>
+          )}
+          <TextInput
+            value={userSearch}
+            onChangeText={setUserSearch}
+            placeholder="Search surfers, filmers & brands…"
+            placeholderTextColor={sub}
+            style={[styles.input, { backgroundColor: inputBg, color: text }]}
+          />
+          {userSearch.trim().length >= 2 && (
+            <View style={styles.results}>
+              {usersLoading ? (
+                <ActivityIndicator style={{ margin: 12 }} />
+              ) : userResults.length === 0 ? (
+                <Text style={[styles.noResults, { color: sub }]}>No people found.</Text>
+              ) : userResults.map((u) => (
+                <Pressable
+                  key={u.id}
+                  disabled={taggedUserIds.has(u.id)}
+                  onPress={() => run(() => tagParticipant({ filmId, userId: u.id, action: 'add' }).unwrap(), 'Failed to tag')}
+                  style={[styles.resultRow, taggedUserIds.has(u.id) && { opacity: 0.4 }]}
+                >
+                  <UserAvatar uri={u.picture} name={u.name ?? u.handle} size={26} />
+                  <Text style={[styles.resultText, { color: text }]}>@{u.handle}</Text>
+                  {!taggedUserIds.has(u.id) && <Ionicons name="add" size={18} color="#0ea5e9" />}
+                </Pressable>
+              ))}
+            </View>
+          )}
+
+          {/* Sessions — candidate sessions at the tagged breaks, owned by the
+              film's confirmed participants (backend-filtered). */}
+          <Text style={[styles.sectionTitle, { color: text, marginTop: 24 }]}>Sessions</Text>
+          <Text style={[styles.hint, { color: sub }]}>
+            Only sessions shot at the tagged breaks by the tagged surfers/photographers (once they accept) can be linked.
+          </Text>
+          {linkedSessions.length > 0 && (
+            <View style={styles.tagWrap}>
+              {linkedSessions.map((s) => (
+                <View key={s.id} style={[styles.tag, { backgroundColor: inputBg }]}>
+                  <Text style={[styles.tagText, { color: text }]} numberOfLines={1}>
+                    {s.session_name || s.surf_break_name?.replace(/_/g, ' ') || 'Session'}
+                  </Text>
+                  <Pressable onPress={() => run(() => tagSession({ filmId, sessionId: s.id, action: 'remove' }).unwrap(), 'Failed to unlink')} hitSlop={6}>
+                    <Ionicons name="close-circle" size={16} color={sub} />
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+          )}
+          <View style={styles.results}>
+            {!hasBreaks ? (
+              <Text style={[styles.noResults, { color: sub }]}>Tag a surf break above first.</Text>
+            ) : !hasParticipants ? (
+              <Text style={[styles.noResults, { color: sub }]}>Tag surfers or photographers — their sessions at these breaks appear once they accept.</Text>
+            ) : sessionsLoading ? (
+              <ActivityIndicator style={{ margin: 12 }} />
+            ) : candidateSessions.length === 0 ? (
+              <Text style={[styles.noResults, { color: sub }]}>No sessions available to link yet.</Text>
+            ) : candidateSessions.map((s) => {
+              const meta = [
+                s.owner_handle ? `@${s.owner_handle}` : null,
+                s.surf_break_name ? s.surf_break_name.replace(/_/g, ' ') : null,
+              ].filter(Boolean).join('  ·  ');
+              return (
+                <Pressable
+                  key={s.id}
+                  disabled={linkedSessionIds.has(s.id)}
+                  onPress={() => run(() => tagSession({ filmId, sessionId: s.id, action: 'add' }).unwrap(), 'Failed to link session')}
+                  style={[styles.resultRow, linkedSessionIds.has(s.id) && { opacity: 0.4 }]}
+                >
+                  {s.thumbnail ? (
+                    <Image source={{ uri: s.thumbnail }} style={styles.sessionThumb} contentFit="cover" />
+                  ) : (
+                    <View style={[styles.sessionThumb, { backgroundColor: inputBg, alignItems: 'center', justifyContent: 'center' }]}>
+                      <Ionicons name="images-outline" size={14} color={sub} />
+                    </View>
+                  )}
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.resultText, { color: text }]} numberOfLines={1}>
+                      {s.session_name || s.surf_break_name?.replace(/_/g, ' ') || 'Session'}
+                    </Text>
+                    {meta ? <Text style={{ color: sub, fontSize: 11 }} numberOfLines={1}>{meta}</Text> : null}
+                  </View>
+                  {!linkedSessionIds.has(s.id) && <Ionicons name="add" size={18} color="#0ea5e9" />}
+                </Pressable>
+              );
+            })}
+          </View>
         </ScrollView>
+
+        {/* Manage a tagged break — reveal/hide (verified creator/admin) + remove. */}
+        <ActionSheet
+          visible={!!breakSheet}
+          onClose={() => setBreakSheet(null)}
+          title={breakSheet?.name?.replace(/_/g, ' ')}
+          sections={[{
+            options: [
+              ...(viewerCanReveal
+                ? [{
+                    label: breakSheet?.is_public ? 'Hide spot (show region only)' : 'Reveal exact spot',
+                    icon: (breakSheet?.is_public ? 'eye-off-outline' : 'eye-outline') as ActionSheetOption['icon'],
+                    onPress: () => {
+                      const b = breakSheet;
+                      setBreakSheet(null);
+                      run(() => tagBreak({ filmId, surfBreakId: b.id, action: b.is_public ? 'hide' : 'reveal' }).unwrap(), 'Failed to update visibility');
+                    },
+                  }]
+                : []),
+              {
+                label: 'Remove break',
+                icon: 'trash-outline' as ActionSheetOption['icon'],
+                destructive: true,
+                onPress: () => {
+                  const b = breakSheet;
+                  setBreakSheet(null);
+                  run(() => tagBreak({ filmId, surfBreakId: b.id, action: 'remove' }).unwrap(), 'Failed to remove');
+                },
+              },
+            ],
+          }]}
+        />
       </SafeAreaView>
     </Modal>
   );

@@ -35,7 +35,15 @@ export interface Film {
   location_locked: boolean;
   breaks: FilmBreak[];
   regions: FilmRegion[];
+  // Regions that contain a HIDDEN break (region-level, no spot named). Detail only.
+  hidden_regions?: FilmRegion[];
   participant_count: number;
+  // YouTube publish date (UTC), drives chronological feeds. Nullable.
+  film_date: string | null;
+  // All-time view count (feeds/detail that select it).
+  views?: number;
+  // Following feed only: which followed users surfaced this film.
+  following_connections?: Array<{ handle: string; name: string | null; picture: string | null; verified?: boolean }>;
   distance_km?: number | null;
   created_at: string;
   updated_at: string;
@@ -71,6 +79,7 @@ export interface FilmSessionTag {
   owner_handle: string;
   owner_name: string | null;
   thumbnail: string | null;
+  confirmed?: boolean;
 }
 
 export interface FilmDetailResult {
@@ -80,6 +89,11 @@ export interface FilmDetailResult {
   sessions: FilmSessionTag[];
   suggestedBreaks: Array<FilmBreak & { is_public: boolean; suggested_by: string | null }>;
   viewerCanEdit: boolean;
+  viewerCanLinkSessions?: boolean;
+  viewerCanVerify?: boolean;
+  viewerCanReveal?: boolean;
+  pendingVerificationCode?: string | null;
+  creditsVisible?: boolean;
 }
 
 /**
@@ -89,9 +103,9 @@ export interface FilmDetailResult {
  */
 const filmsApi = rootApi.injectEndpoints({
   endpoints: (builder) => ({
-    getLatestFilms: builder.query<{ results: { films: Film[] } }, { limit?: number } | void>({
+    getLatestFilms: builder.query<{ results: { films: Film[] } }, { limit?: number; sort?: 'popular' } | void>({
       providesTags: [ApiTag.Film],
-      query: (args) => ({ url: `/films/latest?limit=${args?.limit ?? 30}`, method: 'GET' }),
+      query: (args) => ({ url: `/films/latest?limit=${args?.limit ?? 30}${args?.sort ? `&sort=${args.sort}` : ''}`, method: 'GET' }),
     }),
     getFilmsNear: builder.query<
       { results: { films: Film[] } },
@@ -108,21 +122,29 @@ const filmsApi = rootApi.injectEndpoints({
     }),
     getFilmsForSurfBreak: builder.query<
       { results: { films: Film[] } },
-      { breakId: string; limit?: number }
+      { breakId: string; limit?: number; verifiedOnly?: boolean }
     >({
       providesTags: [ApiTag.Film],
-      query: ({ breakId, limit = 20 }) => ({
-        url: `/surf-breaks/${breakId}/films?limit=${limit}`,
+      query: ({ breakId, limit = 20, verifiedOnly = false }) => ({
+        url: `/surf-breaks/${breakId}/films?limit=${limit}${verifiedOnly ? '&verifiedOnly=true' : ''}`,
         method: 'GET',
       }),
     }),
+    // Auth: films tied to people you follow (confirmed participant / verified or
+    // self-listed creator). Drives the Following films.
+    getFilmsFromFollowing: builder.query<{ results: { films: Film[] } }, { limit?: number } | void>({
+      providesTags: [ApiTag.Film, ApiTag.Follow],
+      query: (args) => ({ url: `/films/from-following?limit=${args?.limit ?? 30}`, method: 'GET' }),
+    }),
     getFilmsForUser: builder.query<
       { results: { films: Film[] } },
-      { handle: string; limit?: number }
+      // scope (self-only): 'mine' = created/catalogued incl. unverified;
+      // 'tagged' = confirmed-participant. Omit for earned-only (default).
+      { handle: string; limit?: number; scope?: 'mine' | 'tagged' }
     >({
       providesTags: [ApiTag.Film],
-      query: ({ handle, limit = 30 }) => ({
-        url: `/users/${handle}/films?limit=${limit}`,
+      query: ({ handle, limit = 30, scope }) => ({
+        url: `/users/${handle}/films?limit=${limit}${scope ? `&scope=${scope}` : ''}`,
         method: 'GET',
       }),
     }),
@@ -130,11 +152,25 @@ const filmsApi = rootApi.injectEndpoints({
       providesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }, ApiTag.Film],
       query: ({ filmId }) => ({ url: `/films/${filmId}`, method: 'GET' }),
     }),
+    // Dedupe pre-check for Add-a-film: resolves the canonical record for a video
+    // id without creating. { exists, filmId, title }.
+    checkFilmByVideoId: builder.query<
+      { results: { exists: boolean; filmId: string | null; title?: string } },
+      { videoId: string }
+    >({
+      query: ({ videoId }) => ({ url: `/films/by-video?videoId=${encodeURIComponent(videoId)}`, method: 'GET' }),
+    }),
+    // Link-a-session picker source: sessions at the film's tagged breaks owned by
+    // the film's CONFIRMED participants — not a blind self-list. Mirror of web.
+    getFilmCandidateSessions: builder.query<{ results: { sessions: FilmSessionTag[] } }, { filmId: string }>({
+      providesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }],
+      query: ({ filmId }) => ({ url: `/films/${filmId}/candidate-sessions`, method: 'GET' }),
+    }),
 
     // ---- Writes ----
     createFilm: builder.mutation<
       { results: { filmId: string } },
-      { youtube_video_id?: string; youtube_url?: string; title: string; description?: string; poster_url?: string | null; creator_name?: string | null }
+      { youtube_video_id?: string; youtube_url?: string; title: string; description?: string; poster_url?: string | null; creator_name?: string | null; film_date?: string }
     >({
       invalidatesTags: [ApiTag.Film],
       query: (payload) => ({ url: `/films`, method: 'POST', body: payload }),
@@ -173,8 +209,8 @@ const filmsApi = rootApi.injectEndpoints({
       }),
     }),
     tagFilmSurfBreak: builder.mutation<
-      { results: { success: boolean } },
-      { filmId: string; surfBreakId: string; action?: 'add' | 'remove' }
+      { results: { success: boolean; is_public?: boolean } },
+      { filmId: string; surfBreakId: string; action?: 'add' | 'remove' | 'reveal' | 'hide' }
     >({
       invalidatesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }, ApiTag.Film],
       query: ({ filmId, surfBreakId, action }) => ({
@@ -205,6 +241,39 @@ const filmsApi = rootApi.injectEndpoints({
         body: { sessionId, action: action ?? 'add' },
       }),
     }),
+    // Session owner approves/rejects a pending editor-linked session.
+    confirmFilmSession: builder.mutation<
+      { results: { success: boolean } },
+      { filmId: string; sessionId: string; action?: 'confirm' | 'reject' }
+    >({
+      invalidatesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }, ApiTag.Film, ApiTag.Notification],
+      query: ({ filmId, sessionId, action }) => ({
+        url: `/films/${filmId}/sessions/${sessionId}/confirm`,
+        method: 'POST',
+        body: { action: action ?? 'confirm' },
+      }),
+    }),
+    // ---- Creator verification (description-code) ----
+    claimFilmCreator: builder.mutation<
+      { results: { code: string; token: string } },
+      { filmId: string }
+    >({
+      invalidatesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }, ApiTag.Film],
+      query: ({ filmId }) => ({ url: `/films/${filmId}/claim`, method: 'POST' }),
+    }),
+    verifyFilmCheck: builder.mutation<
+      { results: { matched: boolean; resultToken?: string } },
+      { filmId: string; token: string }
+    >({
+      query: ({ filmId, token }) => ({ url: `/films/${filmId}/verify-check`, method: 'POST', body: { token } }),
+    }),
+    verifyFilmApply: builder.mutation<
+      { results: { filmId: string; verified: boolean } },
+      { filmId: string; resultToken: string }
+    >({
+      invalidatesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }, ApiTag.Film],
+      query: ({ filmId, resultToken }) => ({ url: `/films/${filmId}/verify-apply`, method: 'POST', body: { resultToken } }),
+    }),
     reportFilm: builder.mutation<
       { message: string },
       { filmId: string; reason: string; details?: string }
@@ -223,8 +292,11 @@ export const {
   useGetLatestFilmsQuery,
   useGetFilmsNearQuery,
   useGetFilmsForSurfBreakQuery,
+  useGetFilmsFromFollowingQuery,
   useGetFilmsForUserQuery,
   useGetFilmQuery,
+  useGetFilmCandidateSessionsQuery,
+  useLazyCheckFilmByVideoIdQuery,
   useCreateFilmMutation,
   useUpdateFilmMutation,
   useDeleteFilmMutation,
@@ -233,6 +305,10 @@ export const {
   useTagFilmSurfBreakMutation,
   useTagFilmBoardMutation,
   useTagFilmSessionMutation,
+  useConfirmFilmSessionMutation,
+  useClaimFilmCreatorMutation,
+  useVerifyFilmCheckMutation,
+  useVerifyFilmApplyMutation,
   useReportFilmMutation,
 } = filmsApi;
 export { filmsApi };

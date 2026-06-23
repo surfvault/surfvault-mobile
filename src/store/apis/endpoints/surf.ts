@@ -56,6 +56,18 @@ const surfApi = rootApi.injectEndpoints({
         body: { userId, action },
       }),
     }),
+    // Unified Explore feed: sessions + films + boards in one sorted stream.
+    // sort = new (created_at) | recent (content date) | popular (views).
+    getExploreFeed: builder.query<
+      { results: { items: any[]; continuationToken: string | null } },
+      { sort?: 'new' | 'recent' | 'popular'; limit?: number; continuationToken?: string }
+    >({
+      providesTags: [ApiTag.SurfBreak, ApiTag.Film],
+      query: ({ sort = 'new', limit = 12, continuationToken } = {}) => ({
+        url: `/explore-feed?sort=${sort}&limit=${limit}&continuationToken=${continuationToken ?? ''}`,
+        method: 'GET',
+      }),
+    }),
     getLatestSessions: builder.query({
       providesTags: [ApiTag.SurfBreak],
       query: ({
@@ -572,6 +584,7 @@ export const {
   useGetUsersForSessionTaggingQuery,
   useUpdateSessionsTaggedUsersMutation,
   useGetLatestSessionsQuery,
+  useGetExploreFeedQuery,
   useGetSessionQuery,
   useGetSessionPhotosQuery,
   useGetAdsQuery,
