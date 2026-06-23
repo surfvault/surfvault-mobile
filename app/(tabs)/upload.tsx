@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -66,7 +66,7 @@ const formatDateParam = (date: Date): string =>
 import { generateUUID } from '../../src/helpers/uuid';
 import { MAX_CLIP_SECONDS, MAX_CLIP_BYTES, MAX_CLIP_GB } from '../../src/helpers/clipMedia';
 import { checkStorageCapacity, showStorageLimitAlert } from '../../src/helpers/storage';
-import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photoTimestamps';
+import { parseExifTakenAt, bakeOrderedTimestamps, summarizePhotoDates, localDateKey, formatDateKey, formatDateRange, dateKeyToLocalDate } from '../../src/helpers/photoTimestamps';
 const formatDateLabel = (date: Date): string =>
   date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -128,6 +128,9 @@ function SessionOrBoardCreate() {
     dispatch(setPendingUploadBreak(null));
   }, [pendingBreak, dispatch]);
   const [sessionDate, setSessionDate] = useState(new Date());
+  // While false, a single shared photo date auto-fills the picker (the
+  // "suggested" date); a manual pick flips it so we never override the user.
+  const [dateManuallySet, setDateManuallySet] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [hideLocation, setHideLocation] = useState(false);
   const [notifyFollowers, setNotifyFollowers] = useState(true);
@@ -179,8 +182,27 @@ function SessionOrBoardCreate() {
 
   const handleDateChange = useCallback((_event: any, date?: Date) => {
     if (Platform.OS === 'android') { setShowDatePicker(false); setTabBarVisible(true); }
-    if (date) setSessionDate(date);
+    if (date) { setSessionDate(date); setDateManuallySet(true); }
   }, []);
+
+  // Capture-date rollup across selected photos (mixed? single? undated count?).
+  // EXIF is already parsed at select time (parseExifTakenAt → file.takenAt).
+  // Videos are excluded — they carry no EXIF date, so they'd wrongly inflate the
+  // "no date info" count.
+  const dateSummary = useMemo(() => {
+    const photoOnly = files.filter((f) => !(f.durationSeconds != null || (f.type ?? '').startsWith('video')));
+    return summarizePhotoDates(photoOnly);
+  }, [files]);
+
+  // Suggest the session date: when every dated photo shares one calendar day
+  // and the user hasn't manually set the date, fill it in. Never fires for
+  // mixed dates and never overrides a manual pick.
+  useEffect(() => {
+    if (isShaper || dateManuallySet) return;
+    const k = dateSummary.singleDateKey;
+    if (k && k !== formatDateParam(sessionDate)) setSessionDate(dateKeyToLocalDate(k));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateSummary.singleDateKey, dateManuallySet, isShaper]);
 
   // Pick photos
   const handlePickPhotos = useCallback(async () => {
@@ -615,6 +637,46 @@ function SessionOrBoardCreate() {
               {formatDateLabel(sessionDate)}
             </Text>
           </Pressable>
+
+          {/* Photo-date awareness — no restriction, just surfaces what the
+              photos' EXIF says so the date isn't left on "today" by mistake. */}
+          {files.length > 0 && dateSummary.datedCount > 0 && (
+            dateSummary.mixed ? (
+              <View style={[styles.dateNotice, { backgroundColor: isDark ? 'rgba(245,158,11,0.12)' : '#fffbeb', borderColor: isDark ? 'rgba(245,158,11,0.3)' : '#fde68a' }]}>
+                <Ionicons name="alert-circle-outline" size={16} color="#d97706" style={{ marginTop: 1 }} />
+                <Text style={[styles.dateNoticeText, { color: isDark ? '#fcd34d' : '#92400e' }]}>
+                  Mixed photo dates — these span {dateSummary.uniqueDateKeys.length} dates ({formatDateRange(dateSummary.minKey, dateSummary.maxKey)}). They'll all be saved under the date above.
+                  {dateSummary.undatedCount > 0 ? ` ${dateSummary.undatedCount} have no date info.` : ''}
+                </Text>
+              </View>
+            ) : (
+              <View style={[styles.dateNotice, { backgroundColor: isDark ? 'rgba(14,165,233,0.12)' : '#f0f9ff', borderColor: isDark ? 'rgba(14,165,233,0.3)' : '#bae6fd' }]}>
+                <Ionicons name="information-circle-outline" size={16} color="#0284c7" style={{ marginTop: 1 }} />
+                <Text style={[styles.dateNoticeText, { color: isDark ? '#7dd3fc' : '#075985' }]}>
+                  All photos taken {formatDateKey(dateSummary.singleDateKey)}.
+                  {dateSummary.singleDateKey === formatDateParam(sessionDate) ? ' Session date matches.' : ''}
+                  {dateSummary.undatedCount > 0 ? ` ${dateSummary.undatedCount} have no date info.` : ''}
+                </Text>
+                {dateSummary.singleDateKey !== formatDateParam(sessionDate) && (
+                  <Pressable
+                    onPress={() => { setSessionDate(dateKeyToLocalDate(dateSummary.singleDateKey!)); setDateManuallySet(true); }}
+                    style={styles.dateNoticeBtn}
+                    hitSlop={6}
+                  >
+                    <Text style={styles.dateNoticeBtnText}>Use date</Text>
+                  </Pressable>
+                )}
+              </View>
+            )
+          )}
+          {files.length > 0 && dateSummary.datedCount === 0 && dateSummary.undatedCount > 0 && (
+            <View style={[styles.dateNotice, { backgroundColor: isDark ? 'rgba(148,163,184,0.14)' : '#f1f5f9', borderColor: isDark ? 'rgba(148,163,184,0.3)' : '#e2e8f0' }]}>
+              <Ionicons name="calendar-outline" size={16} color={isDark ? '#94a3b8' : '#64748b'} style={{ marginTop: 1 }} />
+              <Text style={[styles.dateNoticeText, { color: isDark ? '#cbd5e1' : '#475569' }]}>
+                <Text style={{ fontWeight: '700' }}>No capture dates found.</Text> Set the session date manually above.
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Hide Location */}
@@ -700,6 +762,18 @@ function SessionOrBoardCreate() {
                         style={styles.previewImage}
                         contentFit="cover"
                       />
+                    )}
+                    {!isVideo && typeof file.takenAt === 'number' && (
+                      <View
+                        style={[
+                          styles.dateBadge,
+                          { backgroundColor: localDateKey(file.takenAt) === formatDateParam(sessionDate) ? 'rgba(0,0,0,0.6)' : 'rgba(217,119,6,0.9)' },
+                        ]}
+                      >
+                        <Text style={styles.dateBadgeText} numberOfLines={1}>
+                          {formatDateKey(localDateKey(file.takenAt), { month: 'short', day: 'numeric' })}
+                        </Text>
+                      </View>
                     )}
                     <Pressable onPress={() => removeFile(index)} style={styles.removeBtn}>
                       <Ionicons name="close-circle" size={20} color="#fff" />
@@ -883,6 +957,21 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', gap: 3,
   },
   clipBadgeText: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  dateBadge: {
+    position: 'absolute', bottom: 4, left: 4, right: 4,
+    borderRadius: 6, paddingHorizontal: 4, paddingVertical: 2, alignItems: 'center',
+  },
+  dateBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
+  dateNotice: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginTop: 8, paddingHorizontal: 12, paddingVertical: 10,
+    borderRadius: 12, borderWidth: 1,
+  },
+  dateNoticeText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  dateNoticeBtn: {
+    backgroundColor: '#0284c7', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6,
+  },
+  dateNoticeBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   removeBtn: {
     position: 'absolute', top: 4, right: 4,
     backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 10,
