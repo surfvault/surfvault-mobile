@@ -70,18 +70,18 @@ interface SponsoredCardProps {
  * One in-feed video slide. Autoplays muted+looped when it's the active slide
  * AND the card is on-screen (advertiser content — autoplay is wanted); pauses
  * otherwise. While inactive it shows the poster still + a ▶ badge so paused
- * slides read as video. A corner button toggles sound. Tapping click-throughs.
+ * slides read as video. Tapping click-throughs.
  */
 // Player stays alive while the slide is mounted; we toggle play/pause on
 // `active` so it starts instantly (no spin-up stutter) when scrolled into
-// view. VideoView fades to opacity 0 when inactive so the poster shows. Ads
-// keep their mute toggle, so muting follows `muted` (not forced).
-function SponsoredVideoLayer({ uri, active, muted }: { uri: string; active: boolean; muted: boolean }) {
+// view. VideoView fades to opacity 0 when inactive so the poster shows. Feed
+// clips are always muted — audio is only ever heard in a full player, and ads
+// have no player, so they stay silent in-feed.
+function SponsoredVideoLayer({ uri, active }: { uri: string; active: boolean }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
-    p.muted = muted;
+    p.muted = true;
   });
-  useEffect(() => { player.muted = muted; }, [muted, player]);
   useEffect(() => {
     if (active) player.play();
     else player.pause();
@@ -101,8 +101,6 @@ function SponsoredVideoSlide({
   poster,
   width,
   active,
-  muted,
-  onToggleMute,
   onPress,
   ctaLabel,
 }: {
@@ -110,8 +108,6 @@ function SponsoredVideoSlide({
   poster?: string | null;
   width?: number;
   active: boolean;
-  muted: boolean;
-  onToggleMute: () => void;
   onPress: () => void;
   ctaLabel?: string;
 }) {
@@ -121,7 +117,7 @@ function SponsoredVideoSlide({
           fades in over it when active (no remount flash, instant playback). */}
       <View style={styles.thumb}>
         {poster ? <Image source={{ uri: poster }} style={StyleSheet.absoluteFill} contentFit="cover" /> : null}
-        <SponsoredVideoLayer uri={uri} active={active} muted={muted} />
+        <SponsoredVideoLayer uri={uri} active={active} />
       </View>
       {!active ? (
         <View style={[StyleSheet.absoluteFill, styles.playBadgeWrap]} pointerEvents="none">
@@ -129,11 +125,7 @@ function SponsoredVideoSlide({
             <Ionicons name="play" size={18} color="#fff" />
           </View>
         </View>
-      ) : (
-        <Pressable onPress={onToggleMute} hitSlop={8} style={styles.muteBtn}>
-          <Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={16} color="#fff" />
-        </Pressable>
-      )}
+      ) : null}
       {ctaLabel ? (
         <View style={styles.ctaPill} pointerEvents="none">
           <Text style={styles.ctaPillText} numberOfLines={1}>{ctaLabel}</Text>
@@ -161,8 +153,6 @@ export default function SponsoredCard({
   const requireAuth = useRequireAuth();
   const [sheetVisible, setSheetVisible] = useState(false);
   const [reportVisible, setReportVisible] = useState(false);
-  // In-feed video autoplay sound toggle (muted by default).
-  const [muted, setMuted] = useState(true);
 
   // Carousel slides come from ad.media[] (Phase B). Thumbnail slide is
   // floated to the front so the first visible slide matches the sidebar /
@@ -334,8 +324,6 @@ export default function SponsoredCard({
                     poster={item.poster_s3_key}
                     width={width}
                     active={index === activeIdx && isViewable}
-                    muted={muted}
-                    onToggleMute={() => setMuted((m) => !m)}
                     onPress={openClick}
                     ctaLabel={ctaLabel}
                   />
@@ -404,8 +392,6 @@ export default function SponsoredCard({
           uri={slides[0].s3_key}
           poster={slides[0].poster_s3_key}
           active={isViewable}
-          muted={muted}
-          onToggleMute={() => setMuted((m) => !m)}
           onPress={openClick}
           ctaLabel={ad.cta_label || undefined}
         />
@@ -599,17 +585,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 3,
-  },
-  muteBtn: {
-    position: 'absolute',
-    bottom: 10,
-    right: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   footer: {
     paddingHorizontal: 12,

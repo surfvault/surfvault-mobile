@@ -49,6 +49,17 @@ const UploadContext = createContext<UploadContextType>({
   cancelUpload: () => {},
 });
 
+// Whole-batch ETA from overall progress + elapsed wall-clock (linear
+// extrapolation), so the countdown reflects ALL remaining files instead of just
+// the in-flight one. Null until there's enough signal (≥2% done, >1.5s elapsed)
+// so the very start doesn't flash a wild estimate.
+function batchEtaMs(overall: number, batchStartedAt: number): number | null {
+  if (overall <= 0.02 || overall >= 1) return null;
+  const elapsed = Date.now() - batchStartedAt;
+  if (elapsed < 1500) return null;
+  return (elapsed / overall) * (1 - overall);
+}
+
 export function UploadProvider({ children }: { children: React.ReactNode }) {
   const [upload, setUpload] = useState<UploadState | null>(null);
   const cancelledRef = useRef(false);
@@ -121,6 +132,9 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       let completed = 0;
       let failed = 0;
+      // Wall-clock start of the whole batch — drives a single ETA across all
+      // files (see batchEtaMs) rather than per-file.
+      const batchStartedAt = Date.now();
 
       for (const file of files) {
         if (cancelledRef.current) break;
@@ -130,7 +144,6 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
           try {
             // Stream the file straight from disk to S3 (no 2GB JS blob) and
             // report byte progress so the pill can show a live % + ETA.
-            const startedAt = Date.now();
             const task = LegacyFileSystem.createUploadTask(
               file.presignedUrl,
               file.uri,
@@ -142,13 +155,10 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
               ({ totalBytesSent, totalBytesExpectedToSend }) => {
                 if (totalBytesExpectedToSend <= 0) return;
                 const frac = totalBytesSent / totalBytesExpectedToSend;
-                const elapsed = Date.now() - startedAt;
-                let etaMs: number | null = null;
-                if (totalBytesSent > 0 && elapsed > 750 && totalBytesSent < totalBytesExpectedToSend) {
-                  etaMs = (totalBytesExpectedToSend - totalBytesSent) / (totalBytesSent / elapsed);
-                }
+                // Overall batch fraction: files already done + this file's bytes.
+                const overall = (completed + failed + frac) / files.length;
                 setUpload((prev) =>
-                  prev ? { ...prev, bytesProgress: (completed + failed + frac) / files.length, etaMs } : null
+                  prev ? { ...prev, bytesProgress: overall, etaMs: batchEtaMs(overall, batchStartedAt) } : null
                 );
               }
             );
@@ -179,9 +189,10 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
         } else if (!cancelledRef.current) {
           failed++;
         }
+        const overall = (completed + failed) / files.length;
         setUpload((prev) =>
           prev
-            ? { ...prev, completed, failed, bytesProgress: (completed + failed) / files.length, etaMs: null }
+            ? { ...prev, completed, failed, bytesProgress: overall, etaMs: batchEtaMs(overall, batchStartedAt) }
             : null
         );
       }

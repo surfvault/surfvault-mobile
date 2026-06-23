@@ -29,6 +29,7 @@ import {
 import { getWatermarkUrl, toOriginalKey } from '../../src/helpers/mediaUrl';
 import { useSave } from '../../src/context/SaveContext';
 import UserAvatar from '../../src/components/UserAvatar';
+import PaymentSheet, { hasPaymentChannels, acceptsDonations } from '../../src/components/PaymentSheet';
 
 const FETCH_AMOUNT = 30;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -107,6 +108,14 @@ export default function AccessRequestScreen() {
   const canSaveToVault = requestUser?.user_type === 'surfer';
   const session = accessRequest?.session;
   const surfBreak = accessRequest?.surf_break;
+
+  // Tap-to-pay: the requester can pay/tip the photographer's off-platform pay
+  // pointers right here (display-only — SurfVault never processes the money).
+  // Only the requester sees it; self-hides when the owner has no channels.
+  const [payVisible, setPayVisible] = useState(false);
+  const canPayOwner = !isOwner && hasPaymentChannels(targetUser);
+  const payDonate = acceptsDonations(targetUser);
+  const payeeFirstName = String(targetUser?.name || targetUser?.handle || '').split(' ')[0];
 
   const [grantAccess, { isLoading: granting }] = useGrantSurfMediaAccessMutation();
   const [saveToVault, { isLoading: savingToVault }] = useSaveSurfMediaAccessRequestToVaultMutation();
@@ -369,6 +378,18 @@ export default function AccessRequestScreen() {
 
       {/* Actions */}
       <View style={s.actionsCol}>
+        {canPayOwner && (
+          <Pressable
+            onPress={() => setPayVisible(true)}
+            style={[s.actionBtn, { backgroundColor: payDonate ? '#f59e0b' : '#7c3aed' }]}
+          >
+            <Ionicons name={payDonate ? 'cafe-outline' : 'cash-outline'} size={18} color="#fff" />
+            <Text style={s.actionBtnText}>
+              {payDonate ? 'Buy a coffee' : `Pay ${payeeFirstName}`}
+            </Text>
+          </Pressable>
+        )}
+
         {isOwner && (status === 'pending' || !isApproved) && (
           <Pressable onPress={handleGrant} disabled={granting} style={[s.actionBtn, { backgroundColor: '#22c55e' }]}>
             <Ionicons name="checkmark-circle-outline" size={18} color="#fff" />
@@ -495,6 +516,13 @@ export default function AccessRequestScreen() {
       {activeVideoUrl && (
         <AccessClipPlayer url={activeVideoUrl} onClose={() => setActiveVideoUrl(null)} />
       )}
+
+      <PaymentSheet
+        profile={targetUser}
+        isDark={isDark}
+        visible={payVisible}
+        onClose={() => setPayVisible(false)}
+      />
     </>
   );
 }

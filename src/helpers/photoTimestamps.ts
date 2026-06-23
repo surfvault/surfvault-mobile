@@ -65,6 +65,82 @@ export interface OrderableFile {
   takenAt?: number | null;
 }
 
+/** Local YYYY-MM-DD key for an epoch ms (local timezone, not UTC). */
+export function localDateKey(ms: number): string {
+  const d = new Date(ms);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export interface PhotoDateSummary {
+  datedCount: number;
+  undatedCount: number;
+  uniqueDateKeys: string[];
+  mixed: boolean;
+  singleDateKey: string | null;
+  minKey: string | null;
+  maxKey: string | null;
+}
+
+/**
+ * Rolls up capture dates across selected files so the create-session UI can warn
+ * on mixed dates and suggest a single shared date. `takenAt` may be a number
+ * (EXIF time), null (no EXIF — e.g. screenshots, videos), or undefined.
+ */
+export function summarizePhotoDates(files: Array<{ takenAt?: number | null }>): PhotoDateSummary {
+  let datedCount = 0;
+  let undatedCount = 0;
+  const keyCounts = new Map<string, number>();
+  for (const f of files || []) {
+    const ms = f?.takenAt;
+    if (typeof ms === 'number' && Number.isFinite(ms)) {
+      datedCount += 1;
+      const key = localDateKey(ms);
+      keyCounts.set(key, (keyCounts.get(key) || 0) + 1);
+    } else if (ms === null) {
+      undatedCount += 1;
+    }
+  }
+  const keys = [...keyCounts.keys()].sort();
+  return {
+    datedCount,
+    undatedCount,
+    uniqueDateKeys: keys,
+    mixed: keys.length > 1,
+    singleDateKey: keys.length === 1 ? keys[0] : null,
+    minKey: keys[0] ?? null,
+    maxKey: keys[keys.length - 1] ?? null,
+  };
+}
+
+/** Render a YYYY-MM-DD key (parsed as LOCAL midnight) as a human label. */
+export function formatDateKey(key: string | null, opts?: Intl.DateTimeFormatOptions): string {
+  if (!key) return '';
+  const d = new Date(`${key}T00:00:00`);
+  return d.toLocaleDateString('en-US', opts ?? { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+/** Local Date at midnight for a YYYY-MM-DD key — for seeding the date picker. */
+export function dateKeyToLocalDate(key: string): Date {
+  return new Date(`${key}T00:00:00`);
+}
+
+/**
+ * Human range between two YYYY-MM-DD keys (min first). Shows the year on BOTH
+ * ends when they differ in year — otherwise "Aug 8 2017 – Mar 30 2018" collapses
+ * to "Aug 8 – Mar 30, 2018", which reads backwards because the 2017 is hidden.
+ * Same year → year once at the end ("Mar 30 – Aug 8, 2018").
+ */
+export function formatDateRange(minKey: string | null, maxKey: string | null): string {
+  if (!minKey || !maxKey) return formatDateKey(minKey || maxKey);
+  if (minKey === maxKey) return formatDateKey(minKey);
+  const sameYear = minKey.slice(0, 4) === maxKey.slice(0, 4);
+  const minLabel = sameYear ? formatDateKey(minKey, { month: 'short', day: 'numeric' }) : formatDateKey(minKey);
+  return `${minLabel} – ${formatDateKey(maxKey)}`;
+}
+
 /**
  * Produces a strictly-increasing `lastModified` (epoch ms) per file so the
  * server gallery — which sorts by `photo_taken_at, file_name, id` — reproduces
