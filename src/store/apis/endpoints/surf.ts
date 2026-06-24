@@ -60,11 +60,14 @@ const surfApi = rootApi.injectEndpoints({
     // sort = new (created_at) | recent (content date) | popular (views).
     getExploreFeed: builder.query<
       { results: { items: any[]; continuationToken: string | null } },
-      { sort?: 'new' | 'recent' | 'popular'; limit?: number; continuationToken?: string }
+      { sort?: 'new' | 'recent' | 'popular'; limit?: number; continuationToken?: string; month?: number; day?: number }
     >({
       providesTags: [ApiTag.SurfBreak, ApiTag.Film],
-      query: ({ sort = 'new', limit = 12, continuationToken } = {}) => ({
-        url: `/explore-feed?sort=${sort}&limit=${limit}&continuationToken=${continuationToken ?? ''}`,
+      // `month`/`day` (caller's LOCAL date) engage the "On This Day" filter: only
+      // sessions/films shot on that calendar month-day across all years, newest
+      // year first (boards drop out — no shot-on date).
+      query: ({ sort = 'new', limit = 12, continuationToken, month, day } = {}) => ({
+        url: `/explore-feed?sort=${sort}&limit=${limit}&continuationToken=${continuationToken ?? ''}&month=${month ?? ''}&day=${day ?? ''}`,
         method: 'GET',
       }),
     }),
@@ -82,6 +85,8 @@ const surfApi = rootApi.injectEndpoints({
         groupByBreakDate,
         surfBreakIds,
         sort,
+        month,
+        day,
       }: {
         userId?: string;
         country?: string;
@@ -99,10 +104,14 @@ const surfApi = rootApi.injectEndpoints({
         // Explore grid sort pills: 'popular' = all-time views, 'recent' =
         // session date. Default/omitted = upload recency.
         sort?: 'latest' | 'popular' | 'recent';
+        // "On This Day" filter (caller's LOCAL month/day). Only sessions shot on
+        // that calendar month-day across all years, newest year first.
+        month?: number;
+        day?: number;
       }) => {
         const ids = Array.isArray(surfBreakIds) && surfBreakIds.length ? surfBreakIds.join(',') : '';
         return {
-          url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}&groupByBreakDate=${groupByBreakDate ? 'true' : ''}&surfBreakIds=${ids}&sort=${sort && sort !== 'latest' ? sort : ''}`,
+          url: `/surf-sessions?limit=${limit ?? ''}&viewerId=${userId ?? ''}&country=${country ?? ''}&region=${region ?? ''}&surfBreak=${surfBreak ?? ''}&date=${date ?? ''}&continuationToken=${continuationToken ?? ''}&feed=${feed ?? ''}&groupByBreakDate=${groupByBreakDate ? 'true' : ''}&surfBreakIds=${ids}&sort=${sort && sort !== 'latest' ? sort : ''}&month=${month ?? ''}&day=${day ?? ''}`,
           method: 'GET',
         };
       },

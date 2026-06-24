@@ -31,6 +31,7 @@ import {
   useGetShapersFromFollowingQuery,
   useGetShapersForSurfBreakQuery,
   useGetFilmsForSurfBreakQuery,
+  useGetFilmsNearQuery,
   useGetLatestFilmsQuery,
   useGetSurfBreaksQuery,
   useUpdateUserRecentSearchesMutation,
@@ -97,11 +98,12 @@ const FEED_OPTIONS: { value: FeedType; label: string; description: string; comin
 // Quick filter pills below the Discover search bar. The first three re-sort the
 // same session grid; 'boards' swaps in a location-independent grid of shaper
 // boards from across the vault.
-type ExploreTab = 'latest' | 'recent' | 'popular' | 'films' | 'boards';
+type ExploreTab = 'latest' | 'recent' | 'popular' | 'onThisDay' | 'films' | 'boards';
 const EXPLORE_TABS: { value: ExploreTab; label: string; icon?: string }[] = [
   { value: 'latest', label: 'New' },
   { value: 'recent', label: 'Recent' },
   { value: 'popular', label: 'Popular', icon: 'flame' },
+  { value: 'onThisDay', label: 'On This Day', icon: 'calendar' },
   { value: 'films', label: 'Films', icon: 'logo-youtube' },
   { value: 'boards', label: 'Boards' },
 ];
@@ -799,6 +801,57 @@ export default function HomeScreen() {
     (anchorBreakId ? regionFilmsData?.results?.films : latestFilmsData?.results?.films) ?? []
   ).slice(0, 12);
 
+  // ---- "On This Day" rail ----
+  // Sessions + films shot on today's calendar month-day across all past years.
+  // Nearby-scoped when a location is resolved; otherwise a GLOBAL fallback (no
+  // surfBreakIds / no coords) so logged-out users and users with no location
+  // still get content. Month/day come from the device's LOCAL date (not UTC).
+  // "See all" opens the global Explore On This Day pill. Only rendered in the
+  // SurfVault feed; hidden entirely when even the fallback is empty.
+  const onThisDayDate = useMemo(() => {
+    const d = new Date();
+    return { month: d.getMonth() + 1, day: d.getDate() };
+  }, []);
+  const otdNearby = isSurfVault && hasNearbyAnchor && nearbyBreakIds.length > 0;
+  const { currentData: otdSessionsData } = useGetLatestSessionsQuery(
+    {
+      userId: user?.id,
+      limit: 12,
+      groupByBreakDate: true,
+      surfBreakIds: otdNearby ? nearbyBreakIds : undefined,
+      month: onThisDayDate.month,
+      day: onThisDayDate.day,
+    },
+    { skip: !isSurfVault || (isAuthenticated && !user?.id) }
+  );
+  const { currentData: otdFilmsData } = useGetFilmsNearQuery(
+    {
+      lat: otdNearby ? nearbyLat ?? undefined : undefined,
+      lon: otdNearby ? nearbyLon ?? undefined : undefined,
+      month: onThisDayDate.month,
+      day: onThisDayDate.day,
+      limit: 12,
+    },
+    { skip: !isSurfVault }
+  );
+  const onThisDayItems = useMemo(() => {
+    const groups = ((otdSessionsData as any)?.results?.groups ?? []).map((group: any) => ({
+      kind: 'session' as const,
+      key: `session|${group.session_date}|${group.group_key}`,
+      date: group.session_date,
+      group,
+    }));
+    const films = ((otdFilmsData as any)?.results?.films ?? []).map((film: any) => ({
+      kind: 'film' as const,
+      key: `film|${film.id}`,
+      date: film.film_date || film.created_at,
+      film,
+    }));
+    return [...groups, ...films].sort((a, b) =>
+      String(b.date || '').localeCompare(String(a.date || ''))
+    );
+  }, [otdSessionsData, otdFilmsData]);
+
   // Pick the active shaper stream by feedType. Combined into a single promo
   // pool with paid ads — one slot per shaper (featured boards swipe inside
   // the card) so a prolific shaper can't dominate. Sessions still drive the
@@ -1285,8 +1338,14 @@ export default function HomeScreen() {
           <View style={styles.flex}>
             {/* Quick filter pills below the search bar — New / Recent / Popular
                 re-sort the session grid; Boards swaps in the shaper-board grid.
-                Persistent above the scrolling content. */}
-            <View style={styles.exploreSortRow}>
+                Persistent above the scrolling content. Horizontally scrollable so
+                the row never crowds/clips as pills are added. */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.exploreSortScroll}
+              contentContainerStyle={styles.exploreSortRow}
+            >
               {EXPLORE_TABS.map((tab) => {
                 const active = exploreTab === tab.value;
                 return (
@@ -1327,11 +1386,17 @@ export default function HomeScreen() {
                   </Pressable>
                 );
               })}
-            </View>
+            </ScrollView>
             {exploreTab === 'boards' ? (
               <BoardsExploreGrid onNavigate={navigateKeepExplore} />
             ) : exploreTab === 'films' ? (
               <FilmsExploreGrid onNavigate={navigateKeepExplore} />
+            ) : exploreTab === 'onThisDay' ? (
+              <ExploreGrid
+                onNavigate={navigateKeepExplore}
+                month={new Date().getMonth() + 1}
+                day={new Date().getDate()}
+              />
             ) : (
               <ExploreGrid onNavigate={navigateKeepExplore} sort={exploreTab} />
             )}
@@ -1541,6 +1606,43 @@ export default function HomeScreen() {
             </View>
             <Text style={[styles.locationBarChange, { color: '#0ea5e9' }]}>Change</Text>
           </Pressable>
+
+          {/* On This Day — sessions + films shot on today's date in past years.
+              Nearby-scoped when a location is set, else a global teaser. Sits
+              above everything (incl. the set-location prompt) so the feed always
+              links back into the archive. "See all" opens the global Explore On
+              This Day pill. Renders ONLY once there's content — no loading
+              skeleton — because on most days a location-scoped archive has nothing
+              for today, and a skeleton that flashes then vanishes reads worse than
+              a quiet pop-in when there IS something. */}
+          {onThisDayItems.length > 0 ? (
+            <View style={styles.railSection}>
+              <Pressable
+                onPress={() => { setExploreTab('onThisDay'); setSearchVisible(true); }}
+                style={[styles.railHeader, styles.railHeaderRow]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>On This Day</Text>
+                  <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                    Shot on today&apos;s date in past years{otdNearby ? ' near here' : ''}.
+                  </Text>
+                </View>
+                <Text style={{ color: '#0ea5e9', fontWeight: '600', fontSize: 13 }}>See all</Text>
+              </Pressable>
+              <FlatList
+                data={onThisDayItems}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.railContent}
+                keyExtractor={(it: any) => it.key}
+                renderItem={({ item }: any) =>
+                  item.kind === 'film'
+                    ? <FilmTile film={item.film} showCredit showDate />
+                    : <SessionTile group={item.group} />
+                }
+              />
+            </View>
+          ) : null}
 
           {!hasNearbyAnchor ? (
             // No anchor yet (GPS denied / still resolving + no home break).
@@ -1998,8 +2100,12 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   tagText: { fontSize: 13 },
+  // Horizontal pill scroller: flexGrow 0 so it hugs the pill height instead of
+  // expanding into the flex:1 column below it.
+  exploreSortScroll: { flexGrow: 0, flexShrink: 0 },
   exploreSortRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 16,
     paddingTop: 4,

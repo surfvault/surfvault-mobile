@@ -82,10 +82,17 @@ export default function ExploreGrid({
   onNavigate,
   ListHeaderComponent,
   sort = 'latest',
+  month,
+  day,
 }: {
   onNavigate: (path: string) => void;
   ListHeaderComponent?: React.ReactElement | null;
   sort?: 'latest' | 'popular' | 'recent';
+  // "On This Day" mode: month + day (the viewer's LOCAL date) restrict the feed
+  // to sessions/films shot on that calendar month-day across all years, newest
+  // year first (server forces that ordering and drops boards).
+  month?: number;
+  day?: number;
 }) {
   const { user } = useUser();
   const { isAuthenticated } = useAuth();
@@ -93,6 +100,7 @@ export default function ExploreGrid({
   const { width } = useWindowDimensions();
   const cellW = Math.floor((width - PAD * 2 - GAP) / 2);
   const feedSort = FEED_SORT[sort] ?? 'new';
+  const onThisDay = month != null && day != null;
 
   const { lat, lon, hasCoords } = useUserCoords({ skipPrompt: true });
 
@@ -104,7 +112,7 @@ export default function ExploreGrid({
   const fetchingMoreRef = useRef(false);
 
   const { data, currentData, isFetching, refetch } = useGetExploreFeedQuery(
-    { sort: feedSort, limit: 12, continuationToken },
+    { sort: feedSort, limit: 12, continuationToken, month, day },
     { skip: isAuthenticated && !user?.id }
   );
 
@@ -122,7 +130,7 @@ export default function ExploreGrid({
     fetchingMoreRef.current = false;
     setItems([]);
     setContinuationToken('');
-  }, [feedSort]);
+  }, [feedSort, month, day]);
 
   // Accumulate feed items across pages (dedup by item key).
   useEffect(() => {
@@ -265,7 +273,9 @@ export default function ExploreGrid({
           <ExploreGridSkeleton cellW={cellW} />
         ) : (
           <View style={styles.centered}>
-            <Text style={styles.emptyText}>Nothing to explore yet</Text>
+            <Text style={styles.emptyText}>
+              {onThisDay ? 'No throwbacks today — yet.\nCheck back tomorrow, or upload an old session.' : 'Nothing to explore yet'}
+            </Text>
           </View>
         )
       }
@@ -282,5 +292,5 @@ const styles = StyleSheet.create({
   pairRow: { flexDirection: 'row', paddingHorizontal: PAD, marginBottom: GAP + 6 },
   gridTile: { marginRight: 0 },
   centered: { paddingVertical: 60, alignItems: 'center' },
-  emptyText: { color: '#9ca3af', fontSize: 14 },
+  emptyText: { color: '#9ca3af', fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 32 },
 });
