@@ -21,7 +21,8 @@
         "PUSHER_CLUSTER": "us2",
         "ENVIRONMENT": "dev",
         "EAS_PROJECT_ID": "f0f75cbd-8e64-43a6-b251-438dcd684772",
-        "GOOGLE_MAPS_API_KEY": "AIzaSyAPXfXCfPRUopapBx0vvlU6bhsr8oLctE4"
+        "GOOGLE_MAPS_API_KEY": "AIzaSyAPXfXCfPRUopapBx0vvlU6bhsr8oLctE4",
+        "YOUTUBE_API_KEY": "AIzaSyCmAWNsOYy53wWKGrYDvGA578BLGiJtAc4"
       }
     },
     "production": {
@@ -42,7 +43,8 @@
         "PUSHER_CLUSTER": "us2",
         "ENVIRONMENT": "prod",
         "EAS_PROJECT_ID": "f0f75cbd-8e64-43a6-b251-438dcd684772",
-        "GOOGLE_MAPS_API_KEY": "AIzaSyAPXfXCfPRUopapBx0vvlU6bhsr8oLctE4"
+        "GOOGLE_MAPS_API_KEY": "AIzaSyAPXfXCfPRUopapBx0vvlU6bhsr8oLctE4",
+        "YOUTUBE_API_KEY": "AIzaSyCmAWNsOYy53wWKGrYDvGA578BLGiJtAc4"
       }
     }
   },
