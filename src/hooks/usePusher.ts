@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AppState } from 'react-native';
 import { useDispatch } from 'react-redux';
 import Constants from 'expo-constants';
 import { conversationApi } from '../store/apis/endpoints/conversation';
@@ -70,6 +71,30 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
     const channelName = `private-user-${userId}`;
     const channel = pusher.subscribe(channelName);
 
+    // Private-channel auth failures were silent before — if /pusher/auth fails
+    // (e.g. expired token) the subscription never establishes and realtime
+    // events vanish with no signal. Surface it so it's diagnosable.
+    channel.bind('pusher:subscription_error', (status: any) => {
+      console.warn('Pusher subscription error', channelName, status);
+    });
+    pusher.connection.bind(
+      'state_change',
+      ({ previous, current }: { previous: string; current: string }) => {
+        if (current === 'failed' || current === 'unavailable') {
+          console.warn('Pusher connection', previous, '→', current);
+        }
+      }
+    );
+
+    // RN suspends the socket when the app backgrounds and pusher-js doesn't
+    // always re-establish on resume — nudge it so realtime keeps working
+    // without a manual pull-to-refresh.
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && pusher.connection.state !== 'connected') {
+        pusher.connect();
+      }
+    });
+
     channel.bind('notification', () => {
       // AdPartners keeps any admin ad-moderation surface (e.g. the per-ad
       // review screen) live when a new campaign submission arrives. All
@@ -110,7 +135,9 @@ export const usePusher = ({ userId }: { userId: string | undefined }) => {
     });
 
     return () => {
+      appStateSub.remove();
       channel.unbind_all();
+      pusher.connection.unbind('state_change');
       pusher.unsubscribe(channelName);
       pusher.disconnect();
     };
