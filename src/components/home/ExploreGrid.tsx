@@ -15,8 +15,7 @@ import { useGetExploreFeedQuery, useGetAdsQuery } from '../../store';
 import { useUser } from '../../context/UserProvider';
 import { useAuth } from '../../context/AuthProvider';
 import { useUserCoords } from '../../hooks/useUserCoords';
-import SponsoredCard from '../SponsoredCard';
-import { SessionTile, FilmTile, BoardTile } from './FeedTiles';
+import { SessionTile, FilmTile, BoardTile, BusinessTile } from './FeedTiles';
 
 /**
  * The unified Explore feed — sessions + films + (per-shaper-capped) boards in
@@ -29,7 +28,14 @@ import { SessionTile, FilmTile, BoardTile } from './FeedTiles';
 
 const PAD = 12; // outer horizontal padding
 const GAP = 10; // gap between the two columns
-const AD_EVERY_ROWS = 2; // a full-width ad after every N grid rows (≈ every 4 tiles)
+// Ads scatter with a VARIED gap (not a fixed "every N", which reads mechanical).
+// Deterministic per ad index so they don't reshuffle as pages accumulate.
+const AD_MIN_GAP = 5;
+const AD_MAX_GAP = 12;
+const adGap = (n: number) => {
+  const f = Math.abs(Math.sin((n + 1) * 12.9898) * 43758.5453) % 1;
+  return AD_MIN_GAP + Math.floor(f * (AD_MAX_GAP - AD_MIN_GAP + 1));
+};
 
 // Pill key → unified feed sort.
 const FEED_SORT: Record<string, 'new' | 'recent' | 'popular'> = {
@@ -38,10 +44,8 @@ const FEED_SORT: Record<string, 'new' | 'recent' | 'popular'> = {
   popular: 'popular',
 };
 
-type Tile = { kind: 'session' | 'film' | 'board'; key: string; group?: any; film?: any; board?: any };
-type Row =
-  | { type: 'pair'; key: string; items: Tile[] }
-  | { type: 'ad'; key: string; ad: any };
+type Tile = { kind: 'session' | 'film' | 'board' | 'ad'; key: string; group?: any; film?: any; board?: any; ad?: any };
+type Row = { type: 'pair'; key: string; items: Tile[] };
 
 function ExploreGridSkeleton({ cellW }: { cellW: number }) {
   const isDark = useColorScheme() === 'dark';
@@ -174,20 +178,29 @@ export default function ExploreGrid({
 
   const ads = adsData?.results?.ads ?? [];
 
-  // Pair the unified items into 2-col rows, with full-width ad rows at cadence.
+  // Weave native ad TILES into the content stream at a varied gap (adGap),
+  // then chunk everything into 2-col rows — so ads pack into the grid like any
+  // other tile instead of breaking it with a full-width card.
   const rows = useMemo<Row[]>(() => {
-    const out: Row[] = [];
+    const combined: Tile[] = [];
     let ai = 0;
-    let pairCount = 0;
-    for (let i = 0; i < items.length; i += 2) {
-      const pair = items.slice(i, i + 2);
-      out.push({ type: 'pair', key: `pair-${pair[0].key}`, items: pair });
-      pairCount++;
-      if (pairCount % AD_EVERY_ROWS === 0 && ads.length) {
+    let since = 0;
+    let gap = adGap(0);
+    items.forEach((it) => {
+      combined.push(it);
+      since++;
+      if (ads.length && since >= gap) {
         const ad = ads[ai % ads.length];
-        out.push({ type: 'ad', key: `ad-${ad.id}-${ai}`, ad });
+        combined.push({ kind: 'ad', key: `ad-${ad.id}-${ai}`, ad });
         ai++;
+        since = 0;
+        gap = adGap(ai);
       }
+    });
+    const out: Row[] = [];
+    for (let i = 0; i < combined.length; i += 2) {
+      const pair = combined.slice(i, i + 2);
+      out.push({ type: 'pair', key: `pair-${pair[0].key}`, items: pair });
     }
     return out;
   }, [items, ads]);
@@ -202,19 +215,14 @@ export default function ExploreGrid({
 
   const renderItem = useCallback(
     ({ item: row }: { item: Row }) => {
-      if (row.type === 'ad') {
-        return (
-          <View style={styles.adRow}>
-            <SponsoredCard ad={row.ad} placement="content" isViewable={viewableKeys.has(row.key)} />
-          </View>
-        );
-      }
       const active = viewableKeys.has(row.key);
       return (
         <View style={styles.pairRow}>
           {row.items.map((t, idx) => (
             <View key={t.key} style={{ marginRight: idx === 0 ? GAP : 0 }}>
-              {t.kind === 'film' ? (
+              {t.kind === 'ad' ? (
+                <BusinessTile ad={t.ad} width={cellW} isViewable={active} style={styles.gridTile} />
+              ) : t.kind === 'film' ? (
                 <FilmTile film={t.film} width={cellW} onNavigate={onNavigate} style={styles.gridTile} />
               ) : t.kind === 'board' ? (
                 <BoardTile board={t.board} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
@@ -272,7 +280,6 @@ export default function ExploreGrid({
 
 const styles = StyleSheet.create({
   pairRow: { flexDirection: 'row', paddingHorizontal: PAD, marginBottom: GAP + 6 },
-  adRow: { marginBottom: 8 },
   gridTile: { marginRight: 0 },
   centered: { paddingVertical: 60, alignItems: 'center' },
   emptyText: { color: '#9ca3af', fontSize: 14 },

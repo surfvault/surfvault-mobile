@@ -11,6 +11,7 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useTrackedPush } from '../context/NavigationContext';
+import { useUser } from '../context/UserProvider';
 import { useGetFilmsForUserQuery } from '../store';
 import type { Film } from '../store/apis/endpoints/films';
 import { ytThumb, ytThumbFallback } from '../helpers/youtubeThumb';
@@ -29,7 +30,7 @@ const GRID_COLS = 3;
 const GRID_GAP = 2;
 const TILE_SIZE = (SCREEN_WIDTH - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS;
 
-function FilmGridTile({ film, onPress }: { film: Film; onPress: () => void }) {
+function FilmGridTile({ film, onPress, showViews }: { film: Film; onPress: () => void; showViews?: boolean }) {
   const [errored, setErrored] = useState(false);
   const primary = ytThumb(film.youtube_video_id, film.poster_url);
   const fallback = ytThumbFallback(film.youtube_video_id, film.poster_url);
@@ -67,6 +68,15 @@ function FilmGridTile({ film, onPress }: { film: Film; onPress: () => void }) {
           <Ionicons name="play" size={10} color="#fff" style={{ marginLeft: 1 }} />
         </View>
       </View>
+
+      {/* Private view count — only the verified creator/owner (bottom-left,
+          mirrors the session grid tile's view badge). */}
+      {showViews && film.views != null ? (
+        <View style={styles.viewsBadge} pointerEvents="none">
+          <Ionicons name="eye-outline" size={11} color="#fff" />
+          <Text style={styles.viewsBadgeText}>{film.views.toLocaleString()}</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -85,6 +95,7 @@ export default function ProfileFilmsGrid({
 }) {
   const isDark = useColorScheme() === 'dark';
   const trackedPush = useTrackedPush();
+  const { user } = useUser();
   const { data, isFetching } = useGetFilmsForUserQuery(
     { handle, scope },
     { skip: !handle }
@@ -118,7 +129,11 @@ export default function ProfileFilmsGrid({
           key={film.id}
           style={{ marginRight: (idx + 1) % GRID_COLS === 0 ? 0 : GRID_GAP, marginBottom: GRID_GAP }}
         >
-          <FilmGridTile film={film} onPress={() => trackedPush(`/film/${film.id}` as any)} />
+          <FilmGridTile
+            film={film}
+            onPress={() => trackedPush(`/film/${film.id}` as any)}
+            showViews={!!user?.id && film.creator_user_id === user.id}
+          />
         </View>
       ))}
     </View>
@@ -129,6 +144,19 @@ const styles = StyleSheet.create({
   gridWrap: { flexDirection: 'row', flexWrap: 'wrap' },
   tile: { width: TILE_SIZE, height: TILE_SIZE, backgroundColor: '#0b1220', overflow: 'hidden', position: 'relative' },
   tileFallback: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.05)' },
+  viewsBadge: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  viewsBadgeText: { color: '#fff', fontSize: 10, fontWeight: '600' },
   // Top-left chip — matches the session grid tile's gridDate chrome.
   gridChip: {
     position: 'absolute',

@@ -1040,7 +1040,7 @@ export default function HomeScreen() {
             <Ionicons name="search-outline" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
             <TextInput
               ref={searchInputRef}
-              placeholder={searchType === 'user' ? 'Search people...' : 'Search surf breaks...'}
+              placeholder={searchType === 'user' ? 'Search people...' : 'Search the vault...'}
               placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
               onChangeText={handleSearchInput}
               onFocus={() => setSearchFocused(true)}

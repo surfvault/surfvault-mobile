@@ -307,6 +307,13 @@ export default function FilmDetailScreen() {
               <View style={styles.eyebrowLeft}>
                 <Ionicons name="film" size={12} color="#0ea5e9" />
                 <Text style={styles.eyebrowText}>FILM</Text>
+                {/* Private view count — only the verified creator/admin sees it. */}
+                {viewerCanReveal && film.views != null ? (
+                  <View style={styles.eyebrowViews}>
+                    <Ionicons name="eye-outline" size={12} color={subColor} />
+                    <Text style={[styles.eyebrowViewsText, { color: subColor }]}>{film.views.toLocaleString()}</Text>
+                  </View>
+                ) : null}
               </View>
               {film.creator_verified && film.creator_handle ? (
                 <Pressable onPress={() => trackedPush(`/user/${film.creator_handle}` as any)} hitSlop={6}>
@@ -594,6 +601,8 @@ const styles = StyleSheet.create({
   eyebrowRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 },
   eyebrowLeft: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   eyebrowText: { color: '#0ea5e9', fontSize: 11, fontWeight: '800', letterSpacing: 1.2 },
+  eyebrowViews: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 3 },
+  eyebrowViewsText: { fontSize: 11, fontWeight: '600' },
   statusVerified: { color: '#10b981', fontSize: 11, fontWeight: '700' },
   statusUnverified: { fontSize: 11, fontWeight: '600' },
   title: { fontSize: 22, fontWeight: '800', lineHeight: 28 },

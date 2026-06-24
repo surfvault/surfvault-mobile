@@ -667,10 +667,16 @@ export function BusinessTile({
   ad,
   surfBreakId,
   isViewable = false,
+  width,
+  style,
 }: {
   ad: any;
   surfBreakId?: string;
   isViewable?: boolean;
+  // Grid usage (Explore) passes a computed cell width + style; the Nearby
+  // Business rail omits them and keeps the default rail tile footprint.
+  width?: number;
+  style?: any;
 }) {
   const [recordImpression] = useRecordAdImpressionMutation();
   const firedRef = useRef(false);
@@ -743,6 +749,8 @@ export function BusinessTile({
       }
       title={ad.company_name || 'Local business'}
       subtitle={ad.headline || null}
+      width={width}
+      style={style}
     />
   );
 }
