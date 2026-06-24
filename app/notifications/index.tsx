@@ -68,6 +68,8 @@ const getNotifIcon = (type: string): { name: string; color: string } => {
     case 'surfBreakUpload': return { name: 'location-outline', color: '#0ea5e9' };
     case 'taggedInSurfSession': return { name: 'pricetag-outline', color: '#8b5cf6' };
     case 'taggedInFilm': return { name: 'film-outline', color: '#8b5cf6' };
+    case 'filmAtFavoriteBreak': return { name: 'film-outline', color: '#8b5cf6' };
+    case 'filmFromFollowedCreator': return { name: 'film-outline', color: '#8b5cf6' };
     case 'photographerActive': return { name: 'pulse-outline', color: '#10b981' };
     case 'newBoard': return { name: 'hammer-outline', color: '#f59e0b' };
     case 'newFollower': return { name: 'person-add-outline', color: '#f59e0b' };
@@ -203,6 +205,16 @@ const getNotifTitle = (n: any): string => {
     case 'surfBreakUpload': return n.resource_surfbreak?.name?.replaceAll('_', ' ') ?? 'Surf Break Upload';
     case 'taggedInSurfSession': return 'Photos Available';
     case 'taggedInFilm': return 'Tagged in a Film';
+    case 'filmAtFavoriteBreak': {
+      // Title is the break name (body carries "A new film was posted here"),
+      // mirroring surfBreakUpload.
+      const breakName = n.body_metadata?.breakName?.replaceAll?.('_', ' ');
+      return breakName ?? 'New film at a break';
+    }
+    case 'filmFromFollowedCreator':
+      // Title is the creator's handle (body carries "posted a new film"),
+      // mirroring photographerUpload.
+      return n.metadata_user?.handle ?? 'New film';
     case 'photographerActive': return n.resource_user?.handle ?? 'Photographer Active';
     case 'newBoard': return n.resource_user?.handle ?? 'New Board';
     case 'newFollower': return 'New Follower';
@@ -462,7 +474,9 @@ export default function NotificationsScreen() {
         if (sessionId) trackedPush(`/session/${sessionId}` as any);
         break;
       }
-      case 'taggedInFilm': {
+      case 'taggedInFilm':
+      case 'filmAtFavoriteBreak':
+      case 'filmFromFollowedCreator': {
         // resource_id IS the film id.
         if (n.resource_id) trackedPush(`/film/${n.resource_id}` as any);
         break;
