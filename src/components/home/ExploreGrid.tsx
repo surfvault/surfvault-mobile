@@ -11,41 +11,42 @@ import {
   StyleSheet,
   type ViewToken,
 } from 'react-native';
-import {
-  useGetLatestSessionsQuery,
-  useGetAdsQuery,
-  useGetLatestShapersQuery,
-} from '../../store';
+import { useGetExploreFeedQuery, useGetAdsQuery } from '../../store';
 import { useUser } from '../../context/UserProvider';
 import { useAuth } from '../../context/AuthProvider';
 import { useUserCoords } from '../../hooks/useUserCoords';
-import SponsoredCard from '../SponsoredCard';
-import { SessionTile, ShaperTile } from './FeedTiles';
+import { SessionTile, FilmTile, BoardTile, BusinessTile } from './FeedTiles';
 
 /**
- * The "Discover" feed re-cast as a browsable 2-column Explore grid — lives as
- * the default (empty-query) state of the home Search screen. Worldwide latest
- * sessions render as tiles; nearby shapers are interleaved as same-size tiles;
- * paid ads break the grid as full-width feature rows (reusing SponsoredCard).
- *
- * Self-contained data pipeline (own queries + pagination) so it's fully
- * decoupled from the home feed picker.
+ * The unified Explore feed — sessions + films + (per-shaper-capped) boards in
+ * ONE stream, ranked server-side via `/explore-feed`:
+ *   new     → added-to-vault date (created_at)
+ *   recent  → content date (session_date / film_date / board created_at)
+ *   popular → view count (sessions/films/boards, equal weight)
+ * Ads are the only interleaved element. Pages accumulate on the cursor.
  */
 
 const PAD = 12; // outer horizontal padding
 const GAP = 10; // gap between the two columns
-const SHAPER_EVERY = 5; // a shaper tile after every N session tiles
-const AD_EVERY_ROWS = 2; // a full-width ad after every N grid rows (≈ every 4 tiles)
+// Ads scatter with a VARIED gap (not a fixed "every N", which reads mechanical).
+// Deterministic per ad index so they don't reshuffle as pages accumulate.
+const AD_MIN_GAP = 5;
+const AD_MAX_GAP = 12;
+const adGap = (n: number) => {
+  const f = Math.abs(Math.sin((n + 1) * 12.9898) * 43758.5453) % 1;
+  return AD_MIN_GAP + Math.floor(f * (AD_MAX_GAP - AD_MIN_GAP + 1));
+};
 
-type Tile =
-  | { kind: 'session'; key: string; data: any }
-  | { kind: 'shaper'; key: string; data: any };
-type Row =
-  | { type: 'pair'; key: string; items: Tile[] }
-  | { type: 'ad'; key: string; ad: any };
+// Pill key → unified feed sort.
+const FEED_SORT: Record<string, 'new' | 'recent' | 'popular'> = {
+  latest: 'new',
+  recent: 'recent',
+  popular: 'popular',
+};
 
-// Pulsing 2-column tile skeleton — matches HomeSkeleton's look so the Explore
-// grid loads with placeholders instead of a spinner, consistent with the app.
+type Tile = { kind: 'session' | 'film' | 'board' | 'ad'; key: string; group?: any; film?: any; board?: any; ad?: any };
+type Row = { type: 'pair'; key: string; items: Tile[] };
+
 function ExploreGridSkeleton({ cellW }: { cellW: number }) {
   const isDark = useColorScheme() === 'dark';
   const pulse = useRef(new Animated.Value(0.4)).current;
@@ -68,14 +69,7 @@ function ExploreGridSkeleton({ cellW }: { cellW: number }) {
           {[0, 1].map((c) => (
             <Animated.View
               key={c}
-              style={{
-                width: cellW,
-                height: tileH,
-                borderRadius: 16,
-                backgroundColor: blockColor,
-                opacity: pulse,
-                marginRight: c === 0 ? GAP : 0,
-              }}
+              style={{ width: cellW, height: tileH, borderRadius: 16, backgroundColor: blockColor, opacity: pulse, marginRight: c === 0 ? GAP : 0 }}
             />
           ))}
         </View>
@@ -91,8 +85,6 @@ export default function ExploreGrid({
 }: {
   onNavigate: (path: string) => void;
   ListHeaderComponent?: React.ReactElement | null;
-  // Re-ranks the grid server-side: 'popular' = all-time views, 'recent' =
-  // session date, 'latest' = upload recency.
   sort?: 'latest' | 'popular' | 'recent';
 }) {
   const { user } = useUser();
@@ -100,55 +92,52 @@ export default function ExploreGrid({
   const isDark = useColorScheme() === 'dark';
   const { width } = useWindowDimensions();
   const cellW = Math.floor((width - PAD * 2 - GAP) / 2);
+  const feedSort = FEED_SORT[sort] ?? 'new';
 
-  // Geo-boost ads when we have coords; no prompt here (Explore is browse-only).
   const { lat, lon, hasCoords } = useUserCoords({ skipPrompt: true });
 
-  const [groups, setGroups] = useState<any[]>([]);
+  const [items, setItems] = useState<Tile[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const seenRef = useRef(new Set<string>());
   const hasMoreRef = useRef(false);
   const fetchingMoreRef = useRef(false);
 
-  const { data, currentData, isFetching, refetch } = useGetLatestSessionsQuery(
-    { userId: user?.id, limit: 12, continuationToken, groupByBreakDate: true, sort },
+  const { data, currentData, isFetching, refetch } = useGetExploreFeedQuery(
+    { sort: feedSort, limit: 12, continuationToken },
     { skip: isAuthenticated && !user?.id }
   );
 
-  // Switching sort is a fresh feed: drop the accumulator + cursor so the grid
-  // rebuilds from page 1 of the new ordering. Changing `sort` also re-fires the
-  // query (it's a query arg), so the accumulator effect below repopulates.
-  useEffect(() => {
-    seenRef.current = new Set();
-    hasMoreRef.current = false;
-    fetchingMoreRef.current = false;
-    setGroups([]);
-    setContinuationToken('');
-  }, [sort]);
   const { data: adsData } = useGetAdsQuery({
     feed: true,
     lat: hasCoords && lat != null ? lat : undefined,
     lon: hasCoords && lon != null ? lon : undefined,
     limit: 30,
   });
-  const { data: shapersData } = useGetLatestShapersQuery({ limit: 50 });
 
-  // Accumulate grouped sessions across pages (dedup by date|group_key).
+  // Switching sort is a fresh feed.
+  useEffect(() => {
+    seenRef.current = new Set();
+    hasMoreRef.current = false;
+    fetchingMoreRef.current = false;
+    setItems([]);
+    setContinuationToken('');
+  }, [feedSort]);
+
+  // Accumulate feed items across pages (dedup by item key).
   useEffect(() => {
     const results = currentData?.results;
     if (!results) return;
-    const incoming = Array.isArray(results.groups) ? results.groups : [];
+    const incoming = Array.isArray(results.items) ? results.items : [];
     hasMoreRef.current = Boolean(results.continuationToken);
-    const fresh: any[] = [];
-    for (const g of incoming) {
-      const key = `${g.session_date}|${g.group_key}`;
-      if (!key || seenRef.current.has(key)) continue;
-      seenRef.current.add(key);
-      fresh.push(g);
+    const fresh: Tile[] = [];
+    for (const it of incoming as Tile[]) {
+      if (!it?.key || seenRef.current.has(it.key)) continue;
+      seenRef.current.add(it.key);
+      fresh.push(it);
     }
     fetchingMoreRef.current = false;
-    if (fresh.length) setGroups((prev) => prev.concat(fresh));
+    if (fresh.length) setItems((prev) => prev.concat(fresh));
   }, [currentData]);
 
   const loadMore = useCallback(() => {
@@ -159,10 +148,6 @@ export default function ExploreGrid({
     setContinuationToken(next);
   }, [data]);
 
-  // Pull-to-refresh: rebuild the grid from page 1. If we're already at page 1
-  // (token === ''), the args don't change so the accumulator effect won't
-  // re-run — rebuild directly from the forced refetch. Otherwise reset the
-  // cursor and let the effect repopulate from the re-fired query.
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -170,91 +155,79 @@ export default function ExploreGrid({
         seenRef.current = new Set();
         hasMoreRef.current = false;
         fetchingMoreRef.current = false;
-        setGroups([]);
+        setItems([]);
         setContinuationToken('');
         await refetch();
       } else {
         const res: any = await refetch().unwrap();
-        const incoming = Array.isArray(res?.results?.groups) ? res.results.groups : [];
+        const incoming: Tile[] = Array.isArray(res?.results?.items) ? res.results.items : [];
         seenRef.current = new Set();
-        const fresh: any[] = [];
-        for (const g of incoming) {
-          const key = `${g.session_date}|${g.group_key}`;
-          if (!key || seenRef.current.has(key)) continue;
-          seenRef.current.add(key);
-          fresh.push(g);
+        const fresh: Tile[] = [];
+        for (const it of incoming) {
+          if (!it?.key || seenRef.current.has(it.key)) continue;
+          seenRef.current.add(it.key);
+          fresh.push(it);
         }
         hasMoreRef.current = Boolean(res?.results?.continuationToken);
         fetchingMoreRef.current = false;
-        setGroups(fresh);
+        setItems(fresh);
       }
     } catch {}
     setRefreshing(false);
   }, [continuationToken, refetch]);
 
   const ads = adsData?.results?.ads ?? [];
-  const shapers = shapersData?.results?.shapers ?? [];
 
-  // Build the grid rows: session tiles + interleaved shaper tiles, paired into
-  // 2-col rows, with full-width ad rows injected at cadence.
+  // Weave native ad TILES into the content stream at a varied gap (adGap),
+  // then chunk everything into 2-col rows — so ads pack into the grid like any
+  // other tile instead of breaking it with a full-width card.
   const rows = useMemo<Row[]>(() => {
-    const tiles: Tile[] = [];
-    let si = 0;
-    // Only groups the session tile can render (needs at least one session).
-    // Hidden-location groups DO render now (region/country label), so they're
-    // kept — this just drops any empty group so every 2-col row stays full.
-    const renderable = groups.filter((g) => (g?.sessions?.length ?? 0) > 0);
-    renderable.forEach((g, i) => {
-      tiles.push({ kind: 'session', key: `s-${g.session_date}|${g.group_key}`, data: g });
-      if ((i + 1) % SHAPER_EVERY === 0 && si < shapers.length) {
-        const sh = shapers[si++];
-        tiles.push({ kind: 'shaper', key: `sh-${sh.id ?? sh.handle}`, data: sh });
+    const combined: Tile[] = [];
+    let ai = 0;
+    let since = 0;
+    let gap = adGap(0);
+    items.forEach((it) => {
+      combined.push(it);
+      since++;
+      if (ads.length && since >= gap) {
+        const ad = ads[ai % ads.length];
+        combined.push({ kind: 'ad', key: `ad-${ad.id}-${ai}`, ad });
+        ai++;
+        since = 0;
+        gap = adGap(ai);
       }
     });
-
     const out: Row[] = [];
-    let ai = 0;
-    let pairCount = 0; // count PAIR rows only (not the ad rows) so the cadence
-    // stays a full 2×2 block (AD_EVERY_ROWS rows = 4 cards) between every ad.
-    for (let i = 0; i < tiles.length; i += 2) {
-      const pair = tiles.slice(i, i + 2);
+    for (let i = 0; i < combined.length; i += 2) {
+      const pair = combined.slice(i, i + 2);
       out.push({ type: 'pair', key: `pair-${pair[0].key}`, items: pair });
-      pairCount++;
-      if (pairCount % AD_EVERY_ROWS === 0 && ads.length) {
-        const ad = ads[ai % ads.length];
-        out.push({ type: 'ad', key: `ad-${ad.id}-${ai}`, ad });
-        ai++;
-      }
     }
     return out;
-  }, [groups, shapers, ads]);
+  }, [items, ads]);
 
-  // Viewability — only autoplay the ad whose row is on screen.
+  // Viewability — only autoplay the row/ad on screen.
   const [viewableKeys, setViewableKeys] = useState<Set<string>>(new Set());
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     if (!viewableItems.length) return;
-    setViewableKeys(new Set(viewableItems.map((v) => v.key)));
+    setViewableKeys(new Set(viewableItems.map((v) => String(v.key))));
   }).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
 
   const renderItem = useCallback(
     ({ item: row }: { item: Row }) => {
-      if (row.type === 'ad') {
-        return (
-          <View style={styles.adRow}>
-            <SponsoredCard ad={row.ad} placement="content" isViewable={viewableKeys.has(row.key)} />
-          </View>
-        );
-      }
       const active = viewableKeys.has(row.key);
       return (
         <View style={styles.pairRow}>
           {row.items.map((t, idx) => (
             <View key={t.key} style={{ marginRight: idx === 0 ? GAP : 0 }}>
-              {t.kind === 'session' ? (
-                <SessionTile group={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+              {t.kind === 'ad' ? (
+                <BusinessTile ad={t.ad} width={cellW} isViewable={active} style={styles.gridTile} />
+              ) : t.kind === 'film' ? (
+                <FilmTile film={t.film} width={cellW} onNavigate={onNavigate} style={styles.gridTile} />
+              ) : t.kind === 'board' ? (
+                <BoardTile board={t.board} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
               ) : (
-                <ShaperTile shaper={t.data} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+                <SessionTile group={t.group} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
               )}
             </View>
           ))}
@@ -264,12 +237,8 @@ export default function ExploreGrid({
     [cellW, onNavigate, viewableKeys]
   );
 
-  // Show the loader (not the empty text) until we have a settled, genuinely
-  // empty response. Covers: query not started yet, in-flight, AND the one-frame
-  // gap on (re)mount where cached data is present but the accumulator effect
-  // hasn't populated `groups` yet (e.g. right after tapping Cancel).
-  const incomingHasGroups = (currentData?.results?.groups?.length ?? 0) > 0;
-  const stillLoading = isFetching || !currentData || incomingHasGroups;
+  const incomingHasItems = (currentData?.results?.items?.length ?? 0) > 0;
+  const stillLoading = isFetching || !currentData || incomingHasItems;
 
   return (
     <FlatList
@@ -289,23 +258,19 @@ export default function ExploreGrid({
       onEndReached={loadMore}
       onEndReachedThreshold={0.6}
       refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          tintColor={isDark ? '#9ca3af' : '#6b7280'}
-        />
+        <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={isDark ? '#9ca3af' : '#6b7280'} />
       }
       ListEmptyComponent={
         stillLoading ? (
           <ExploreGridSkeleton cellW={cellW} />
         ) : (
           <View style={styles.centered}>
-            <Text style={styles.emptyText}>No sessions to explore yet</Text>
+            <Text style={styles.emptyText}>Nothing to explore yet</Text>
           </View>
         )
       }
       ListFooterComponent={
-        isFetching && groups.length > 0 ? (
+        isFetching && items.length > 0 ? (
           <View style={{ paddingVertical: 20 }}><ActivityIndicator /></View>
         ) : null
       }
@@ -314,10 +279,7 @@ export default function ExploreGrid({
 }
 
 const styles = StyleSheet.create({
-  // Extra bottom room so a multi-session tile's depth-peek edges show before
-  // the next row covers them.
   pairRow: { flexDirection: 'row', paddingHorizontal: PAD, marginBottom: GAP + 6 },
-  adRow: { marginBottom: 8 },
   gridTile: { marginRight: 0 },
   centered: { paddingVertical: 60, alignItems: 'center' },
   emptyText: { color: '#9ca3af', fontSize: 14 },

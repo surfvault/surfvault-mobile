@@ -31,9 +31,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '../context/UserProvider';
 import { useTrackedPush } from '../context/NavigationContext';
-import { useGetUserFavoritesQuery, useGetLatestSessionsQuery } from '../store';
+import { useGetUserFavoritesQuery, useGetLatestSessionsQuery, useGetFilmsForSurfBreakQuery } from '../store';
 import type { BreakDateGroup } from './BreakDateCard';
-import { SessionTile } from './home/FeedTiles';
+import { SessionTile, FilmTile } from './home/FeedTiles';
 import RailSkeleton from './home/RailSkeleton';
 
 // region · country, underscores → spaces, dropping blanks / "0" sentinels.
@@ -50,6 +50,70 @@ interface Favorite {
   country_code?: string | null;
   surf_break_identifier?: string | null;
   has_active_photographer?: boolean;
+}
+
+// One favorite's rail: its recent sessions + films VERIFIED at this exact break
+// (a verified creator disclosed the spot), merged chronologically. Each rail
+// fetches its own verified films (per-break, like the web FavoriteBreakRail).
+function FavoriteRail({
+  fav,
+  groups,
+  isDark,
+  onOpen,
+}: {
+  fav: Favorite;
+  groups: BreakDateGroup[];
+  isDark: boolean;
+  onOpen: () => void;
+}) {
+  const { data } = useGetFilmsForSurfBreakQuery(
+    { breakId: fav.surf_break_id, verifiedOnly: true, limit: 12 },
+    { skip: !fav.surf_break_id },
+  );
+  const films = data?.results?.films ?? [];
+  const items = useMemo(() => {
+    const s = groups.map((g) => ({
+      kind: 'session' as const,
+      key: `s-${g.session_date}|${g.group_key}`,
+      primary: String(g.session_date ?? ''),
+      group: g,
+    }));
+    const f = films.map((film) => ({
+      kind: 'film' as const,
+      key: `f-${film.id}`,
+      primary: String(film.film_date ?? film.created_at ?? ''),
+      film,
+    }));
+    return [...s, ...f].sort((a, b) => b.primary.localeCompare(a.primary));
+  }, [groups, films]);
+
+  const subtitle = locationSubtitle(fav);
+  return (
+    <View style={styles.rail}>
+      <Pressable onPress={onOpen} style={styles.railHeader} hitSlop={6}>
+        {fav.has_active_photographer && <View style={styles.activeDot} />}
+        <View style={styles.railHeaderText}>
+          <Text style={[styles.railTitle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>{fav.name}</Text>
+          {!!subtitle && (
+            <Text style={[styles.railSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>{subtitle}</Text>
+          )}
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
+      </Pressable>
+      <FlatList
+        data={items}
+        horizontal
+        keyExtractor={(it) => it.key}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.railRow}
+        renderItem={({ item }) =>
+          item.kind === 'film'
+            ? <FilmTile film={item.film} showCredit showDate />
+            : <SessionTile group={item.group} hideBreakName isViewable={false} />
+        }
+      />
+    </View>
+  );
 }
 
 export default function FavoritesRails({ isDark: isDarkProp }: { isDark?: boolean }) {
@@ -179,41 +243,15 @@ export default function FavoritesRails({ isDark: isDarkProp }: { isDark?: boolea
         />
       }
     >
-      {rails.map(({ fav, groups: railGroups }) => {
-        const subtitle = locationSubtitle(fav);
-        return (
-          <View key={fav.surf_break_id} style={styles.rail}>
-            <Pressable onPress={() => openBreak(fav)} style={styles.railHeader} hitSlop={6}>
-              {fav.has_active_photographer && <View style={styles.activeDot} />}
-              <View style={styles.railHeaderText}>
-                <Text style={[styles.railTitle, { color: isDark ? '#fff' : '#111827' }]} numberOfLines={1}>
-                  {fav.name}
-                </Text>
-                {!!subtitle && (
-                  <Text style={[styles.railSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={1}>
-                    {subtitle}
-                  </Text>
-                )}
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
-            </Pressable>
-            <FlatList
-              data={railGroups}
-              horizontal
-              // `group_key` alone isn't unique across dates at the same break —
-              // combine with session_date (same as the home/Nearby rails) so a
-              // break with sessions on multiple days doesn't collide keys.
-              keyExtractor={(g) => `${g.session_date}|${g.group_key}`}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.railRow}
-              // No ItemSeparatorComponent — SessionTile/RailTile carries its own
-              // `marginRight: 12`, so the spacing matches the Nearby Sessions
-              // rail exactly. Adding a separator here double-gapped the tiles.
-              renderItem={({ item }) => <SessionTile group={item} hideBreakName isViewable={false} />}
-            />
-          </View>
-        );
-      })}
+      {rails.map(({ fav, groups: railGroups }) => (
+        <FavoriteRail
+          key={fav.surf_break_id}
+          fav={fav}
+          groups={railGroups}
+          isDark={isDark}
+          onOpen={() => openBreak(fav)}
+        />
+      ))}
 
       {empties.length > 0 && (
         <View style={styles.emptiesSection}>

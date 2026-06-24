@@ -58,6 +58,39 @@ export type {
 } from './apis/endpoints/boardroom';
 
 export {
+  useGetLatestFilmsQuery,
+  useGetFilmsNearQuery,
+  useGetFilmsForSurfBreakQuery,
+  useGetFilmsFromFollowingQuery,
+  useGetFilmsForUserQuery,
+  useGetFilmQuery,
+  useGetFilmCandidateSessionsQuery,
+  useLazyCheckFilmByVideoIdQuery,
+  useCreateFilmMutation,
+  useUpdateFilmMutation,
+  useDeleteFilmMutation,
+  useTagFilmParticipantMutation,
+  useConfirmFilmParticipantMutation,
+  useTagFilmSurfBreakMutation,
+  useTagFilmBoardMutation,
+  useTagFilmSessionMutation,
+  useConfirmFilmSessionMutation,
+  useClaimFilmCreatorMutation,
+  useVerifyFilmCheckMutation,
+  useVerifyFilmApplyMutation,
+  useReportFilmMutation,
+} from './apis/endpoints/films';
+export type {
+  Film,
+  FilmBreak,
+  FilmRegion,
+  FilmParticipant,
+  FilmBoardTag,
+  FilmSessionTag,
+  FilmDetailResult,
+} from './apis/endpoints/films';
+
+export {
   useGetMapSearchContentQuery,
   useGetMapSurfBreaksQuery,
   useGetMapAdsQuery,
@@ -89,6 +122,7 @@ export {
 export {
   useCreateSurfSessionBookingMutation,
   useCreateBoardViewReportMutation,
+  useCreateFilmViewReportMutation,
   useCreateSurfSessionViewReportMutation,
   useDeleteSurfSessionBookingMutation,
   useGetBookingSearchContentQuery,
@@ -120,6 +154,7 @@ export {
   useGetMyCampaignsQuery,
   useReportAdMutation,
   useGetLatestSessionsQuery,
+  useGetExploreFeedQuery,
   useGetSessionGroupsQuery,
   useGetSessionPhotosQuery,
   useGetSessionQuery,

@@ -163,6 +163,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     pusherCluster: process.env.PUSHER_CLUSTER ?? 'us2',
     revenuecatApiKey: process.env.REVENUCAT_API_KEY ?? '',
     googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
+    // YouTube Data API v3 key (enables film publish-date + description autofill
+    // in CreateFilmSheet). Reuse the same key as the backend YOUTUBE_API_KEY
+    // (API-restricted to YouTube Data API). Empty → autofill silently skipped.
+    youtubeApiKey: process.env.YOUTUBE_API_KEY ?? '',
     environment: process.env.ENVIRONMENT ?? 'dev',
     eas: {
       projectId: 'f0f75cbd-8e64-43a6-b251-438dcd684772',

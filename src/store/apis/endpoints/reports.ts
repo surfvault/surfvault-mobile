@@ -70,6 +70,14 @@ const reportsApi = rootApi.injectEndpoints({
         body: { boardId, viewerHash },
       }),
     }),
+    createFilmViewReport: builder.mutation({
+      // Fire-and-forget, like the board view report.
+      query: ({ filmId, viewerHash }: { filmId: string; viewerHash: string }) => ({
+        url: '/reports/film-view',
+        method: 'POST',
+        body: { filmId, viewerHash },
+      }),
+    }),
     createSurfSessionBooking: builder.mutation({
       invalidatesTags: [ApiTag.Reports],
       query: ({
@@ -101,6 +109,7 @@ const reportsApi = rootApi.injectEndpoints({
 
 export const {
   useCreateBoardViewReportMutation,
+  useCreateFilmViewReportMutation,
   useCreateSurfSessionViewReportMutation,
   useGetLifetimeVaultStatisticsQuery,
   useGetSurfSessionViewsQuery,

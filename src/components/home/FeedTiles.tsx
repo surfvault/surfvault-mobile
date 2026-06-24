@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Linking, Alert, useColorScheme } from 'react-native';
 import { Image } from 'expo-image';
 import Svg, { Defs, LinearGradient as SvgLinearGradient, Stop, Rect } from 'react-native-svg';
@@ -7,11 +7,14 @@ import { useTrackedPush } from '../../context/NavigationContext';
 import UserAvatar from '../UserAvatar';
 import AutoplayVideo from '../AutoplayVideo';
 import { boardPhotoDisplay } from '../../helpers/mediaUrl';
+import { ytThumb, ytThumbFallback } from '../../helpers/youtubeThumb';
+import { filmPlaceLabel, filmRegionForContext } from '../../helpers/filmLocation';
+import { formatSessionDate } from '../../helpers/dateTime';
 import { pickThumbnailPhoto } from '../ShaperBoardsGrid';
 import { useRecordAdImpressionMutation } from '../../store';
 import { buildAdClickUrl, currentDevice } from '../../helpers/adTracking';
 import type { BreakDateGroup } from '../BreakDateCard';
-import type { BoardroomShaper } from '../../store';
+import type { BoardroomShaper, Film } from '../../store';
 
 /**
  * Compact horizontal-rail tiles for the SurfVault (nearby) landing — mirrors
@@ -65,10 +68,12 @@ function BottomScrim({ width, height }: { width: number; height: number }) {
 function RailTile({
   onPress,
   heroUri,
+  heroFallbackUri,
   fallbackIcon,
   fallbackColor,
   topLeft,
   topRight,
+  centerOverlay,
   avatar,
   title,
   subtitle,
@@ -80,10 +85,14 @@ function RailTile({
 }: {
   onPress: () => void;
   heroUri?: string | null;
+  // Swapped in when `heroUri` errors (e.g. YouTube maxres 404 → mqdefault).
+  heroFallbackUri?: string | null;
   fallbackIcon: React.ReactNode;
   fallbackColor: string;
   topLeft?: React.ReactNode;
   topRight?: React.ReactNode;
+  // Absolutely-centered, non-interactive overlay (e.g. a red play badge).
+  centerOverlay?: React.ReactNode;
   avatar?: React.ReactNode;
   // Optional: omitted entirely (no empty line) when falsy — e.g. break-page
   // session tiles whose session has no name show just the subtitle.
@@ -100,6 +109,9 @@ function RailTile({
   const isDark = useColorScheme() === 'dark';
   const h = tileHeight(width);
   const scrimH = Math.round(h * 0.55);
+  // Swap to the fallback hero once the primary 404s (maxres → mqdefault).
+  const [heroErrored, setHeroErrored] = useState(false);
+  const resolvedHero = heroErrored && heroFallbackUri ? heroFallbackUri : heroUri;
   return (
     <Pressable onPress={onPress} style={[styles.tile, { width }, stackCount > 1 && styles.tileStacked, style]}>
       {/* Depth peeks — far edge first (only for 3+), then the near edge. */}
@@ -116,19 +128,30 @@ function RailTile({
         />
       )}
       <View style={[styles.hero, { width, height: h, backgroundColor: fallbackColor }]}>
-        {heroUri ? (
-          <Image source={{ uri: heroUri }} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
+        {resolvedHero ? (
+          <Image
+            source={{ uri: resolvedHero }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            transition={200}
+            onError={() => setHeroErrored(true)}
+          />
         ) : (
           <View style={styles.heroFallback}>{fallbackIcon}</View>
         )}
 
         {/* Autoplaying clip over the poster — mounted only while on-screen. */}
         {videoUri && active ? (
-          <AutoplayVideo uri={videoUri} poster={heroUri ?? undefined} active style={StyleSheet.absoluteFill} />
+          <AutoplayVideo uri={videoUri} poster={resolvedHero ?? undefined} active style={StyleSheet.absoluteFill} />
         ) : null}
 
         {topLeft ? <View style={styles.topLeft}>{topLeft}</View> : null}
         {topRight ? <View style={styles.topRight}>{topRight}</View> : null}
+        {centerOverlay ? (
+          <View pointerEvents="none" style={styles.centerOverlay}>
+            {centerOverlay}
+          </View>
+        ) : null}
 
         <BottomScrim width={width} height={scrimH} />
         <View style={styles.footer}>
@@ -499,15 +522,161 @@ export function ShaperTile({
   );
 }
 
+// ─────────────────────────── Surf Films ───────────────────────────
+// External YouTube records. Poster fills the tile with a play badge; tapping
+// opens the film detail page (embed). Subtitle prefers a revealed break name,
+// else region, else the creator.
+export function FilmTile({
+  film,
+  width,
+  style,
+  onNavigate,
+  subtitle: subtitleOverride,
+  contextBreakId,
+  contextCountryCode,
+  contextRegion,
+  showCredit = false,
+  showDate = false,
+}: {
+  film: Film;
+  width?: number;
+  style?: any;
+  onNavigate?: (path: string) => void;
+  // Explicit subtitle (e.g. Explore grid shows the creator handle).
+  subtitle?: string | null;
+  // Location context (nearby rail / break page) — drives the region-vs-break
+  // subtitle exactly like web NearbyFilmCard.
+  contextBreakId?: string | null;
+  contextCountryCode?: string | null;
+  contextRegion?: string | null;
+  // Credit mode (surf-break page): show verification/creator instead of location.
+  showCredit?: boolean;
+  // Show the film's publish date as a top-left badge (nearby/break rails) —
+  // mirrors web NearbyFilmCard so films read chronologically.
+  showDate?: boolean;
+}) {
+  const trackedPush = useTrackedPush();
+  // Explore-grid creator credit — prefer @handle, then the cataloguer-entered
+  // name (mirror of web filmCreatorSubtitle). May be null → no subtitle line.
+  const creatorSubtitle = film.creator_handle ? `@${film.creator_handle}` : film.creator_name || null;
+
+  // Credit subtitle: verified → creator's @handle; unverified → nothing.
+  const creditSubtitle = film.creator_verified && film.creator_handle ? `@${film.creator_handle}` : null;
+
+  // Subtitle rule (mirror of web NearbyFilmCard):
+  //  - On a surf-break surface (contextBreakId set): that break's name only if
+  //    REVEALED on the film (film.breaks holds revealed exact breaks); else the
+  //    context region label.
+  //  - On the nearby rail (country/region context, no break id): always the
+  //    region label, viewer-context-aware.
+  //  - Explore grid (no context): the creator credit.
+  const hasLocationContext = !!(contextCountryCode || contextRegion || contextBreakId);
+  const revealedSelected = contextBreakId ? (film.breaks ?? []).find((b) => b.id === contextBreakId) : null;
+  const contextRegionObj = hasLocationContext
+    ? filmRegionForContext(film.regions, { countryCode: contextCountryCode, region: contextRegion })
+    : null;
+  const subtitle = showCredit
+    ? creditSubtitle
+    : subtitleOverride ||
+      (revealedSelected?.name ? revealedSelected.name.replaceAll('_', ' ') : null) ||
+      (hasLocationContext ? filmPlaceLabel(contextRegionObj) : null) ||
+      creatorSubtitle;
+
+  return (
+    <RailTile
+      onPress={() => (onNavigate ?? trackedPush)(`/film/${film.id}` as any)}
+      heroUri={ytThumb(film.youtube_video_id, film.poster_url)}
+      heroFallbackUri={ytThumbFallback(film.youtube_video_id, film.poster_url)}
+      fallbackColor="#0c4a6e"
+      fallbackIcon={<Ionicons name="film-outline" size={28} color="#38bdf8" />}
+      topLeft={
+        showDate ? (
+          film.film_date ? (
+            <Chip>
+              <Text style={styles.chipText}>{formatSessionDate(film.film_date)}</Text>
+            </Chip>
+          ) : undefined
+        ) : film.creator_verified ? undefined : (
+          // Explore grid: flag only UNVERIFIED films — verified ones carry the
+          // creator @handle in the subtitle (mirror of web FilmTile).
+          <View style={[styles.verifyPill, styles.verifyPillOff]}>
+            <Text style={styles.verifyPillText}>Unverified</Text>
+          </View>
+        )
+      }
+      centerOverlay={
+        <View style={styles.playBadge}>
+          <Ionicons name="play" size={12} color="#fff" style={{ marginLeft: 1 }} />
+        </View>
+      }
+      title={film.title || 'Surf film'}
+      subtitle={subtitle}
+      width={width}
+      style={style}
+    />
+  );
+}
+
+// ─────────────────────────── Shaper Boards ───────────────────────────
+// An individual board (from the unified Explore feed). Cover fills the tile
+// (autoplaying its clip on-screen); footer carries the shaper avatar + board
+// name + shaper. Tapping opens the board detail page.
+export function BoardTile({
+  board,
+  width,
+  style,
+  onNavigate,
+  isViewable = false,
+}: {
+  board: any; // { id, name, photos, thumbnail_photo_id, shaper:{handle,name,picture,verified} }
+  width?: number;
+  style?: any;
+  onNavigate?: (path: string) => void;
+  isViewable?: boolean;
+}) {
+  const trackedPush = useTrackedPush();
+  const shaper = board?.shaper ?? {};
+  const disp = boardPhotoDisplay(pickThumbnailPhoto(board));
+  return (
+    <RailTile
+      onPress={() => (onNavigate ?? trackedPush)(`/board/${board.id}` as any)}
+      heroUri={disp?.posterUrl}
+      videoUri={disp?.isVideo ? disp.videoUrl : null}
+      active={isViewable}
+      fallbackColor="#3a2a08"
+      fallbackIcon={<MaterialCommunityIcons name="surfing" size={28} color="#f59e0b" />}
+      avatar={
+        <UserAvatar
+          uri={shaper.picture}
+          name={shaper.name ?? shaper.handle}
+          size={26}
+          userType={shaper.verified ? 'shaper' : undefined}
+          verified={!!shaper.verified}
+        />
+      }
+      title={board.name || 'Board'}
+      subtitle={shaper.name ?? (shaper.handle ? `@${shaper.handle}` : null)}
+      width={width}
+      style={style}
+    />
+  );
+}
+
 // ─────────────────────────── Nearby Business (ads) ───────────────────────────
 export function BusinessTile({
   ad,
   surfBreakId,
   isViewable = false,
+  width,
+  style,
 }: {
   ad: any;
   surfBreakId?: string;
   isViewable?: boolean;
+  // Grid usage (Explore) passes a computed cell width + style; the Nearby
+  // Business rail omits them and keeps the default rail tile footprint.
+  width?: number;
+  style?: any;
 }) {
   const [recordImpression] = useRecordAdImpressionMutation();
   const firedRef = useRef(false);
@@ -580,6 +749,8 @@ export function BusinessTile({
       }
       title={ad.company_name || 'Local business'}
       subtitle={ad.headline || null}
+      width={width}
+      style={style}
     />
   );
 }
@@ -605,6 +776,24 @@ const styles = StyleSheet.create({
   scrim: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   topLeft: { position: 'absolute', top: 8, left: 8 },
   topRight: { position: 'absolute', top: 8, right: 8 },
+  centerOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  // Film verification pill (Explore grid) — mirror of web NearbyPill.
+  verifyPill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  verifyPillOff: { backgroundColor: 'rgba(0,0,0,0.55)' },
+  verifyPillText: { color: '#fff', fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  // YouTube-style red play badge — matches web FilmTile (h-10 w-[58px] rounded-2xl).
+  playBadge: {
+    width: 38,
+    height: 26,
+    borderRadius: 8,
+    backgroundColor: '#dc2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
   footer: {
     position: 'absolute',
     left: 0,

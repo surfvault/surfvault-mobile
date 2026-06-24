@@ -30,6 +30,8 @@ import {
   useGetLatestShapersQuery,
   useGetShapersFromFollowingQuery,
   useGetShapersForSurfBreakQuery,
+  useGetFilmsForSurfBreakQuery,
+  useGetLatestFilmsQuery,
   useGetSurfBreaksQuery,
   useUpdateUserRecentSearchesMutation,
   useUpdatePreferencesMutation,
@@ -39,6 +41,7 @@ import {
 import { useUser } from '../../src/context/UserProvider';
 import { useUserPreferences, formatDistance, kmToUnit, unitToKm } from '../../src/helpers/preferences';
 import { useAuth } from '../../src/context/AuthProvider';
+import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useTabBar } from '../../src/context/TabBarContext';
 import SessionCard from '../../src/components/SessionCard';
 import FavoritesRails from '../../src/components/FavoritesRails';
@@ -55,9 +58,13 @@ import {
   SessionTile,
   ShaperTile,
   BusinessTile,
+  FilmTile,
+  RAIL_TILE_WIDTH,
 } from '../../src/components/home/FeedTiles';
+import CreateFilmSheet from '../../src/components/CreateFilmSheet';
 import ExploreGrid from '../../src/components/home/ExploreGrid';
 import BoardsExploreGrid from '../../src/components/home/BoardsExploreGrid';
+import FilmsExploreGrid from '../../src/components/home/FilmsExploreGrid';
 import BoardIcon from '../../src/components/BoardIcon';
 import RailSkeleton from '../../src/components/home/RailSkeleton';
 import {
@@ -90,11 +97,12 @@ const FEED_OPTIONS: { value: FeedType; label: string; description: string; comin
 // Quick filter pills below the Discover search bar. The first three re-sort the
 // same session grid; 'boards' swaps in a location-independent grid of shaper
 // boards from across the vault.
-type ExploreTab = 'latest' | 'recent' | 'popular' | 'boards';
+type ExploreTab = 'latest' | 'recent' | 'popular' | 'films' | 'boards';
 const EXPLORE_TABS: { value: ExploreTab; label: string; icon?: string }[] = [
   { value: 'latest', label: 'New' },
   { value: 'recent', label: 'Recent' },
   { value: 'popular', label: 'Popular', icon: 'flame' },
+  { value: 'films', label: 'Films', icon: 'logo-youtube' },
   { value: 'boards', label: 'Boards' },
 ];
 
@@ -162,6 +170,7 @@ export default function HomeScreen() {
   const { user } = useUser();
   const { units, nearby: nearbyPrefs } = useUserPreferences();
   const { isAuthenticated } = useAuth();
+  const requireAuth = useRequireAuth();
   const { setTabBarVisible } = useTabBar();
   const [updateUserRecentSearches] = useUpdateUserRecentSearchesMutation();
   const [updatePreferences] = useUpdatePreferencesMutation();
@@ -260,6 +269,23 @@ export default function HomeScreen() {
     ((user as any)?.surf_break_name as string | undefined) ??
     ((nearbyBreaks[0] as any)?.name as string | undefined) ??
     undefined;
+  // The anchor break's country/region — fed to the nearby-films rail so film
+  // subtitles resolve to the viewer-context region (web NearbyFilmCard parity).
+  const anchorBreak =
+    (nearbyBreaks as any[]).find((b) => b.id === anchorBreakId) ?? (nearbyBreaks as any[])[0];
+  const anchorCountryCode = anchorBreak?.country_code ?? (user as any)?.surf_break_country_code ?? null;
+  const anchorRegion = anchorBreak?.region ?? (user as any)?.surf_break_region ?? null;
+  // Title-cased region for the "in {Region}" rail subtitle (stored UPPER-case).
+  const anchorRegionLabel = anchorRegion
+    ? String(anchorRegion).replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
+    : anchorCountryCode || '';
+
+  // ---- Add-a-film (from the Nearby Surf Films rail) ----
+  const [createFilmVisible, setCreateFilmVisible] = useState(false);
+  const handleAddFilm = useCallback(() => {
+    if (!requireAuth()) return;
+    setCreateFilmVisible(true);
+  }, [requireAuth]);
 
   // ---- Viewability tracking ----
   // Until the first non-empty viewability report arrives, treat every card as
@@ -759,6 +785,20 @@ export default function HomeScreen() {
     { skip: !isSurfVault || !anchorBreakId }
   );
 
+  // Nearby Surf Films — region-anchored to the nearby break (same model as web
+  // Home2). With an anchor → region/country films; without → latest films.
+  const { currentData: regionFilmsData } = useGetFilmsForSurfBreakQuery(
+    { breakId: anchorBreakId as string, limit: 12 },
+    { skip: !isSurfVault || !anchorBreakId }
+  );
+  const { currentData: latestFilmsData } = useGetLatestFilmsQuery(
+    { limit: 12 },
+    { skip: !isSurfVault || !!anchorBreakId }
+  );
+  const nearbyFilms = (
+    (anchorBreakId ? regionFilmsData?.results?.films : latestFilmsData?.results?.films) ?? []
+  ).slice(0, 12);
+
   // Pick the active shaper stream by feedType. Combined into a single promo
   // pool with paid ads — one slot per shaper (featured boards swipe inside
   // the card) so a prolific shaper can't dominate. Sessions still drive the
@@ -1000,7 +1040,7 @@ export default function HomeScreen() {
             <Ionicons name="search-outline" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
             <TextInput
               ref={searchInputRef}
-              placeholder={searchType === 'user' ? 'Search people...' : 'Search surf breaks...'}
+              placeholder={searchType === 'user' ? 'Search people...' : 'Search the vault...'}
               placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
               onChangeText={handleSearchInput}
               onFocus={() => setSearchFocused(true)}
@@ -1290,6 +1330,8 @@ export default function HomeScreen() {
             </View>
             {exploreTab === 'boards' ? (
               <BoardsExploreGrid onNavigate={navigateKeepExplore} />
+            ) : exploreTab === 'films' ? (
+              <FilmsExploreGrid onNavigate={navigateKeepExplore} />
             ) : (
               <ExploreGrid onNavigate={navigateKeepExplore} sort={exploreTab} />
             )}
@@ -1686,6 +1728,51 @@ export default function HomeScreen() {
                 <RailSkeleton title="Nearby Shapers" subtitle="Tap a shaper to browse their boards." />
               ) : null}
 
+              {/* Nearby Surf Films — always shown so there's always an entry to
+                  add a film. With films: an "Add" button sits opposite the title.
+                  Empty: a single add-a-film placeholder tile fills the rail. */}
+              <View style={styles.railSection}>
+                <View style={[styles.railHeader, styles.filmsHeaderRow]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.nearbyTitle, { color: isDark ? '#fff' : '#111827' }]}>Nearby Surf Films</Text>
+                    <Text style={[styles.nearbySubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                      {anchorRegionLabel ? `in ${anchorRegionLabel}` : 'Surf films from around your area.'}
+                    </Text>
+                  </View>
+                  {nearbyFilms.length > 0 && (
+                    <Pressable onPress={handleAddFilm} hitSlop={8} style={styles.addFilmBtn}>
+                      <Ionicons name="add" size={16} color="#0ea5e9" />
+                      <Text style={styles.addFilmBtnText}>Add</Text>
+                    </Pressable>
+                  )}
+                </View>
+                {nearbyFilms.length > 0 ? (
+                  <FlatList
+                    data={nearbyFilms}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.railContent}
+                    keyExtractor={(f: any) => f.id}
+                    renderItem={({ item }) => <FilmTile film={item} showCredit showDate />}
+                  />
+                ) : (
+                  <View style={styles.railContent}>
+                    <Pressable
+                      onPress={handleAddFilm}
+                      style={[styles.addFilmTile, { borderColor: isDark ? '#1f2937' : '#cbd5e1' }]}
+                    >
+                      <View style={styles.addFilmTileIcon}>
+                        <Ionicons name="add" size={26} color="#0ea5e9" />
+                      </View>
+                      <Text style={[styles.addFilmTileText, { color: isDark ? '#fff' : '#111827' }]}>Add a film</Text>
+                      <Text style={[styles.addFilmTileSub, { color: isDark ? '#9ca3af' : '#6b7280' }]} numberOfLines={2}>
+                        Catalogue a YouTube edit from around here
+                      </Text>
+                    </Pressable>
+                  </View>
+                )}
+              </View>
+
               {/* Nearby Business */}
               {nearbyBusinessAds.length > 0 ? (
                 <View style={styles.railSection} onLayout={onRailLayout('business')}>
@@ -1722,6 +1809,7 @@ export default function HomeScreen() {
                 nearbySessions.length === 0 &&
                 nearbyPhotographers.length === 0 &&
                 nearbyShapers.length === 0 &&
+                nearbyFilms.length === 0 &&
                 nearbyBusinessAds.length === 0 &&
                 !sessionsLoading &&
                 !photographersLoading &&
@@ -1841,6 +1929,12 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       />
       )}
+      <CreateFilmSheet
+        visible={createFilmVisible}
+        onClose={() => setCreateFilmVisible(false)}
+        defaultSurfBreakId={anchorBreakId}
+        defaultBreakName={anchorName}
+      />
     </View>
   );
 }
@@ -2057,6 +2151,30 @@ const styles = StyleSheet.create({
   nearbySubtitle: { fontSize: 13, marginTop: 2 },
   railSection: { marginBottom: 28 },
   railHeader: { paddingHorizontal: 16, marginBottom: 4 },
+  filmsHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  addFilmBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingVertical: 4, paddingHorizontal: 8 } as any,
+  addFilmBtnText: { color: '#0ea5e9', fontSize: 14, fontWeight: '600' },
+  addFilmTile: {
+    width: RAIL_TILE_WIDTH,
+    height: Math.round((RAIL_TILE_WIDTH * 5) / 4),
+    borderRadius: 16,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  addFilmTileIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(14,165,233,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  addFilmTileText: { fontSize: 14, fontWeight: '700' },
+  addFilmTileSub: { fontSize: 11, textAlign: 'center', marginTop: 4 },
   railHeaderRow: { flexDirection: 'row', alignItems: 'flex-end' },
   seeAll: { fontSize: 13, fontWeight: '600', color: '#0ea5e9' },
   radiusChip: {

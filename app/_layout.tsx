@@ -185,6 +185,9 @@ function AppShell() {
         case 'session':
           if (data.sessionId) router.push(`/session/${data.sessionId}` as any);
           break;
+        case 'film':
+          if (data.filmId) router.push(`/film/${data.filmId}` as any);
+          break;
         case 'user':
           if (data.userId) router.push(`/user/${data.userId}` as any);
           break;
