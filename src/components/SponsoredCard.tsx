@@ -81,6 +81,9 @@ function SponsoredVideoLayer({ uri, active }: { uri: string; active: boolean }) 
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = true;
+    // Silent feed clip — mix with other audio so it doesn't pause the user's
+    // background music by grabbing the iOS audio session (see AutoplayVideo).
+    p.audioMixingMode = 'mixWithOthers';
   });
   useEffect(() => {
     if (active) player.play();

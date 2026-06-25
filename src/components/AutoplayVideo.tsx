@@ -40,6 +40,12 @@ export default function AutoplayVideo({
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = true;
+    // Feed clips are silent — let them mix with other audio so they don't
+    // seize the iOS audio session and pause the user's background music.
+    // (Default 'auto' takes the playback category and interrupts other apps
+    // even when the player is muted.) The full-screen player keeps the
+    // default so its audio plays when a clip is actually opened.
+    p.audioMixingMode = 'mixWithOthers';
   });
 
   useEffect(() => {
