@@ -12,6 +12,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import { safeShare } from '../../src/helpers/share';
+import { countryNameFromCode } from '../../src/helpers/countryNames';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -377,6 +378,9 @@ export default function SurfBreakDetailScreen() {
   const regionLabel = regionDisplay
     ? regionDisplay.toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
     : '';
+  // Full country name (e.g. Portugal) for the films rail subtitle when this break
+  // has no region — friendlier than the bare country code.
+  const filmsLocationLabel = regionLabel || countryNameFromCode(breakData?.country_code ?? country);
 
   // Coordinates arrive as a JSONB { lat, lon } object (values may be strings).
   const heroLat = breakData?.coordinates?.lat != null ? parseFloat(String(breakData.coordinates.lat)) : null;
@@ -560,7 +564,7 @@ export default function SurfBreakDetailScreen() {
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.railTitle, { color: isDark ? '#fff' : '#111827' }]}>Local Surf Films</Text>
                       <Text style={[styles.railSubtitle, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
-                        {regionLabel || countryDisplay ? `in ${regionLabel || countryDisplay}` : 'Nearby'}
+                        {filmsLocationLabel ? `in ${filmsLocationLabel}` : 'Nearby'}
                       </Text>
                     </View>
                   </View>

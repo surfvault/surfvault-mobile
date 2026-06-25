@@ -11,17 +11,18 @@ import {
 } from 'react-native';
 import { useGetLatestFilmsQuery } from '../../store';
 import type { Film } from '../../store/apis/endpoints/films';
-import { FilmTile } from './FeedTiles';
+import { FilmTile, GRID_TILE_HEIGHT_RATIO } from './FeedTiles';
 
 /**
- * "Films" mode of the Discover Explore grid — a films-only 2-column grid of the
+ * "Films" mode of the Discover Explore grid — a films-only 3-column grid of the
  * latest catalogued surf films (newest first). Reuses the shared FilmTile in its
  * Explore form (verification pill + creator @handle). Mirror of web
  * FilmsExploreGrid. No new backend.
  */
 
-const PAD = 12;
-const GAP = 10;
+const PAD = 0; // edge-to-edge — tiles touch the screen edges
+const COLS = 3; // tiles per row
+const GAP = 6; // gap between tiles (both axes)
 
 export default function FilmsExploreGrid({
   onNavigate,
@@ -30,7 +31,7 @@ export default function FilmsExploreGrid({
 }) {
   const isDark = useColorScheme() === 'dark';
   const { width } = useWindowDimensions();
-  const cellW = Math.floor((width - PAD * 2 - GAP) / 2);
+  const cellW = Math.floor((width - PAD * 2 - GAP * (COLS - 1)) / COLS);
 
   const { data, currentData, isFetching, refetch } = useGetLatestFilmsQuery({ limit: 60 });
   const [refreshing, setRefreshing] = useState(false);
@@ -47,7 +48,7 @@ export default function FilmsExploreGrid({
 
   const renderItem = useCallback(
     ({ item }: { item: Film }) => (
-      <FilmTile film={item} width={cellW} onNavigate={onNavigate} style={styles.gridTile} />
+      <FilmTile film={item} width={cellW} onNavigate={onNavigate} style={styles.gridTile} heightRatio={GRID_TILE_HEIGHT_RATIO} />
     ),
     [cellW, onNavigate]
   );
@@ -61,9 +62,9 @@ export default function FilmsExploreGrid({
       data={films}
       keyExtractor={(f) => f.id}
       renderItem={renderItem}
-      numColumns={2}
-      columnWrapperStyle={{ paddingHorizontal: PAD, justifyContent: 'space-between' }}
-      ItemSeparatorComponent={() => <View style={{ height: GAP + 6 }} />}
+      numColumns={COLS}
+      columnWrapperStyle={{ paddingHorizontal: PAD, gap: GAP }}
+      ItemSeparatorComponent={() => <View style={{ height: GAP }} />}
       contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"

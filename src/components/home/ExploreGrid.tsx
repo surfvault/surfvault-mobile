@@ -15,7 +15,7 @@ import { useGetExploreFeedQuery, useGetAdsQuery } from '../../store';
 import { useUser } from '../../context/UserProvider';
 import { useAuth } from '../../context/AuthProvider';
 import { useUserCoords } from '../../hooks/useUserCoords';
-import { SessionTile, FilmTile, BoardTile, BusinessTile } from './FeedTiles';
+import { SessionTile, FilmTile, BoardTile, BusinessTile, GRID_TILE_HEIGHT_RATIO } from './FeedTiles';
 
 /**
  * The unified Explore feed — sessions + films + (per-shaper-capped) boards in
@@ -26,8 +26,9 @@ import { SessionTile, FilmTile, BoardTile, BusinessTile } from './FeedTiles';
  * Ads are the only interleaved element. Pages accumulate on the cursor.
  */
 
-const PAD = 12; // outer horizontal padding
-const GAP = 10; // gap between the two columns
+const PAD = 0; // edge-to-edge — tiles touch the screen edges
+const COLS = 3; // tiles per row
+const GAP = 6; // gap between tiles (both axes)
 // Ads scatter with a VARIED gap (not a fixed "every N", which reads mechanical).
 // Deterministic per ad index so they don't reshuffle as pages accumulate.
 const AD_MIN_GAP = 5;
@@ -61,15 +62,15 @@ function ExploreGridSkeleton({ cellW }: { cellW: number }) {
     return () => anim.stop();
   }, [pulse]);
   const blockColor = isDark ? '#1f2937' : '#e5e7eb';
-  const tileH = Math.round((cellW * 5) / 4);
+  const tileH = Math.round(cellW * GRID_TILE_HEIGHT_RATIO);
   return (
     <View style={{ paddingHorizontal: PAD }}>
       {Array.from({ length: 6 }).map((_, r) => (
         <View key={r} style={{ flexDirection: 'row', marginBottom: GAP }}>
-          {[0, 1].map((c) => (
+          {Array.from({ length: COLS }).map((_, c) => (
             <Animated.View
               key={c}
-              style={{ width: cellW, height: tileH, borderRadius: 16, backgroundColor: blockColor, opacity: pulse, marginRight: c === 0 ? GAP : 0 }}
+              style={{ width: cellW, height: tileH, borderRadius: 16, backgroundColor: blockColor, opacity: pulse, marginRight: c < COLS - 1 ? GAP : 0 }}
             />
           ))}
         </View>
@@ -98,7 +99,7 @@ export default function ExploreGrid({
   const { isAuthenticated } = useAuth();
   const isDark = useColorScheme() === 'dark';
   const { width } = useWindowDimensions();
-  const cellW = Math.floor((width - PAD * 2 - GAP) / 2);
+  const cellW = Math.floor((width - PAD * 2 - GAP * (COLS - 1)) / COLS);
   const feedSort = FEED_SORT[sort] ?? 'new';
   const onThisDay = month != null && day != null;
 
@@ -187,8 +188,8 @@ export default function ExploreGrid({
   const ads = adsData?.results?.ads ?? [];
 
   // Weave native ad TILES into the content stream at a varied gap (adGap),
-  // then chunk everything into 2-col rows — so ads pack into the grid like any
-  // other tile instead of breaking it with a full-width card.
+  // then chunk everything into COLS-wide rows — so ads pack into the grid like
+  // any other tile instead of breaking it with a full-width card.
   const rows = useMemo<Row[]>(() => {
     const combined: Tile[] = [];
     let ai = 0;
@@ -206,9 +207,9 @@ export default function ExploreGrid({
       }
     });
     const out: Row[] = [];
-    for (let i = 0; i < combined.length; i += 2) {
-      const pair = combined.slice(i, i + 2);
-      out.push({ type: 'pair', key: `pair-${pair[0].key}`, items: pair });
+    for (let i = 0; i < combined.length; i += COLS) {
+      const group = combined.slice(i, i + COLS);
+      out.push({ type: 'pair', key: `pair-${group[0].key}`, items: group });
     }
     return out;
   }, [items, ads]);
@@ -227,15 +228,15 @@ export default function ExploreGrid({
       return (
         <View style={styles.pairRow}>
           {row.items.map((t, idx) => (
-            <View key={t.key} style={{ marginRight: idx === 0 ? GAP : 0 }}>
+            <View key={t.key} style={{ marginRight: idx < COLS - 1 ? GAP : 0 }}>
               {t.kind === 'ad' ? (
-                <BusinessTile ad={t.ad} width={cellW} isViewable={active} style={styles.gridTile} />
+                <BusinessTile ad={t.ad} width={cellW} isViewable={active} style={styles.gridTile} hideAvatar heightRatio={GRID_TILE_HEIGHT_RATIO} />
               ) : t.kind === 'film' ? (
-                <FilmTile film={t.film} width={cellW} onNavigate={onNavigate} style={styles.gridTile} />
+                <FilmTile film={t.film} width={cellW} onNavigate={onNavigate} style={styles.gridTile} heightRatio={GRID_TILE_HEIGHT_RATIO} />
               ) : t.kind === 'board' ? (
-                <BoardTile board={t.board} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+                <BoardTile board={t.board} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} hideAvatar heightRatio={GRID_TILE_HEIGHT_RATIO} />
               ) : (
-                <SessionTile group={t.group} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} />
+                <SessionTile group={t.group} width={cellW} onNavigate={onNavigate} style={styles.gridTile} isViewable={active} hideAvatar heightRatio={GRID_TILE_HEIGHT_RATIO} />
               )}
             </View>
           ))}
@@ -289,7 +290,7 @@ export default function ExploreGrid({
 }
 
 const styles = StyleSheet.create({
-  pairRow: { flexDirection: 'row', paddingHorizontal: PAD, marginBottom: GAP + 6 },
+  pairRow: { flexDirection: 'row', paddingHorizontal: PAD, marginBottom: GAP },
   gridTile: { marginRight: 0 },
   centered: { paddingVertical: 60, alignItems: 'center' },
   emptyText: { color: '#9ca3af', fontSize: 14, textAlign: 'center', lineHeight: 20, paddingHorizontal: 32 },

@@ -25,7 +25,9 @@ import type { BoardroomShaper, Film } from '../../store';
  */
 
 export const RAIL_TILE_WIDTH = 168;
-const tileHeight = (w: number) => Math.round((w * 5) / 4); // 4:5 portrait
+const tileHeight = (w: number, ratio = 5 / 4) => Math.round(w * ratio); // default 4:5 portrait
+// Explore grids run a touch taller than the 4:5 rails — denser, more editorial.
+export const GRID_TILE_HEIGHT_RATIO = 1.3;
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const formatDate = (dateStr?: string | null) => {
@@ -82,6 +84,7 @@ function RailTile({
   style,
   videoUri,
   active = false,
+  heightRatio,
 }: {
   onPress: () => void;
   heroUri?: string | null;
@@ -105,9 +108,11 @@ function RailTile({
   // Player is mounted ONLY while active so a grid never holds many live players.
   videoUri?: string | null;
   active?: boolean;
+  // Override the 4:5 height ratio (the Explore grids run slightly taller).
+  heightRatio?: number;
 }) {
   const isDark = useColorScheme() === 'dark';
-  const h = tileHeight(width);
+  const h = tileHeight(width, heightRatio);
   const scrimH = Math.round(h * 0.55);
   // Swap to the fallback hero once the primary 404s (maxres → mqdefault).
   const [heroErrored, setHeroErrored] = useState(false);
@@ -186,6 +191,8 @@ export function SessionTile({
   style,
   noStack = false,
   hideBreakName = false,
+  hideAvatar = false,
+  heightRatio,
   onNavigate,
   isViewable = false,
 }: {
@@ -194,6 +201,10 @@ export function SessionTile({
   style?: any;
   // Grid mode disables the depth-peek stack (it would overflow the cell).
   noStack?: boolean;
+  // Drop the footer avatar — the dense Explore grid reads cleaner without it.
+  hideAvatar?: boolean;
+  // Override the 4:5 height ratio (Explore grid runs slightly taller).
+  heightRatio?: number;
   // Drop the break-name title from the footer — used when the tile already
   // sits under a break-named header (e.g. Favorites rails), so the footer shows
   // just the photographer avatar + @handle subtitle.
@@ -331,10 +342,11 @@ export function SessionTile({
       fallbackIcon={<Ionicons name="images-outline" size={28} color="#38bdf8" />}
       topLeft={group.session_date ? <Text style={styles.dateText}>{formatDate(group.session_date)}</Text> : null}
       topRight={topRight}
-      avatar={avatar}
+      avatar={hideAvatar ? undefined : avatar}
       title={hideBreakName ? undefined : breakName}
       subtitle={subtitle}
       stackCount={!noStack && isMultiSession ? sessionCount : 0}
+      heightRatio={heightRatio}
       width={width}
       style={style}
       videoUri={videoUri}
@@ -537,11 +549,14 @@ export function FilmTile({
   contextRegion,
   showCredit = false,
   showDate = false,
+  heightRatio,
 }: {
   film: Film;
   width?: number;
   style?: any;
   onNavigate?: (path: string) => void;
+  // Override the 4:5 height ratio (Explore grid runs slightly taller).
+  heightRatio?: number;
   // Explicit subtitle (e.g. Explore grid shows the creator handle).
   subtitle?: string | null;
   // Location context (nearby rail / break page) — drives the region-vs-break
@@ -590,27 +605,30 @@ export function FilmTile({
       fallbackColor="#0c4a6e"
       fallbackIcon={<Ionicons name="film-outline" size={28} color="#38bdf8" />}
       topLeft={
-        showDate ? (
-          film.film_date ? (
-            <Chip>
-              <Text style={styles.chipText}>{formatSessionDate(film.film_date)}</Text>
-            </Chip>
-          ) : undefined
-        ) : film.creator_verified ? undefined : (
-          // Explore grid: flag only UNVERIFIED films — verified ones carry the
-          // creator @handle in the subtitle (mirror of web FilmTile).
-          <View style={[styles.verifyPill, styles.verifyPillOff]}>
-            <Text style={styles.verifyPillText}>Unverified</Text>
-          </View>
-        )
+        // Publish date top-left as plain shadowed text — no pill fill — to mimic
+        // the session tiles exactly, so films read chronologically alongside them.
+        film.film_date ? (
+          <Text style={styles.dateText}>{formatSessionDate(film.film_date)}</Text>
+        ) : undefined
       }
       centerOverlay={
-        <View style={styles.playBadge}>
-          <Ionicons name="play" size={12} color="#fff" style={{ marginLeft: 1 }} />
+        // Play badge centered, with the Explore-grid UNVERIFIED flag stacked
+        // directly beneath it. Verified films carry the creator @handle in the
+        // subtitle instead, so they show no flag (mirror of web FilmTile).
+        <View style={{ alignItems: 'center' }}>
+          <View style={styles.playBadge}>
+            <Ionicons name="play" size={9} color="#fff" style={{ marginLeft: 1 }} />
+          </View>
+          {!showDate && !showCredit && !film.creator_verified ? (
+            <View style={[styles.verifyPill, styles.verifyPillOff, { marginTop: 6 }]}>
+              <Text style={styles.verifyPillText}>Unverified</Text>
+            </View>
+          ) : null}
         </View>
       }
       title={film.title || 'Surf film'}
       subtitle={subtitle}
+      heightRatio={heightRatio}
       width={width}
       style={style}
     />
@@ -627,12 +645,18 @@ export function BoardTile({
   style,
   onNavigate,
   isViewable = false,
+  hideAvatar = false,
+  heightRatio,
 }: {
   board: any; // { id, name, photos, thumbnail_photo_id, shaper:{handle,name,picture,verified} }
   width?: number;
   style?: any;
   onNavigate?: (path: string) => void;
   isViewable?: boolean;
+  // Drop the footer avatar — the dense Explore grid reads cleaner without it.
+  hideAvatar?: boolean;
+  // Override the 4:5 height ratio (Explore grid runs slightly taller).
+  heightRatio?: number;
 }) {
   const trackedPush = useTrackedPush();
   const shaper = board?.shaper ?? {};
@@ -646,16 +670,19 @@ export function BoardTile({
       fallbackColor="#3a2a08"
       fallbackIcon={<MaterialCommunityIcons name="surfing" size={28} color="#f59e0b" />}
       avatar={
-        <UserAvatar
-          uri={shaper.picture}
-          name={shaper.name ?? shaper.handle}
-          size={26}
-          userType={shaper.verified ? 'shaper' : undefined}
-          verified={!!shaper.verified}
-        />
+        hideAvatar ? undefined : (
+          <UserAvatar
+            uri={shaper.picture}
+            name={shaper.name ?? shaper.handle}
+            size={26}
+            userType={shaper.verified ? 'shaper' : undefined}
+            verified={!!shaper.verified}
+          />
+        )
       }
       title={board.name || 'Board'}
       subtitle={shaper.name ?? (shaper.handle ? `@${shaper.handle}` : null)}
+      heightRatio={heightRatio}
       width={width}
       style={style}
     />
@@ -669,6 +696,8 @@ export function BusinessTile({
   isViewable = false,
   width,
   style,
+  hideAvatar = false,
+  heightRatio,
 }: {
   ad: any;
   surfBreakId?: string;
@@ -677,6 +706,10 @@ export function BusinessTile({
   // Business rail omits them and keeps the default rail tile footprint.
   width?: number;
   style?: any;
+  // Drop the footer avatar — the dense Explore grid reads cleaner without it.
+  hideAvatar?: boolean;
+  // Override the 4:5 height ratio (Explore grid runs slightly taller).
+  heightRatio?: number;
 }) {
   const [recordImpression] = useRecordAdImpressionMutation();
   const firedRef = useRef(false);
@@ -739,16 +772,19 @@ export function BusinessTile({
       fallbackIcon={<Ionicons name="business-outline" size={28} color="#9ca3af" />}
       topLeft={<Chip><Text style={styles.chipTextUpper}>Sponsored</Text></Chip>}
       avatar={
-        <View style={styles.adAvatar}>
-          {ad.advertiser_picture || ad.partner_logo_url ? (
-            <Image source={{ uri: ad.advertiser_picture || ad.partner_logo_url }} style={styles.adAvatarImg} contentFit="cover" />
-          ) : (
-            <Ionicons name="business" size={13} color="#fff" />
-          )}
-        </View>
+        hideAvatar ? undefined : (
+          <View style={styles.adAvatar}>
+            {ad.advertiser_picture || ad.partner_logo_url ? (
+              <Image source={{ uri: ad.advertiser_picture || ad.partner_logo_url }} style={styles.adAvatarImg} contentFit="cover" />
+            ) : (
+              <Ionicons name="business" size={13} color="#fff" />
+            )}
+          </View>
+        )
       }
       title={ad.company_name || 'Local business'}
       subtitle={ad.headline || null}
+      heightRatio={heightRatio}
       width={width}
       style={style}
     />
@@ -764,12 +800,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 0,
     left: 0,
-    borderRadius: 16,
+    borderRadius: 10,
   },
   peekNear: { transform: [{ translateX: 8 }, { translateY: 8 }] },
   peekFar: { transform: [{ translateX: 15 }, { translateY: 13 }] },
   hero: {
-    borderRadius: 16,
+    borderRadius: 10,
     overflow: 'hidden',
   },
   heroFallback: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
@@ -781,11 +817,11 @@ const styles = StyleSheet.create({
   verifyPill: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
   verifyPillOff: { backgroundColor: 'rgba(0,0,0,0.55)' },
   verifyPillText: { color: '#fff', fontSize: 9, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
-  // YouTube-style red play badge — matches web FilmTile (h-10 w-[58px] rounded-2xl).
+  // YouTube-style red play badge — kept compact for the dense 3-col Explore grid.
   playBadge: {
-    width: 38,
-    height: 26,
-    borderRadius: 8,
+    width: 28,
+    height: 19,
+    borderRadius: 6,
     backgroundColor: '#dc2626',
     alignItems: 'center',
     justifyContent: 'center',

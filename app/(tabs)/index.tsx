@@ -41,6 +41,7 @@ import {
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 import { useUserPreferences, formatDistance, kmToUnit, unitToKm } from '../../src/helpers/preferences';
+import { countryNameFromCode } from '../../src/helpers/countryNames';
 import { useAuth } from '../../src/context/AuthProvider';
 import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import { useTabBar } from '../../src/context/TabBarContext';
@@ -277,10 +278,11 @@ export default function HomeScreen() {
     (nearbyBreaks as any[]).find((b) => b.id === anchorBreakId) ?? (nearbyBreaks as any[])[0];
   const anchorCountryCode = anchorBreak?.country_code ?? (user as any)?.surf_break_country_code ?? null;
   const anchorRegion = anchorBreak?.region ?? (user as any)?.surf_break_region ?? null;
-  // Title-cased region for the "in {Region}" rail subtitle (stored UPPER-case).
+  // Title-cased region for the "in {Region}" rail subtitle (stored UPPER-case);
+  // no region → full country name (e.g. Portugal) over the bare country code.
   const anchorRegionLabel = anchorRegion
     ? String(anchorRegion).replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase())
-    : anchorCountryCode || '';
+    : countryNameFromCode(anchorCountryCode);
 
   // ---- Add-a-film (from the Nearby Surf Films rail) ----
   const [createFilmVisible, setCreateFilmVisible] = useState(false);
