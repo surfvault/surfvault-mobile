@@ -34,6 +34,8 @@ import UserTypeBadge from '../../src/components/UserTypeBadge';
 import ConversationSkeleton from '../../src/components/ConversationSkeleton';
 import ReportMessageSheet from '../../src/components/ReportMessageSheet';
 import ActionSheet from '../../src/components/ActionSheet';
+import PaymentRequestSheet from '../../src/components/PaymentRequestSheet';
+import { hasPaymentChannels } from '../../src/helpers/paymentChannels';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const URL_REGEX = /(https?:\/\/[^\s]+)/gi;
@@ -78,8 +80,10 @@ function MessageBody({ body, isOutbound, isDark, onNavigate }: { body: string; i
     }
   }
 
-  // URL detection
-  if (URL_REGEX.test(body)) {
+  // URL detection. Use a non-global test so the shared global URL_REGEX's
+  // lastIndex isn't advanced here (a stateful /g + .test() would intermittently
+  // skip linkifying later messages).
+  if (/(https?:\/\/[^\s]+)/i.test(body)) {
     const parts = body.split(URL_REGEX);
     return (
       <Text style={[styles.messageText, { color: textColor }]}>
@@ -147,6 +151,7 @@ export default function ConversationDetailScreen() {
   // message so the sheet can both copy its body and (for inbound only) open
   // ReportMessageSheet keyed to its id.
   const [actionTarget, setActionTarget] = useState<{ id: string; body: string; isOutbound: boolean } | null>(null);
+  const [paymentSheetOpen, setPaymentSheetOpen] = useState(false);
 
   // Growing-window pagination: fetch the most-recent N messages, grow N when
   // the user scrolls to the top ("load older").
@@ -478,6 +483,7 @@ export default function ConversationDetailScreen() {
                 </Text>
               </View>
             ) : (
+              <>
               <View style={[styles.inputWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
                 <TextInput
                   value={message}
@@ -496,6 +502,16 @@ export default function ConversationDetailScreen() {
                   <Ionicons name="send" size={16} color="#fff" />
                 </Pressable>
               </View>
+              {hasPaymentChannels(user) && !isOtherUserBlocked && (
+                <Pressable
+                  onPress={() => setPaymentSheetOpen(true)}
+                  style={[styles.payReqPill, { borderColor: isDark ? 'rgba(255,255,255,0.12)' : '#e5e7eb' }]}
+                >
+                  <Ionicons name="cash-outline" size={15} color={isDark ? '#34d399' : '#059669'} />
+                  <Text style={[styles.payReqPillText, { color: isDark ? '#34d399' : '#059669' }]}>Generate payment link</Text>
+                </Pressable>
+              )}
+              </>
             )}
           </View>
         </KeyboardAvoidingView>
@@ -539,6 +555,15 @@ export default function ConversationDetailScreen() {
         senderUserId={otherUser?.id}
         senderHandle={otherUser?.handle}
         onClose={() => setReportMessageId(null)}
+      />
+
+      <PaymentRequestSheet
+        visible={paymentSheetOpen}
+        user={user}
+        onClose={() => setPaymentSheetOpen(false)}
+        onInsert={(text) =>
+          setMessage((prev) => (prev.trim() ? `${prev.trim()}\n${text}` : text))
+        }
       />
     </>
   );
@@ -597,4 +622,6 @@ const styles = StyleSheet.create({
   inputWrap: { flexDirection: 'row', alignItems: 'flex-end', borderRadius: 22, paddingHorizontal: 12, paddingVertical: 6 },
   input: { flex: 1, fontSize: 16, maxHeight: 100, paddingVertical: 8 },
   sendBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
+  payReqPill: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 8, marginLeft: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
+  payReqPillText: { fontSize: 12, fontWeight: '600' },
 });

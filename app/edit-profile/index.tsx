@@ -742,13 +742,21 @@ export default function EditProfileScreen() {
                           />
                         </View>
                       )}
+                      {meta.usOnly && (
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 5, marginTop: 6 }}>
+                          <Ionicons name="information-circle-outline" size={13} color={isDark ? '#fbbf24' : '#d97706'} style={{ marginTop: 1 }} />
+                          <Text style={{ flex: 1, fontSize: 11, lineHeight: 15, color: isDark ? '#fbbf24' : '#d97706' }}>
+                            US-only — both people need US accounts. For international surfers, use PayPal or a Payment link.
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   );
                 })}
 
                 {paymentChannels.length < MAX_PAYMENT_CHANNELS ? (
                   <Pressable
-                    onPress={() => setPaymentChannels((prev) => [...prev, { type: 'venmo', handle: '' }])}
+                    onPress={() => setPaymentChannels((prev) => [...prev, { type: 'paypal', handle: '' }])}
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 4 }}
                   >
                     <Ionicons name="add-circle-outline" size={18} color="#0ea5e9" />
