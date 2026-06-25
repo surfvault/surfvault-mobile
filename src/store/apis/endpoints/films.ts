@@ -92,7 +92,6 @@ export interface FilmDetailResult {
   viewerCanLinkSessions?: boolean;
   viewerCanVerify?: boolean;
   viewerCanReveal?: boolean;
-  pendingVerificationCode?: string | null;
   creditsVisible?: boolean;
 }
 
@@ -109,18 +108,20 @@ const filmsApi = rootApi.injectEndpoints({
     }),
     getFilmsNear: builder.query<
       { results: { films: Film[] } },
-      { lat?: number | null; lon?: number | null; limit?: number; month?: number; day?: number }
+      { lat?: number | null; lon?: number | null; limit?: number; month?: number; day?: number; radiusKm?: number }
     >({
       providesTags: [ApiTag.Film],
       // `month`/`day` (caller's LOCAL date) engage the "On This Day" filter: only
       // films whose film_date falls on that month-day across all years.
-      query: ({ lat, lon, limit = 30, month, day }) => {
+      query: ({ lat, lon, limit = 30, month, day, radiusKm }) => {
         const params = new URLSearchParams();
         if (lat != null) params.set('lat', String(lat));
         if (lon != null) params.set('lon', String(lon));
         params.set('limit', String(limit));
         if (month != null) params.set('month', String(month));
         if (day != null) params.set('day', String(day));
+        // Bounds the proximity search so nothing far away leaks in.
+        if (radiusKm != null) params.set('radiusKm', String(radiusKm));
         return { url: `/films/near?${params.toString()}`, method: 'GET' };
       },
     }),

@@ -15,8 +15,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { useCreateFilmMutation, useTagFilmSurfBreakMutation } from '../store';
+import { useCreateFilmMutation, useLazyCheckFilmByVideoIdQuery, useTagFilmSurfBreakMutation } from '../store';
 import { useTrackedPush } from '../context/NavigationContext';
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Format a 'YYYY-MM-DD' string as 'Mon D, YYYY' without timezone drift (no Date parse). */
+function formatFilmDate(d: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+  if (!m) return d;
+  return `${MONTHS[Number(m[2]) - 1] ?? m[2]} ${Number(m[3])}, ${m[1]}`;
+}
 
 /**
  * Best-effort YouTube snippet (publish date + description) via the Data API v3.
@@ -89,6 +98,7 @@ export default function CreateFilmSheet({
   const trackedPush = useTrackedPush();
   const [createFilm, { isLoading }] = useCreateFilmMutation();
   const [tagBreak] = useTagFilmSurfBreakMutation();
+  const [checkFilm] = useLazyCheckFilmByVideoIdQuery();
 
   const [url, setUrl] = useState('');
   const [title, setTitle] = useState('');
@@ -97,6 +107,10 @@ export default function CreateFilmSheet({
   const [videoId, setVideoId] = useState<string | null>(null);
   const [filmDate, setFilmDate] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
+  // idle | checking | valid | invalid | duplicate — drives the status badge and
+  // the Add-film enabled state. Mirrors the web CreateFilmModal flow.
+  const [status, setStatus] = useState<'idle' | 'checking' | 'valid' | 'invalid' | 'duplicate'>('idle');
+  const [existingId, setExistingId] = useState<string | null>(null);
 
   const bg = isDark ? '#000' : '#fff';
   const text = isDark ? '#fff' : '#0f172a';
@@ -107,41 +121,65 @@ export default function CreateFilmSheet({
   const noteBorder = isDark ? 'rgba(14,165,233,0.28)' : '#bae6fd';
   const headerBorder = isDark ? '#1f2937' : '#e5e7eb';
 
-  const reset = () => { setUrl(''); setTitle(''); setDescription(''); setPosterUrl(null); setVideoId(null); setFilmDate(null); };
+  const reset = () => {
+    setUrl(''); setTitle(''); setDescription(''); setPosterUrl(null);
+    setVideoId(null); setFilmDate(null); setStatus('idle'); setExistingId(null);
+  };
   const close = () => { reset(); onClose(); };
 
-  const resolve = async () => {
+  // Verify the pasted link on Fetch: (1) is it a real, public, embeddable
+  // YouTube video (oEmbed returns 200), and (2) is it already catalogued on
+  // SurfVault. Drives the status badge + the Add-film enabled state — no create
+  // side effect. Mirrors the web CreateFilmModal verify().
+  const verify = async () => {
     const id = parseYoutubeId(url);
-    if (!id) { Alert.alert('Invalid link', 'Enter a valid YouTube link.'); return; }
+    if (!id) { setVideoId(null); setExistingId(null); setStatus(url.trim() ? 'invalid' : 'idle'); return; }
     setVideoId(id);
+    setExistingId(null);
+    setStatus('checking');
     setResolving(true);
     try {
-      const resp = await fetch(
-        `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}&format=json`
-      );
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data?.title && !title) setTitle(data.title);
-        setPosterUrl(data?.thumbnail_url || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
-      } else {
-        setPosterUrl(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
-      }
-      // Publish date + description via the Data API (best-effort). Description
+      // 1) Validity — oEmbed 200 only for real, embeddable videos.
+      let valid = false;
+      try {
+        const resp = await fetch(
+          `https://www.youtube.com/oembed?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}&format=json`
+        );
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data?.title) { setTitle((t) => t || data.title); valid = true; }
+          if (data?.thumbnail_url) setPosterUrl(data.thumbnail_url);
+        }
+      } catch { /* network error — treat as unverifiable */ }
+      if (!valid) { setPosterUrl(null); setFilmDate(null); setStatus('invalid'); return; }
+      // 1b) Publish date + description via the Data API (best-effort). Description
       // only fills if the user hasn't typed one (mirrors the title autofill).
       const snip = await fetchYoutubeSnippet(id);
       setFilmDate(snip?.filmDate ?? null);
       if (snip?.description) setDescription((prev) => prev || snip.description);
-    } catch {
-      setPosterUrl(`https://i.ytimg.com/vi/${id}/hqdefault.jpg`);
+      // 2) Dedupe — already on SurfVault?
+      try {
+        const res = await checkFilm({ videoId: id }).unwrap();
+        if (res?.results?.exists) { setExistingId(res.results.filmId); setStatus('duplicate'); return; }
+      } catch { /* check failed — submit-time 409 still guards */ }
+      setStatus('valid');
     } finally {
       setResolving(false);
     }
   };
 
+  const openExisting = () => {
+    if (!existingId) return;
+    close();
+    trackedPush(`/film/${existingId}` as any);
+  };
+
+  const canSubmit = status === 'valid' && !!title.trim() && !isLoading;
+
   const submit = async () => {
+    if (!canSubmit) return;
     const id = videoId || parseYoutubeId(url);
     if (!id) { Alert.alert('Invalid link', 'Enter a valid YouTube link.'); return; }
-    if (!title.trim()) { Alert.alert('Add a title', 'Give the film a title.'); return; }
     try {
       const res = await createFilm({
         youtube_video_id: id,
@@ -198,20 +236,51 @@ export default function CreateFilmSheet({
           <View style={styles.row}>
             <TextInput
               value={url}
-              onChangeText={setUrl}
+              onChangeText={(t) => { setUrl(t); setStatus('idle'); setExistingId(null); }}
+              onBlur={verify}
               placeholder="https://youtube.com/watch?v=…"
               placeholderTextColor={sub}
               autoCapitalize="none"
               autoCorrect={false}
+              returnKeyType="search"
+              onSubmitEditing={verify}
               style={[styles.input, { backgroundColor: inputBg, color: text, flex: 1 }]}
             />
-            <Pressable onPress={resolve} style={styles.fetchBtn}>
+            <Pressable onPress={verify} disabled={resolving} style={[styles.fetchBtn, resolving && { opacity: 0.6 }]}>
               {resolving ? <ActivityIndicator color="#fff" /> : <Text style={styles.fetchBtnText}>Fetch</Text>}
             </Pressable>
           </View>
           <Text style={[styles.hint, { color: sub }]}>We embed the video from YouTube — we never host it.</Text>
 
-          {posterUrl ? (
+          {/* Verification feedback — mirrors web CreateFilmModal status badges. */}
+          {status === 'checking' ? (
+            <Text style={[styles.statusText, { color: sub }]}>Checking the link…</Text>
+          ) : null}
+          {status === 'invalid' ? (
+            <Text style={[styles.statusText, { color: '#ef4444', fontWeight: '600' }]}>
+              That's not a valid YouTube video — check the link and try again.
+            </Text>
+          ) : null}
+          {status === 'duplicate' ? (
+            <View style={styles.statusRow}>
+              <Ionicons name="alert-circle" size={15} color="#d97706" />
+              <Text style={[styles.statusText, { color: '#d97706', fontWeight: '600', marginTop: 0, flex: 1 }]}>
+                This film is already on SurfVault.{' '}
+                <Text onPress={openExisting} style={{ textDecorationLine: 'underline' }}>Open it →</Text>
+              </Text>
+            </View>
+          ) : null}
+          {status === 'valid' ? (
+            <View style={styles.statusRow}>
+              <Ionicons name="checkmark-circle" size={15} color="#10b981" />
+              <Text style={[styles.statusText, { color: '#10b981', fontWeight: '600', marginTop: 0, flex: 1 }]}>
+                Valid video — ready to add.
+                {filmDate ? <Text style={{ color: sub, fontWeight: '400' }}>{`  ·  Published ${formatFilmDate(filmDate)}`}</Text> : null}
+              </Text>
+            </View>
+          ) : null}
+
+          {posterUrl && status !== 'invalid' ? (
             <Image source={{ uri: posterUrl }} style={styles.poster} contentFit="cover" />
           ) : null}
 
@@ -236,9 +305,19 @@ export default function CreateFilmSheet({
             style={[styles.input, { backgroundColor: inputBg, color: text, height: 90, textAlignVertical: 'top' }]}
           />
 
-          <Pressable onPress={submit} disabled={isLoading} style={[styles.submitBtn, isLoading && { opacity: 0.6 }]}>
-            {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Add film</Text>}
-          </Pressable>
+          {status === 'duplicate' ? (
+            <Pressable onPress={openExisting} style={styles.submitBtn}>
+              <Text style={styles.submitText}>Open existing film</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={submit}
+              disabled={!canSubmit}
+              style={[styles.submitBtn, !canSubmit && { opacity: 0.5 }]}
+            >
+              {isLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>Add film</Text>}
+            </Pressable>
+          )}
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -259,6 +338,8 @@ const styles = StyleSheet.create({
   fetchBtn: { backgroundColor: '#0ea5e9', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11 },
   fetchBtnText: { color: '#fff', fontWeight: '700' },
   hint: { fontSize: 12, marginTop: 6 },
+  statusText: { fontSize: 12, marginTop: 8, lineHeight: 16 },
+  statusRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8 },
   poster: { width: '100%', aspectRatio: 16 / 9, borderRadius: 12, marginTop: 14, backgroundColor: '#000' },
   submitBtn: { backgroundColor: '#0ea5e9', borderRadius: 12, alignItems: 'center', paddingVertical: 14, marginTop: 22 },
   submitText: { color: '#fff', fontSize: 16, fontWeight: '700' },

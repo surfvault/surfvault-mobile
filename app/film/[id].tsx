@@ -34,6 +34,7 @@ import {
 } from '../../src/store';
 import { useUser } from '../../src/context/UserProvider';
 import { useSmartBack, useTrackedPush } from '../../src/context/NavigationContext';
+import { useRequireAuth } from '../../src/hooks/useRequireAuth';
 import ScreenHeader from '../../src/components/ScreenHeader';
 import UserAvatar from '../../src/components/UserAvatar';
 import { formatSessionDate } from '../../src/helpers/dateTime';
@@ -68,6 +69,7 @@ export default function FilmDetailScreen() {
   const smartBack = useSmartBack();
   const trackedPush = useTrackedPush();
   const { user } = useUser();
+  const requireAuth = useRequireAuth();
 
   const { data, isLoading, isError } = useGetFilmQuery({ filmId }, { skip: !filmId });
   const film = data?.results?.film;
@@ -78,7 +80,6 @@ export default function FilmDetailScreen() {
   const canEdit = !!data?.results?.viewerCanEdit;
   const viewerCanVerify = !!data?.results?.viewerCanVerify;
   const viewerCanReveal = !!data?.results?.viewerCanReveal;
-  const pendingVerificationCode = data?.results?.pendingVerificationCode ?? null;
 
   const [deleteFilm] = useDeleteFilmMutation();
   const [updateFilm] = useUpdateFilmMutation();
@@ -120,10 +121,6 @@ export default function FilmDetailScreen() {
   const [verifyToken, setVerifyToken] = useState<string | null>(null);
   // idle | claiming | checking | applying | notfound | error
   const [verifyState, setVerifyState] = useState<'idle' | 'claiming' | 'checking' | 'applying' | 'notfound' | 'error'>('idle');
-
-  useEffect(() => {
-    if (pendingVerificationCode) setVerifyCode(pendingVerificationCode);
-  }, [pendingVerificationCode]);
 
   // Record a film view (3s dwell, deduped). Skip editors so self-views don't inflate.
   useEffect(() => {
@@ -388,7 +385,8 @@ export default function FilmDetailScreen() {
               </Pressable>
             ) : null}
 
-            {/* Creator verification (description-code) — verified creator / cataloguer */}
+            {/* Creator verification (description-code) — any signed-in viewer of an
+                unverified film. The real channel owner usually arrives unlinked. */}
             {viewerCanVerify && (
               <View style={[styles.verifyCard, { backgroundColor: isDark ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.08)' }]}>
                 {!verifyOpen ? (
@@ -431,6 +429,16 @@ export default function FilmDetailScreen() {
                 )}
               </View>
             )}
+
+            {/* Logged-out filmmaker CTA — claim path needs auth first, then the
+                signed-in card above takes over (and doubles as a signup driver). */}
+            {!viewerCanVerify && !film.creator_verified && !user?.id ? (
+              <View style={[styles.verifyCard, { backgroundColor: isDark ? 'rgba(16,185,129,0.10)' : 'rgba(16,185,129,0.08)' }]}>
+                <Text style={[styles.verifyTitle, { color: textColor }]}>Are you the filmmaker?</Text>
+                <Text style={[styles.verifySub, { color: subColor }]}>Sign in to claim this film, get creator credit, and reveal spot details.</Text>
+                <Pressable onPress={() => requireAuth()} style={styles.verifyBtn}><Text style={styles.verifyBtnText}>Sign in to claim</Text></Pressable>
+              </View>
+            ) : null}
 
             {canEdit && (
               <Pressable onPress={() => setTagOpen(true)} style={[styles.tagBtn, { borderColor: isDark ? '#1f2937' : '#e5e7eb' }]}>

@@ -830,6 +830,9 @@ export default function HomeScreen() {
     {
       lat: otdNearby ? nearbyLat ?? undefined : undefined,
       lon: otdNearby ? nearbyLon ?? undefined : undefined,
+      // Scope films to the same radius as the nearby breaks/sessions half,
+      // otherwise the proximity sort leaks far-away films into the rail.
+      radiusKm: otdNearby ? nearbyPrefs.breaksKm : undefined,
       month: onThisDayDate.month,
       day: onThisDayDate.day,
       limit: 12,
