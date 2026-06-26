@@ -612,18 +612,10 @@ export function FilmTile({
         ) : undefined
       }
       centerOverlay={
-        // Play badge centered, with the Explore-grid UNVERIFIED flag stacked
-        // directly beneath it. Verified films carry the creator @handle in the
-        // subtitle instead, so they show no flag (mirror of web FilmTile).
-        <View style={{ alignItems: 'center' }}>
-          <View style={styles.playBadge}>
-            <Ionicons name="play" size={9} color="#fff" style={{ marginLeft: 1 }} />
-          </View>
-          {!showDate && !showCredit && !film.creator_verified ? (
-            <View style={[styles.verifyPill, styles.verifyPillOff, { marginTop: 6 }]}>
-              <Text style={styles.verifyPillText}>Unverified</Text>
-            </View>
-          ) : null}
+        // Play badge centered. (Explore-grid tiles previously stacked an
+        // UNVERIFIED flag beneath this; removed.)
+        <View style={styles.playBadge}>
+          <Ionicons name="play" size={9} color="#fff" style={{ marginLeft: 1 }} />
         </View>
       }
       title={film.title || 'Surf film'}
