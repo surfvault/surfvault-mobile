@@ -171,6 +171,17 @@ const filmsApi = rootApi.injectEndpoints({
       providesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }],
       query: ({ filmId }) => ({ url: `/films/${filmId}/candidate-sessions`, method: 'GET' }),
     }),
+    // "Keep watching" rails for the film detail screen. One round trip →
+    // { fromCreator, nearby, nearbyScope }: other films by the same filmer +
+    // films near this film's breaks (server-side proximity, no coords leaked;
+    // nearbyScope='local'|'latest' picks the rail title). Public.
+    getRelatedFilms: builder.query<
+      { results: { fromCreator: Film[]; nearby: Film[]; nearbyScope: 'local' | 'latest' } },
+      { filmId: string; limit?: number }
+    >({
+      providesTags: (_r, _e, { filmId }) => [{ type: ApiTag.Film, id: filmId }, ApiTag.Film],
+      query: ({ filmId, limit = 12 }) => ({ url: `/films/${filmId}/related?limit=${limit}`, method: 'GET' }),
+    }),
 
     // ---- Writes ----
     createFilm: builder.mutation<
@@ -301,6 +312,7 @@ export const {
   useGetFilmsForUserQuery,
   useGetFilmQuery,
   useGetFilmCandidateSessionsQuery,
+  useGetRelatedFilmsQuery,
   useLazyCheckFilmByVideoIdQuery,
   useCreateFilmMutation,
   useUpdateFilmMutation,

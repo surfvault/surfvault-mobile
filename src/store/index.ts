@@ -65,6 +65,7 @@ export {
   useGetFilmsForUserQuery,
   useGetFilmQuery,
   useGetFilmCandidateSessionsQuery,
+  useGetRelatedFilmsQuery,
   useLazyCheckFilmByVideoIdQuery,
   useCreateFilmMutation,
   useUpdateFilmMutation,

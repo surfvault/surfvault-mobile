@@ -40,6 +40,7 @@ import UserAvatar from '../../src/components/UserAvatar';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 import ActionSheet, { type ActionSheetSection } from '../../src/components/ActionSheet';
 import FilmTagSheet from '../../src/components/FilmTagSheet';
+import FilmRelatedRails from '../../src/components/FilmRelatedRails';
 
 // In-memory dedup so a same-launch revisit doesn't double-count (mirrors boards).
 const viewedFilmIds = new Set<string>();
@@ -578,6 +579,14 @@ export default function FilmDetailScreen() {
               </View>
             )}
           </Pressable>
+
+          {/* "Keep watching" rails — more from this filmer + films nearby. Outside
+              the body Pressable so the horizontal lists own their pan gestures.
+              Public: shown to everyone regardless of credit visibility. */}
+          <FilmRelatedRails
+            filmId={filmId}
+            creatorName={film.creator_display_name || (film.creator_handle ? `@${film.creator_handle}` : film.creator_name) || null}
+          />
         </ScrollView>
       )}
 
