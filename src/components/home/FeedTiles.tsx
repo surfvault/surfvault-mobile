@@ -534,6 +534,43 @@ export function ShaperTile({
   );
 }
 
+// ─────────────────────────── Account (people / brands) ───────────────────────────
+// Person/brand result tile for NL/structured search + focused-profile rails.
+// The account's picture fills the tile (like web PhotographerTile). `onPress`
+// overrides navigation (used to open the in-search focused view); otherwise it
+// routes to the profile.
+export function AccountTile({
+  account,
+  width,
+  style,
+  onNavigate,
+  onPress,
+  heightRatio,
+}: {
+  account: { id: string; handle: string; name?: string | null; picture?: string | null; verified?: boolean; user_type?: string; surf_break_name?: string | null };
+  width?: number;
+  style?: any;
+  onNavigate?: (path: string) => void;
+  onPress?: () => void;
+  heightRatio?: number;
+}) {
+  const trackedPush = useTrackedPush();
+  const subtitle = account?.surf_break_name || (account?.name ? `@${account.handle}` : null);
+  return (
+    <RailTile
+      onPress={onPress ?? (() => (onNavigate ?? trackedPush)(`/user/${account.handle}` as any))}
+      heroUri={account.picture}
+      fallbackColor="#1f2937"
+      fallbackIcon={<Ionicons name="person" size={30} color="#9ca3af" />}
+      title={account.name ?? `@${account.handle}`}
+      subtitle={subtitle}
+      width={width}
+      style={style}
+      heightRatio={heightRatio}
+    />
+  );
+}
+
 // ─────────────────────────── Surf Films ───────────────────────────
 // External YouTube records. Poster fills the tile with a play badge; tapping
 // opens the film detail page (embed). Subtitle prefers a revealed break name,

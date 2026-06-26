@@ -52,7 +52,7 @@ import { safeShare, openUrl } from '../../src/helpers/share';
 import { youtubeUrl } from '../../src/helpers/socialLinks';
 
 export default function UserProfileScreen() {
-  const { handle } = useLocalSearchParams<{ handle: string }>();
+  const { handle, view } = useLocalSearchParams<{ handle: string; view?: string }>();
   const router = useRouter();
   const { user: currentUser } = useUser();
   const requireAuth = useRequireAuth();
@@ -63,6 +63,11 @@ export default function UserProfileScreen() {
   const isDark = colorScheme === 'dark';
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'films'>('grid');
+  // Honor a ?view= deep-link (from the search profile-rail "See all"). 'films'
+  // maps to the Films tab; anything else → grid. (No tagged tab on mobile.)
+  useEffect(() => {
+    setActiveTab(view === 'films' ? 'films' : 'grid');
+  }, [handle, view]);
   const [sessions, setSessions] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
   const [refreshing, setRefreshing] = useState(false);

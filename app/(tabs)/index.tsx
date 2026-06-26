@@ -25,6 +25,7 @@ import {
   useGetNearbySurfBreaksQuery,
   useGetNearbyPhotographersQuery,
   useGetMapSearchContentQuery,
+  useGetSearchSuggestionsQuery,
   useGetPopularTagsQuery,
   useGetAdsQuery,
   useGetLatestShapersQuery,
@@ -67,6 +68,8 @@ import CreateFilmSheet from '../../src/components/CreateFilmSheet';
 import ExploreGrid from '../../src/components/home/ExploreGrid';
 import BoardsExploreGrid from '../../src/components/home/BoardsExploreGrid';
 import FilmsExploreGrid from '../../src/components/home/FilmsExploreGrid';
+import SearchResultsGrid from '../../src/components/home/SearchResultsGrid';
+import ProfileRails from '../../src/components/home/ProfileRails';
 import BoardIcon from '../../src/components/BoardIcon';
 import RailSkeleton from '../../src/components/home/RailSkeleton';
 import {
@@ -107,6 +110,26 @@ const EXPLORE_TABS: { value: ExploreTab; label: string; icon?: string }[] = [
   { value: 'onThisDay', label: 'On This Day', icon: 'calendar' },
   { value: 'films', label: 'Films', icon: 'logo-youtube' },
   { value: 'boards', label: 'Boards' },
+];
+
+// Content-type chips for the free structured search lane (single-select).
+// People = surfers + photographers; Brands = shapers + advertisers.
+const SEARCH_TYPE_CHIPS = [
+  { key: 'session', label: 'Sessions' },
+  { key: 'film', label: 'Films' },
+  { key: 'board', label: 'Boards' },
+  { key: 'people', label: 'People' },
+  { key: 'brand', label: 'Brands' },
+];
+
+// Default "Try searching" chips — fallback when the DB-backed list
+// (/search-suggestions) is empty/unreachable. Structured ones (types + term) run
+// the FREE lane; the bare one is a genuine NL example (date parsing).
+const DEFAULT_SUGGESTIONS: { label: string; types?: string[]; term?: string }[] = [
+  { label: 'Films in California', types: ['film'], term: 'California' },
+  { label: 'Longboard shapers', types: ['brand'], term: 'longboard' },
+  { label: 'Drone photographers', types: ['people'], term: 'drone' },
+  { label: 'Sessions at Pipeline last winter' },
 ];
 
 // Module-level so the offset survives any remount (tab detach/attach cycles).
@@ -632,6 +655,13 @@ export default function HomeScreen() {
   // Active Explore pill — three session sorts + a boards mode. Driven by the
   // pill row below the Discover search bar (browse state only).
   const [exploreTab, setExploreTab] = useState<ExploreTab>(savedExploreTab);
+  // NL + structured search state (mirrors web Home). nlQuery = submitted
+  // sentence (AI); searchScope = a content-type chip → free structured search;
+  // focusedUser = a tapped account → in-search focused-profile view.
+  const [nlQuery, setNlQuery] = useState('');
+  const [searchScope, setSearchScope] = useState<string | null>(null);
+  const [focusedUser, setFocusedUser] = useState<any>(null);
+  const [, setActiveIntent] = useState<any>(null);
 
   // Keep the module-level mirrors in sync so a home-tab remount restores the
   // overlay + pill exactly. Also hide the tab bar on a restore-into-Discover
@@ -706,15 +736,21 @@ export default function HomeScreen() {
 
   // Search — uses /map/search which returns { results: { searchContent: [...] } }
   // API accepts type: "all" | "surf_break" | "photographer" (legacy) | "user" (all users)
-  const hasTagFilter = searchType === 'user' && selectedTags.length > 0;
+  // Structured (type-chip) search is on when a content type is picked + there's
+  // a term — builds the intent client-side and skips the LLM.
+  const structuredActive = !!searchScope && searchTerm.length >= 2;
+  // Instant quick-jump panel: combined breaks + people (type 'all'). Skipped
+  // while showing NL results, structured results, or a focused profile.
   const { data: searchData, isFetching: searchLoading } = useGetMapSearchContentQuery(
+    { search: searchTerm, type: 'all', tags: [], viewerId: user?.id },
     {
-      search: searchTerm,
-      type: searchType, // "surf_break" or "user" — "user" returns surfers + photographers
-      tags: searchType === 'user' ? selectedTags : [],
-      viewerId: user?.id,
-    },
-    { skip: (searchTerm.length < 2 && !hasTagFilter) || (isAuthenticated && !user?.id) }
+      skip:
+        searchTerm.length < 2 ||
+        (isAuthenticated && !user?.id) ||
+        !!nlQuery ||
+        !!focusedUser ||
+        structuredActive,
+    }
   );
 
   const { data: tagsData } = useGetPopularTagsQuery(undefined);
@@ -950,14 +986,14 @@ export default function HomeScreen() {
 
   // Recent searches from user profile
   const recentSearches = user?.recentSearches ?? [];
-  const filteredRecents = recentSearches.filter((r: any) => {
-    if (searchType === 'surf_break') return r.itemType === 'surf_break';
-    // "user" mode shows any recent person search (surfers + photographers).
-    return r.itemType === 'user';
-  });
+  const filteredRecents = recentSearches.filter(
+    (r: any) => r.itemType === 'surf_break' || r.itemType === 'user'
+  );
 
   const handleSearchInput = useCallback((text: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    setNlQuery('');
+    setFocusedUser(null);
     debounceRef.current = setTimeout(() => setSearchTerm(text), 350);
   }, []);
 
@@ -981,6 +1017,10 @@ export default function HomeScreen() {
     setSearchTerm('');
     setSelectedTags([]);
     setSearchFocused(false);
+    setNlQuery('');
+    setSearchScope(null);
+    setFocusedUser(null);
+    setActiveIntent(null);
     // Back at the plain home tab — clear the depth we set while browsing the
     // overlay so normal tab navigation behaves as usual.
     setNavDepth(0);
@@ -994,6 +1034,10 @@ export default function HomeScreen() {
     setSearchTerm('');
     setSelectedTags([]);
     setSearchFocused(false);
+    setNlQuery('');
+    setSearchScope(null);
+    setFocusedUser(null);
+    setActiveIntent(null);
   }, []);
 
   const navigateAndClose = useCallback((path: string) => {
@@ -1054,7 +1098,64 @@ export default function HomeScreen() {
     navigateAndClose(`/user/${item.handle}`);
   }, [navigateAndClose, recordSearch]);
 
-  const isSearching = searchTerm.length >= 2 || hasTagFilter;
+  const isSearching = searchTerm.length >= 2;
+
+  // Client-built structured filter (free, no-LLM lane) from the type chip + term.
+  const structuredIntent = structuredActive
+    ? { entityTypes: [searchScope], keyword: searchTerm, sort: 'recent' }
+    : null;
+  // Context for the NL parse (viewer's LOCAL date + coords).
+  const nowDate = new Date();
+  const searchContext = {
+    today: `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`,
+    lat: hasCoords && userLat != null ? userLat : undefined,
+    lon: hasCoords && userLon != null ? userLon : undefined,
+  };
+
+  // Run a full NL search (the only path that calls the LLM). Records the query.
+  const runNlSearch = (text?: string) => {
+    const q = (text ?? searchTerm).trim();
+    if (q.length < 2) return;
+    // NL (AI) path is signed-in only — prompt login for guests. Type chips +
+    // instant panel stay open to everyone (no LLM).
+    if (!user?.id) { requireAuth(); return; }
+    setSearchScope(null);
+    setFocusedUser(null);
+    setActiveIntent(null);
+    setSearchTerm(q);
+    setNlQuery(q);
+    if (user?.id) {
+      try { updateUserRecentSearches({ payload: { recentSearch: { type: 'query', data: { query: q } } } }); } catch {}
+    }
+  };
+
+  // Content-type chip (single-select) → free structured search lane.
+  const toggleScope = (key: string) => {
+    setNlQuery('');
+    setFocusedUser(null);
+    setActiveIntent(null);
+    setSearchScope((prev) => (prev === key ? null : key));
+  };
+
+  // Open the in-search focused-profile view for a tapped account (+ record it).
+  const focusAccount = (acct: any) => {
+    if (acct?.id) recordSearch('user', acct.id);
+    setFocusedUser(acct);
+  };
+
+  // "Try searching" suggestion: structured (types+term) → free lane; else NL.
+  const applySuggestion = (s: any) => {
+    if (s.types?.length && s.term) {
+      setNlQuery('');
+      setFocusedUser(null);
+      setActiveIntent(null);
+      setSearchScope(s.types[0]);
+      setSearchTerm(s.term);
+      searchInputRef.current?.setNativeProps({ text: s.term });
+    } else {
+      runNlSearch(s.label);
+    }
+  };
 
   // Empty-state suggestions (mirrors web's no-recents / logged-out search):
   //   People → recent users via the `suggest` param on /map/search.
@@ -1064,21 +1165,30 @@ export default function HomeScreen() {
   const wantSuggestions = searchVisible && searchFocused && !isSearching && filteredRecents.length === 0;
   const { data: suggestPeopleData } = useGetMapSearchContentQuery(
     { search: '', type: 'user', suggest: 10, viewerId: user?.id },
-    { skip: !wantSuggestions || searchType !== 'user' || (isAuthenticated && !user?.id) }
+    { skip: !wantSuggestions || (isAuthenticated && !user?.id) }
   );
   const { data: suggestBreaksData } = useGetSurfBreaksQuery(
     { limit: 24 },
-    { skip: !wantSuggestions || searchType !== 'surf_break' }
+    { skip: !wantSuggestions }
   );
   const suggestedItems = useMemo(() => {
-    if (searchType === 'user') return suggestPeopleData?.results?.searchContent ?? [];
+    const people = (suggestPeopleData?.results?.searchContent ?? []).slice(0, 5);
     const breaks = [...(suggestBreaksData?.results?.breaks ?? [])];
     for (let i = breaks.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [breaks[i], breaks[j]] = [breaks[j], breaks[i]];
     }
-    return breaks.slice(0, 10);
-  }, [searchType, suggestPeopleData, suggestBreaksData]);
+    return [...people, ...breaks.slice(0, 5)];
+  }, [suggestPeopleData, suggestBreaksData]);
+
+  // "Try searching" chips (DB-backed; fallback to defaults) + recent NL queries.
+  const { data: suggestionsData } = useGetSearchSuggestionsQuery();
+  const trySuggestions = suggestionsData?.results?.suggestions?.length
+    ? suggestionsData.results.suggestions
+    : DEFAULT_SUGGESTIONS;
+  const recentQueries = ((user as any)?.recentQueries ?? [])
+    .map((r: any) => r?.query)
+    .filter(Boolean);
 
   // ---- Search overlay ----
   if (searchVisible) {
@@ -1098,10 +1208,12 @@ export default function HomeScreen() {
             <Ionicons name="search-outline" size={18} color={isDark ? '#6b7280' : '#9ca3af'} />
             <TextInput
               ref={searchInputRef}
-              placeholder={searchType === 'user' ? 'Search people...' : 'Search the vault...'}
+              placeholder="Search anything — breaks, films, brands…"
               placeholderTextColor={isDark ? '#6b7280' : '#9ca3af'}
               onChangeText={handleSearchInput}
               onFocus={() => setSearchFocused(true)}
+              onSubmitEditing={(e) => runNlSearch(e.nativeEvent.text)}
+              returnKeyType="search"
               autoCapitalize="none"
               autoCorrect={false}
               style={[styles.searchInput, { color: isDark ? '#ffffff' : '#111827' }]}
@@ -1114,85 +1226,50 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* Breaks/People segments + tags — only once the user enters search mode
-            (focus or an active query). Before that, the Explore grid shows. */}
-        {(searchFocused || isSearching) && (
-        <>
-        {/* Type toggle */}
-        <View style={[styles.toggleWrap, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
-          <Pressable
-            onPress={() => { setSearchType('surf_break'); setSelectedTags([]); setSearchTerm(''); }}
-            style={[
-              styles.toggleBtn,
-              searchType === 'surf_break' && {
-                backgroundColor: isDark ? '#374151' : '#ffffff',
-                shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
-              },
-            ]}
-          >
-            <Text style={[
-              styles.toggleText,
-              { color: searchType === 'surf_break' ? (isDark ? '#fff' : '#111827') : (isDark ? '#9ca3af' : '#6b7280') },
-              searchType === 'surf_break' && styles.toggleTextActive,
-            ]}>Breaks</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => { setSearchType('user'); setSearchTerm(''); }}
-            style={[
-              styles.toggleBtn,
-              searchType === 'user' && {
-                backgroundColor: isDark ? '#374151' : '#ffffff',
-                shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 2, shadowOffset: { width: 0, height: 1 },
-              },
-            ]}
-          >
-            <Text style={[
-              styles.toggleText,
-              { color: searchType === 'user' ? (isDark ? '#fff' : '#111827') : (isDark ? '#9ca3af' : '#6b7280') },
-              searchType === 'user' && styles.toggleTextActive,
-            ]}>People</Text>
-          </Pressable>
-        </View>
-
-        {/* Tags — people search only (naturally surfaces photographers since surfers have no tags) */}
-        {searchType === 'user' && popularTags.length > 0 && (
+        {/* Content-type chips — pick one to run a FREE structured search; leave
+            blank and press search to describe what you want (AI). Hidden while a
+            focused profile is open. */}
+        {(searchFocused || isSearching) && !focusedUser && (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.tagsWrap}
             style={{ flexGrow: 0 }}
           >
-            {popularTags.map((tag: any) => {
-              const tagName = tag.tag ?? tag;
-              const isSelected = selectedTags.includes(tagName);
+            {SEARCH_TYPE_CHIPS.map((c) => {
+              const active = searchScope === c.key;
               return (
                 <Pressable
-                  key={tagName}
-                  onPress={() => toggleTag(tagName)}
+                  key={c.key}
+                  onPress={() => toggleScope(c.key)}
                   style={[
                     styles.tagChip,
                     {
-                      backgroundColor: isSelected ? '#0ea5e9' : 'transparent',
-                      borderColor: isSelected ? '#0ea5e9' : (isDark ? '#374151' : '#e5e7eb'),
+                      backgroundColor: active ? '#0ea5e9' : 'transparent',
+                      borderColor: active ? '#0ea5e9' : (isDark ? '#374151' : '#e5e7eb'),
                     },
                   ]}
                 >
                   <Text style={[
                     styles.tagText,
-                    { color: isSelected ? '#ffffff' : (isDark ? '#9ca3af' : '#4b5563') },
-                    isSelected && { fontWeight: '500' },
-                  ]}>{tagName}</Text>
+                    { color: active ? '#ffffff' : (isDark ? '#9ca3af' : '#4b5563') },
+                    active && { fontWeight: '500' },
+                  ]}>{c.label}</Text>
                 </Pressable>
               );
             })}
           </ScrollView>
         )}
-        </>
-        )}
 
-        {/* Body: live search results / recents when in search mode; otherwise
-            the browsable Explore grid (the old worldwide "Discover" feed). */}
-        {isSearching || searchFocused ? (
+        {/* Body: focused profile → structured results → NL results → instant
+            panel → browsable Explore grid. */}
+        {focusedUser ? (
+          <ProfileRails user={focusedUser} onBack={() => setFocusedUser(null)} onNavigate={navigateAndClose} />
+        ) : structuredActive ? (
+          <SearchResultsGrid intent={structuredIntent} onNavigate={navigateAndClose} onAccountSelect={focusAccount} />
+        ) : nlQuery ? (
+          <SearchResultsGrid query={nlQuery} context={searchContext} onNavigate={navigateAndClose} onAccountSelect={focusAccount} onIntent={setActiveIntent} />
+        ) : isSearching || searchFocused ? (
         <ScrollView
           style={styles.flex}
           showsVerticalScrollIndicator={false}
@@ -1202,15 +1279,24 @@ export default function HomeScreen() {
           {isSearching ? (
             /* ---- Active search results ---- */
             <View style={styles.resultsWrap}>
+              {/* Run the full natural-language search for the typed phrase. */}
+              <Pressable
+                onPress={() => runNlSearch(searchTerm)}
+                style={[styles.nlCta, { borderColor: isDark ? '#0ea5e955' : '#bae6fd', backgroundColor: isDark ? '#0ea5e91a' : '#f0f9ff' }]}
+              >
+                <Ionicons name="search" size={16} color="#0ea5e9" />
+                <Text style={styles.nlCtaText} numberOfLines={1}>Search the vault for “{searchTerm}”</Text>
+                <Text style={styles.nlCtaHint}>Go</Text>
+              </Pressable>
               {searchLoading ? (
                 <View style={styles.centered}><ActivityIndicator /></View>
               ) : searchContent.length > 0 ? (
                 searchContent.map((item: any) => {
-                  // User result
+                  // User result → open the focused profile view in search
                   if (item.handle) {
                     const userType = item.user_type;
                     return (
-                      <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item)} style={styles.resultRow}>
+                      <Pressable key={item.id ?? item.handle} onPress={() => focusAccount(item)} style={styles.resultRow}>
                         <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} userType={userType} />
                         <View style={styles.resultInfo}>
                           <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
@@ -1242,17 +1328,56 @@ export default function HomeScreen() {
                 })
               ) : (
                 <Text style={[styles.emptyText, { color: '#9ca3af' }]}>
-                  No {searchType === 'user' ? 'people' : 'surf breaks'} found
+                  No breaks or people match — tap above to search everything.
                 </Text>
               )}
             </View>
           ) : (
             <>
-              {/* ---- Recent searches ---- */}
+              {/* ---- Recent NL searches (re-runnable query chips) ---- */}
+              {recentQueries.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                    Recent searches
+                  </Text>
+                  <View style={styles.chipsWrap}>
+                    {recentQueries.map((q: string) => (
+                      <Pressable
+                        key={q}
+                        onPress={() => runNlSearch(q)}
+                        style={[styles.queryChip, { borderColor: isDark ? '#374151' : '#e5e7eb' }]}
+                      >
+                        <Ionicons name="time-outline" size={12} color={isDark ? '#9ca3af' : '#9ca3af'} />
+                        <Text style={[styles.queryChipText, { color: isDark ? '#d1d5db' : '#4b5563' }]} numberOfLines={1}>{q}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* ---- "Try searching" suggestions ---- */}
+              <View style={styles.section}>
+                <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
+                  Try searching
+                </Text>
+                <View style={styles.chipsWrap}>
+                  {trySuggestions.map((s: any) => (
+                    <Pressable
+                      key={s.label}
+                      onPress={() => applySuggestion(s)}
+                      style={[styles.queryChip, { borderColor: isDark ? '#374151' : '#e5e7eb' }]}
+                    >
+                      <Text style={[styles.queryChipText, { color: isDark ? '#d1d5db' : '#4b5563' }]}>{s.label}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* ---- Recently viewed (entity quick-jump) ---- */}
               {filteredRecents.length > 0 && (
                 <View style={styles.section}>
                   <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
-                    Recent
+                    Recently viewed
                   </Text>
                   {filteredRecents.map((recent: any, idx: number) => {
                     const item = recent.itemType === 'surf_break' ? recent.surfBreak : recent.user;
@@ -1260,7 +1385,7 @@ export default function HomeScreen() {
 
                     if (recent.itemType === 'user' && item.handle) {
                       return (
-                        <Pressable key={item.id ?? idx} onPress={() => navigateToUser(item)} style={styles.resultRow}>
+                        <Pressable key={item.id ?? idx} onPress={() => focusAccount(item)} style={styles.resultRow}>
                           <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={36} />
                           <View style={styles.resultInfo}>
                             <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
@@ -1298,11 +1423,11 @@ export default function HomeScreen() {
                 suggestedItems.length > 0 ? (
                   <View style={styles.section}>
                     <Text style={[styles.sectionTitle, { color: isDark ? '#fff' : '#111827' }]}>
-                      {searchType === 'user' ? 'Suggested people' : 'Suggested surf breaks'}
+                      Suggested
                     </Text>
                     {suggestedItems.map((item: any) =>
                       item.handle ? (
-                        <Pressable key={item.id ?? item.handle} onPress={() => navigateToUser(item)} style={styles.resultRow}>
+                        <Pressable key={item.id ?? item.handle} onPress={() => focusAccount(item)} style={styles.resultRow}>
                           <UserAvatar uri={item.picture} name={item.name ?? item.handle} size={40} verified={item.verified} userType={item.user_type} />
                           <View style={styles.resultInfo}>
                             <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>
@@ -1331,7 +1456,7 @@ export default function HomeScreen() {
                 ) : (
                   <View style={styles.centered}>
                     <Text style={{ color: '#9ca3af', fontSize: 14 }}>
-                      Search for {searchType === 'user' ? 'people' : 'surf breaks'}
+                      Search breaks, films, people and brands
                     </Text>
                   </View>
                 )
@@ -2126,6 +2251,12 @@ const styles = StyleSheet.create({
   },
   exploreSortText: { fontSize: 13 },
   resultsWrap: { paddingHorizontal: 16 },
+  nlCta: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 8 },
+  nlCtaText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#0ea5e9' },
+  nlCtaHint: { fontSize: 12, fontWeight: '600', color: '#0ea5e999' },
+  chipsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16 },
+  queryChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 7 },
+  queryChipText: { fontSize: 13, fontWeight: '500' },
   resultRow: {
     flexDirection: 'row',
     alignItems: 'center',

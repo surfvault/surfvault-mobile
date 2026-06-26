@@ -71,6 +71,44 @@ const surfApi = rootApi.injectEndpoints({
         method: 'GET',
       }),
     }),
+    // Natural-language Explore search. POST: server parses the sentence into a
+    // structured filter (Claude, cached) and runs it; first page sends
+    // { query, context }, pagination sends back { query, intent, continuationToken }
+    // so it never re-hits the LLM. Passing `intent` directly (type-chip lane)
+    // skips the LLM entirely — just SQL. Response mirrors explore-feed items plus
+    // `people`/`brand` account kinds, and echoes the parsed `intent`.
+    getExploreSearch: builder.query<
+      { results: { intent: any; items: any[]; continuationToken: string | null; cached?: boolean } },
+      { query?: string; intent?: any; continuationToken?: string; context?: any; limit?: number }
+    >({
+      providesTags: [ApiTag.SurfBreak, ApiTag.Film],
+      query: ({ query, intent, continuationToken, context, limit = 12 } = {}) => ({
+        url: `/explore-search`,
+        method: 'POST',
+        body: {
+          query: query ?? '',
+          intent: intent ?? undefined,
+          continuationToken: continuationToken ?? undefined,
+          context: context ?? undefined,
+          limit,
+        },
+      }),
+    }),
+    // Editable "Try searching" chips (DB-backed); falls back to defaults client-side.
+    getSearchSuggestions: builder.query<
+      { results: { suggestions: Array<{ label: string; types: string[]; term: string | null }> } },
+      void
+    >({
+      query: () => ({ url: `/search-suggestions`, method: 'GET' }),
+    }),
+    // Focused-profile rails: { recentSessions, recentFilms, boards, featuredIn, counts }.
+    getProfilePreview: builder.query<
+      { results: { user: any; recentSessions: any[]; recentFilms: any[]; boards: any[]; featuredIn: any[]; counts: { sessions: number; films: number; boards: number; featured: number } } },
+      { userId: string }
+    >({
+      providesTags: [ApiTag.SurfBreak, ApiTag.Film],
+      query: ({ userId }) => ({ url: `/profile-preview/${userId}`, method: 'GET' }),
+    }),
     getLatestSessions: builder.query({
       providesTags: [ApiTag.SurfBreak],
       query: ({
@@ -594,6 +632,9 @@ export const {
   useUpdateSessionsTaggedUsersMutation,
   useGetLatestSessionsQuery,
   useGetExploreFeedQuery,
+  useGetExploreSearchQuery,
+  useGetSearchSuggestionsQuery,
+  useGetProfilePreviewQuery,
   useGetSessionQuery,
   useGetSessionPhotosQuery,
   useGetAdsQuery,
