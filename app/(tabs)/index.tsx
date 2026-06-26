@@ -1272,6 +1272,11 @@ export default function HomeScreen() {
         ) : isSearching || searchFocused ? (
         <ScrollView
           style={styles.flex}
+          // flexGrow:1 makes the content fill the viewport even when suggestions
+          // are short, so a tap on the empty area (with persistTaps="handled")
+          // dismisses the keyboard — otherwise on-drag never fires without
+          // scrollable overflow and the keyboard gets stuck open.
+          contentContainerStyle={{ flexGrow: 1 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -1588,9 +1593,30 @@ export default function HomeScreen() {
           )}
 
           {locationSearch.length < 2 ? (
-            <View style={styles.centered}>
-              <Text style={{ color: '#9ca3af', fontSize: 14 }}>Search for a surf break</Text>
-            </View>
+            nearbyBreaks.length > 0 ? (
+              <>
+                <Text style={[styles.locationHint, { color: isDark ? '#6b7280' : '#9ca3af', marginTop: 4 }]}>
+                  Nearby breaks
+                </Text>
+                {(nearbyBreaks as any[]).map((b: any) => (
+                  <Pressable key={b.id} onPress={() => pickAnchorBreak(b)} style={styles.resultRow}>
+                    <View style={[styles.resultIcon, { backgroundColor: isDark ? '#1f2937' : '#f3f4f6' }]}>
+                      <Ionicons name="location-outline" size={18} color={isDark ? '#9ca3af' : '#6b7280'} />
+                    </View>
+                    <View style={styles.resultInfo}>
+                      <Text style={[styles.resultName, { color: isDark ? '#fff' : '#111827' }]}>{b.name}</Text>
+                      <Text style={[styles.resultSub, { color: isDark ? '#9ca3af' : '#6b7280' }]}>
+                        {b.region ? `${String(b.region).replaceAll('_', ' ')} · ` : ''}{b.country_code ?? ''}
+                      </Text>
+                    </View>
+                  </Pressable>
+                ))}
+              </>
+            ) : (
+              <View style={styles.centered}>
+                <Text style={{ color: '#9ca3af', fontSize: 14 }}>Search for a surf break</Text>
+              </View>
+            )
           ) : locationLoading ? (
             <View style={styles.centered}><ActivityIndicator /></View>
           ) : locationResults.length > 0 ? (

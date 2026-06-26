@@ -162,7 +162,12 @@ export default function ProfileRails({
           <Text style={styles.emptyBody}>No sessions, films, or tags for this account yet. Open their profile to follow or message them.</Text>
         </View>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingVertical: 12 }}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={{ paddingVertical: 12 }}
+        >
           <Rail title="Recent Sessions" items={recentSessions} onNavigate={onNavigate} seeAllTo={profileBase} isDark={isDark} />
           <Rail title="Recent Films" items={recentFilms} onNavigate={onNavigate} seeAllTo={profileBase ? `${profileBase}?view=films` : null} isDark={isDark} />
           <Rail title="Boards" items={boards} onNavigate={onNavigate} seeAllTo={profileBase} isDark={isDark} />
