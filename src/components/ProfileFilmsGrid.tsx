@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { forwardRef, useImperativeHandle, useState } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTrackedPush } from '../context/NavigationContext';
 import { useUser } from '../context/UserProvider';
 import { useGetFilmsForUserQuery } from '../store';
+import { useCursorList } from '../hooks/useCursorList';
 import type { Film } from '../store/apis/endpoints/films';
 import { ytThumb, ytThumbFallback } from '../helpers/youtubeThumb';
 import { formatSessionDate } from '../helpers/dateTime';
+
+// Imperative handle so the parent scroll container (profile ScrollView / user
+// FlatList) can drive scroll-to-fetch: ProfileFilmsGrid renders inside the
+// parent's scrolling header, so the parent owns the scroll and forwards
+// near-bottom events here.
+export type ProfileFilmsGridHandle = { loadMore: () => void };
 
 /**
  * Profile "Films" grid — mobile port of web FilmsGallery. A 3-column square
@@ -81,31 +88,37 @@ function FilmGridTile({ film, onPress, showViews }: { film: Film; onPress: () =>
   );
 }
 
-export default function ProfileFilmsGrid({
-  handle,
-  scope,
-  verifiedOnly = false,
-  emptyText = 'No films yet.',
-}: {
-  handle: string;
-  scope?: 'mine' | 'tagged';
-  // When another user views this profile, show only verified films.
-  verifiedOnly?: boolean;
-  emptyText?: string;
-}) {
+const ProfileFilmsGrid = forwardRef<
+  ProfileFilmsGridHandle,
+  {
+    handle: string;
+    scope?: 'mine' | 'tagged';
+    // When another user views this profile, show only verified films.
+    verifiedOnly?: boolean;
+    emptyText?: string;
+  }
+>(function ProfileFilmsGrid({ handle, scope, verifiedOnly = false, emptyText = 'No films yet.' }, ref) {
   const isDark = useColorScheme() === 'dark';
   const trackedPush = useTrackedPush();
   const { user } = useUser();
-  const { data, isFetching } = useGetFilmsForUserQuery(
-    { handle, scope },
-    { skip: !handle }
-  );
-  const films = useMemo<Film[]>(() => {
-    const all = data?.results?.films ?? [];
-    return verifiedOnly ? all.filter((f) => f.creator_verified) : all;
-  }, [data, verifiedOnly]);
 
-  if (isFetching && films.length === 0) {
+  // Scroll-to-fetch on the shared keyset cursor. The verified-only filter (other
+  // viewers) is applied per page, so paging keeps pulling server-side until the
+  // feed is exhausted — nothing is silently dropped.
+  const { items: films, loadMore, isFetchingMore, isLoading } = useCursorList<Film>({
+    useQuery: useGetFilmsForUserQuery,
+    args: { handle, scope },
+    selectItems: (page) => {
+      const all: Film[] = page?.results?.films ?? [];
+      return verifiedOnly ? all.filter((f) => f.creator_verified) : all;
+    },
+    getId: (f) => f.id,
+    skip: !handle,
+  });
+
+  useImperativeHandle(ref, () => ({ loadMore }), [loadMore]);
+
+  if (isLoading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator />
@@ -123,22 +136,31 @@ export default function ProfileFilmsGrid({
   }
 
   return (
-    <View style={styles.gridWrap}>
-      {films.map((film, idx) => (
-        <View
-          key={film.id}
-          style={{ marginRight: (idx + 1) % GRID_COLS === 0 ? 0 : GRID_GAP, marginBottom: GRID_GAP }}
-        >
-          <FilmGridTile
-            film={film}
-            onPress={() => trackedPush(`/film/${film.id}` as any)}
-            showViews={!!user?.id && film.creator_user_id === user.id}
-          />
+    <View>
+      <View style={styles.gridWrap}>
+        {films.map((film, idx) => (
+          <View
+            key={film.id}
+            style={{ marginRight: (idx + 1) % GRID_COLS === 0 ? 0 : GRID_GAP, marginBottom: GRID_GAP }}
+          >
+            <FilmGridTile
+              film={film}
+              onPress={() => trackedPush(`/film/${film.id}` as any)}
+              showViews={!!user?.id && film.creator_user_id === user.id}
+            />
+          </View>
+        ))}
+      </View>
+      {isFetchingMore ? (
+        <View style={{ paddingVertical: 16 }}>
+          <ActivityIndicator />
         </View>
-      ))}
+      ) : null}
     </View>
   );
-}
+});
+
+export default ProfileFilmsGrid;
 
 const styles = StyleSheet.create({
   gridWrap: { flexDirection: 'row', flexWrap: 'wrap' },

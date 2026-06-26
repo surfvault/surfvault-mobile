@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useGetLatestShapersQuery } from '../../store';
+import { useCursorList } from '../../hooks/useCursorList';
 import type { Board, BoardPhoto, BoardroomShaper } from '../../store/apis/endpoints/boardroom';
 import { boardPhotoDisplay } from '../../helpers/mediaUrl';
 import AutoplayVideo from '../AutoplayVideo';
@@ -45,6 +46,34 @@ function pickThumb(board: Board): BoardPhoto | undefined {
 
 type FlatBoard = { board: Board; shaper: BoardroomShaper };
 
+// Flatten ONE page of shapers into board tiles, round-robin by board index so
+// the grid alternates shapers (board 0 from each shaper, then board 1, ...)
+// instead of clustering one shaper's boards. Flattening per-page (rather than
+// over the whole accumulated list) keeps already-rendered tiles from reordering
+// when the next page appends. Shaper order (latest activity first) is preserved.
+function flattenShaperPage(shapers: BoardroomShaper[]): FlatBoard[] {
+  const perShaper = shapers.map((sh) => ({
+    sh,
+    list: (sh.featured_boards ?? []).filter((b) => b?.id && pickThumb(b)),
+  }));
+  const out: FlatBoard[] = [];
+  const seen = new Set<string>();
+  let i = 0;
+  let added = true;
+  while (added) {
+    added = false;
+    for (const { sh, list } of perShaper) {
+      const b = list[i];
+      if (!b || seen.has(b.id)) continue;
+      seen.add(b.id);
+      out.push({ board: b, shaper: sh });
+      added = true;
+    }
+    i++;
+  }
+  return out;
+}
+
 export default function BoardsExploreGrid({
   onNavigate,
 }: {
@@ -55,37 +84,13 @@ export default function BoardsExploreGrid({
   const cellW = Math.floor((width - PAD * 2 - GAP) / 2);
   const tileH = Math.round((cellW * 5) / 4); // portrait — suits surfboards
 
-  const { data, currentData, isFetching, refetch } = useGetLatestShapersQuery({ limit: 50 });
-  const [refreshing, setRefreshing] = useState(false);
-
-  // Flatten featured boards across shapers into one grid. Round-robin by board
-  // index so the grid alternates shapers (board 0 from each shaper, then board
-  // 1, ...) instead of clustering all of one shaper's boards together — a more
-  // varied "glance through the vault" feel, and no single prolific shaper
-  // dominates the top. Shaper order (latest activity first) is preserved.
-  const boards = useMemo<FlatBoard[]>(() => {
-    const shapers: BoardroomShaper[] = data?.results?.shapers ?? [];
-    const perShaper = shapers.map((sh) => ({
-      sh,
-      list: (sh.featured_boards ?? []).filter((b) => b?.id && pickThumb(b)),
-    }));
-    const out: FlatBoard[] = [];
-    const seen = new Set<string>();
-    let i = 0;
-    let added = true;
-    while (added) {
-      added = false;
-      for (const { sh, list } of perShaper) {
-        const b = list[i];
-        if (!b || seen.has(b.id)) continue;
-        seen.add(b.id);
-        out.push({ board: b, shaper: sh });
-        added = true;
-      }
-      i++;
-    }
-    return out;
-  }, [data]);
+  const { items: boards, loadMore, refresh, isFetchingMore, isRefreshing, isLoading } =
+    useCursorList<FlatBoard>({
+      useQuery: useGetLatestShapersQuery,
+      args: { limit: 50 },
+      selectItems: (page) => flattenShaperPage(page?.results?.shapers ?? []),
+      getId: (item) => item.board.id,
+    });
 
   // Viewability → which tiles autoplay their clip. keyExtractor uses board.id,
   // so the ViewToken keys are board ids.
@@ -94,14 +99,6 @@ export default function BoardsExploreGrid({
     setViewableKeys(new Set(viewableItems.map((v) => String(v.key))));
   }).current;
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await refetch();
-    } catch {}
-    setRefreshing(false);
-  }, [refetch]);
 
   const renderItem = useCallback(
     ({ item }: { item: FlatBoard }) => {
@@ -171,10 +168,6 @@ export default function BoardsExploreGrid({
     [cellW, tileH, isDark, onNavigate, viewableKeys]
   );
 
-  // Settle on the empty state only once the query has resolved with no boards
-  // (covers initial load + the cached-but-not-yet-populated frame).
-  const stillLoading = isFetching || !currentData;
-
   return (
     <FlatList
       style={{ flex: 1 }}
@@ -191,15 +184,24 @@ export default function BoardsExploreGrid({
       keyboardDismissMode="on-drag"
       onViewableItemsChanged={onViewable}
       viewabilityConfig={viewabilityConfig}
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.5}
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
+          refreshing={isRefreshing}
+          onRefresh={refresh}
           tintColor={isDark ? '#9ca3af' : '#6b7280'}
         />
       }
+      ListFooterComponent={
+        isFetchingMore ? (
+          <View style={{ paddingVertical: 16 }}>
+            <ActivityIndicator />
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
-        stillLoading ? (
+        isLoading ? (
           <View style={styles.centered}>
             <ActivityIndicator />
           </View>

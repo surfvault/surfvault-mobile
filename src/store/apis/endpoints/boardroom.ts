@@ -102,13 +102,14 @@ const boardroomApi = rootApi.injectEndpoints({
     /** Latest shapers — public. Drives the mobile + web Discover feed. One
      * card per shaper, sorted by their most recent featured-board activity. */
     getLatestShapers: builder.query<
-      { results: { shapers: BoardroomShaper[] } },
-      { limit?: number } | void
+      { results: { shapers: BoardroomShaper[]; continuationToken?: string | null } },
+      { limit?: number; continuationToken?: string | null } | void
     >({
       providesTags: [ApiTag.Boardroom],
       query: (args) => {
         const limit = args?.limit ?? 30;
-        return { url: `/shapers/latest?limit=${limit}`, method: 'GET' };
+        const ct = args?.continuationToken ? `&continuationToken=${encodeURIComponent(args.continuationToken)}` : '';
+        return { url: `/shapers/latest?limit=${limit}${ct}`, method: 'GET' };
       },
     }),
     /** Shapers tied to a specific surf break — public. Filters by region match

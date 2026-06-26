@@ -102,9 +102,15 @@ export interface FilmDetailResult {
  */
 const filmsApi = rootApi.injectEndpoints({
   endpoints: (builder) => ({
-    getLatestFilms: builder.query<{ results: { films: Film[] } }, { limit?: number; sort?: 'popular' } | void>({
+    getLatestFilms: builder.query<
+      { results: { films: Film[]; continuationToken?: string | null } },
+      { limit?: number; sort?: 'popular'; continuationToken?: string | null } | void
+    >({
       providesTags: [ApiTag.Film],
-      query: (args) => ({ url: `/films/latest?limit=${args?.limit ?? 30}${args?.sort ? `&sort=${args.sort}` : ''}`, method: 'GET' }),
+      query: (args) => ({
+        url: `/films/latest?limit=${args?.limit ?? 30}${args?.sort ? `&sort=${args.sort}` : ''}${args?.continuationToken ? `&continuationToken=${encodeURIComponent(args.continuationToken)}` : ''}`,
+        method: 'GET',
+      }),
     }),
     getFilmsNear: builder.query<
       { results: { films: Film[] } },
@@ -142,14 +148,14 @@ const filmsApi = rootApi.injectEndpoints({
       query: (args) => ({ url: `/films/from-following?limit=${args?.limit ?? 30}`, method: 'GET' }),
     }),
     getFilmsForUser: builder.query<
-      { results: { films: Film[] } },
+      { results: { films: Film[]; continuationToken?: string | null } },
       // scope (self-only): 'mine' = created/catalogued incl. unverified;
       // 'tagged' = confirmed-participant. Omit for earned-only (default).
-      { handle: string; limit?: number; scope?: 'mine' | 'tagged' }
+      { handle: string; limit?: number; scope?: 'mine' | 'tagged'; continuationToken?: string | null }
     >({
       providesTags: [ApiTag.Film],
-      query: ({ handle, limit = 30, scope }) => ({
-        url: `/users/${handle}/films?limit=${limit}${scope ? `&scope=${scope}` : ''}`,
+      query: ({ handle, limit = 30, scope, continuationToken }) => ({
+        url: `/users/${handle}/films?limit=${limit}${scope ? `&scope=${scope}` : ''}${continuationToken ? `&continuationToken=${encodeURIComponent(continuationToken)}` : ''}`,
         method: 'GET',
       }),
     }),

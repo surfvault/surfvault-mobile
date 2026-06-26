@@ -43,7 +43,7 @@ import { AccessBanner, PrivateGalleryCard, BlockedGalleryCard } from '../../src/
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
-import ProfileFilmsGrid from '../../src/components/ProfileFilmsGrid';
+import ProfileFilmsGrid, { type ProfileFilmsGridHandle } from '../../src/components/ProfileFilmsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import FilmsGrid from '../../src/components/FilmsGrid';
 import PaymentSheet, { hasPaymentChannels, acceptsDonations } from '../../src/components/PaymentSheet';
@@ -74,6 +74,7 @@ export default function UserProfileScreen() {
   const seenIdsRef = useRef(new Set<string>());
   const hasMoreRef = useRef(false);
   const isFetchingMoreRef = useRef(false);
+  const filmsGridRef = useRef<ProfileFilmsGridHandle>(null);
 
   const isSelf = currentUser?.handle === handle;
 
@@ -218,12 +219,18 @@ export default function UserProfileScreen() {
   }, [sessionsData]);
 
   const handleLoadMore = useCallback(() => {
+    // On the Films tab the grid lives in the list header (data is empty), so the
+    // FlatList's onEndReached is the near-bottom signal — forward it to the grid.
+    if (activeTab === 'films') {
+      filmsGridRef.current?.loadMore();
+      return;
+    }
     if (!hasMoreRef.current || isFetchingMoreRef.current || sessionsFetching) return;
     const nextToken = sessionsData?.results?.continuationToken;
     if (!nextToken) return;
     isFetchingMoreRef.current = true;
     setContinuationToken(nextToken);
-  }, [sessionsData, sessionsFetching]);
+  }, [sessionsData, sessionsFetching, activeTab]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -587,6 +594,7 @@ export default function UserProfileScreen() {
                 <AccessBanner isPrivate={isPrivate} accessRequest={accessRequest} scope="profile" />
                 {activeTab === 'films' && !isLocked && !isBlocked && handle ? (
                   <ProfileFilmsGrid
+                    ref={filmsGridRef}
                     handle={handle}
                     scope={isSelf ? 'mine' : undefined}
                     verifiedOnly={!isSelf}

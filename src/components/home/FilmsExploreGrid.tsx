@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useGetLatestFilmsQuery } from '../../store';
+import { useCursorList } from '../../hooks/useCursorList';
 import type { Film } from '../../store/apis/endpoints/films';
 import { FilmTile, GRID_TILE_HEIGHT_RATIO } from './FeedTiles';
 
@@ -17,7 +18,7 @@ import { FilmTile, GRID_TILE_HEIGHT_RATIO } from './FeedTiles';
  * "Films" mode of the Discover Explore grid — a films-only 3-column grid of the
  * latest catalogued surf films (newest first). Reuses the shared FilmTile in its
  * Explore form (verification pill + creator @handle). Mirror of web
- * FilmsExploreGrid. No new backend.
+ * FilmsExploreGrid. Scroll-to-fetch via the shared keyset cursor.
  */
 
 const PAD = 0; // edge-to-edge — tiles touch the screen edges
@@ -33,18 +34,13 @@ export default function FilmsExploreGrid({
   const { width } = useWindowDimensions();
   const cellW = Math.floor((width - PAD * 2 - GAP * (COLS - 1)) / COLS);
 
-  const { data, currentData, isFetching, refetch } = useGetLatestFilmsQuery({ limit: 60 });
-  const [refreshing, setRefreshing] = useState(false);
-
-  const films = useMemo<Film[]>(() => data?.results?.films ?? [], [data]);
-
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      await refetch();
-    } catch {}
-    setRefreshing(false);
-  }, [refetch]);
+  const { items: films, loadMore, refresh, isFetchingMore, isRefreshing, isLoading } =
+    useCursorList<Film>({
+      useQuery: useGetLatestFilmsQuery,
+      args: { limit: 60 },
+      selectItems: (page) => page?.results?.films ?? [],
+      getId: (f) => f.id,
+    });
 
   const renderItem = useCallback(
     ({ item }: { item: Film }) => (
@@ -52,9 +48,6 @@ export default function FilmsExploreGrid({
     ),
     [cellW, onNavigate]
   );
-
-  // Settle on the empty state only once the query resolves with no films.
-  const stillLoading = isFetching || !currentData;
 
   return (
     <FlatList
@@ -69,15 +62,24 @@ export default function FilmsExploreGrid({
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
+      onEndReached={loadMore}
+      onEndReachedThreshold={0.5}
       refreshControl={
         <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
+          refreshing={isRefreshing}
+          onRefresh={refresh}
           tintColor={isDark ? '#9ca3af' : '#6b7280'}
         />
       }
+      ListFooterComponent={
+        isFetchingMore ? (
+          <View style={{ paddingVertical: 16 }}>
+            <ActivityIndicator />
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
-        stillLoading ? (
+        isLoading ? (
           <View style={styles.centered}>
             <ActivityIndicator />
           </View>

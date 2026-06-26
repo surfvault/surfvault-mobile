@@ -47,7 +47,7 @@ import UserTypeBadge from '../../src/components/UserTypeBadge';
 import SessionCard from '../../src/components/SessionCard';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
-import ProfileFilmsGrid from '../../src/components/ProfileFilmsGrid';
+import ProfileFilmsGrid, { type ProfileFilmsGridHandle } from '../../src/components/ProfileFilmsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import CreateFilmSheet from '../../src/components/CreateFilmSheet';
@@ -380,6 +380,7 @@ export default function ProfileScreen() {
   // Tagged-in sessions (separate paginated list)
   const [taggedSessions, setTaggedSessions] = useState<any[]>([]);
   const [taggedToken, setTaggedToken] = useState('');
+  const filmsGridRef = useRef<ProfileFilmsGridHandle>(null);
   const taggedSeenIdsRef = useRef(new Set<string>());
   const taggedHasMoreRef = useRef(false);
   const taggedFetchingMoreRef = useRef(false);
@@ -825,6 +826,8 @@ export default function ProfileScreen() {
       ) : activeTab === 'films' ? (
         // Films tab — surf films the user created/catalogued (scope='mine'
         // includes their unverified entries). Mirror of the web profile Films tab.
+        // The grid paginates on its keyset cursor; this ScrollView owns the
+        // scroll, so it forwards near-bottom events into the grid's loadMore.
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: 24 }}
@@ -832,10 +835,18 @@ export default function ProfileScreen() {
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
           }
           showsVerticalScrollIndicator={false}
+          scrollEventThrottle={120}
+          onScroll={(e) => {
+            const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+            if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 600) {
+              filmsGridRef.current?.loadMore();
+            }
+          }}
         >
           {listHeader}
           {user?.handle ? (
             <ProfileFilmsGrid
+              ref={filmsGridRef}
               handle={user.handle}
               scope="mine"
               emptyText="No films yet — add one from a surf break or Home."
