@@ -28,11 +28,12 @@ function formatFilmDate(d: string): string {
 }
 
 /**
- * Best-effort YouTube snippet (publish date + description) via the Data API v3.
- * oEmbed doesn't expose either. Needs extra.youtubeApiKey (YouTube Data API
- * enabled). Returns { filmDate: 'YYYY-MM-DD'|null, description } or null — never throws.
+ * Best-effort YouTube snippet (publish date + description + immutable channel id)
+ * via the Data API v3. oEmbed doesn't expose any of these. Needs
+ * extra.youtubeApiKey (YouTube Data API enabled). Returns
+ * { filmDate: 'YYYY-MM-DD'|null, description, channelId: string|null } or null — never throws.
  */
-async function fetchYoutubeSnippet(videoId: string): Promise<{ filmDate: string | null; description: string } | null> {
+async function fetchYoutubeSnippet(videoId: string): Promise<{ filmDate: string | null; description: string; channelId: string | null } | null> {
   const apiKey = Constants.expoConfig?.extra?.youtubeApiKey as string | undefined;
   if (!apiKey || !videoId) return null;
   try {
@@ -45,6 +46,7 @@ async function fetchYoutubeSnippet(videoId: string): Promise<{ filmDate: string 
     return {
       filmDate: typeof pub === 'string' && pub.length >= 10 ? pub.slice(0, 10) : null,
       description: typeof snip.description === 'string' ? snip.description.trim().slice(0, 5000) : '',
+      channelId: typeof snip.channelId === 'string' ? snip.channelId : null,
     };
   } catch {
     return null;
@@ -106,6 +108,12 @@ export default function CreateFilmSheet({
   const [posterUrl, setPosterUrl] = useState<string | null>(null);
   const [videoId, setVideoId] = useState<string | null>(null);
   const [filmDate, setFilmDate] = useState<string | null>(null);
+  // YouTube uploader identity. channelId (immutable UC… id, from the Data API
+  // snippet) is the grouping key; name/url (oEmbed, mutable) are display caches
+  // the server normalizes into youtube_channels. Never shown as credit.
+  const [channelId, setChannelId] = useState<string | null>(null);
+  const [channelName, setChannelName] = useState<string | null>(null);
+  const [channelUrl, setChannelUrl] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   // idle | checking | valid | invalid | duplicate — drives the status badge and
   // the Add-film enabled state. Mirrors the web CreateFilmModal flow.
@@ -123,7 +131,9 @@ export default function CreateFilmSheet({
 
   const reset = () => {
     setUrl(''); setTitle(''); setDescription(''); setPosterUrl(null);
-    setVideoId(null); setFilmDate(null); setStatus('idle'); setExistingId(null);
+    setVideoId(null); setFilmDate(null);
+    setChannelId(null); setChannelName(null); setChannelUrl(null);
+    setStatus('idle'); setExistingId(null);
   };
   const close = () => { reset(); onClose(); };
 
@@ -149,13 +159,18 @@ export default function CreateFilmSheet({
           const data = await resp.json();
           if (data?.title) { setTitle((t) => t || data.title); valid = true; }
           if (data?.thumbnail_url) setPosterUrl(data.thumbnail_url);
+          // Uploader identity — powers "more films from this channel".
+          setChannelName(data?.author_name || null);
+          setChannelUrl(data?.author_url || null);
         }
       } catch { /* network error — treat as unverifiable */ }
-      if (!valid) { setPosterUrl(null); setFilmDate(null); setStatus('invalid'); return; }
-      // 1b) Publish date + description via the Data API (best-effort). Description
-      // only fills if the user hasn't typed one (mirrors the title autofill).
+      if (!valid) { setPosterUrl(null); setFilmDate(null); setChannelId(null); setChannelName(null); setChannelUrl(null); setStatus('invalid'); return; }
+      // 1b) Publish date + description + immutable channel id via the Data API
+      // (best-effort). Description only fills if the user hasn't typed one
+      // (mirrors the title autofill); channelId is the stable grouping key.
       const snip = await fetchYoutubeSnippet(id);
       setFilmDate(snip?.filmDate ?? null);
+      setChannelId(snip?.channelId ?? null);
       if (snip?.description) setDescription((prev) => prev || snip.description);
       // 2) Dedupe — already on SurfVault?
       try {
@@ -187,6 +202,9 @@ export default function CreateFilmSheet({
         description: description.trim(),
         poster_url: posterUrl || `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
         film_date: filmDate || undefined,
+        channel_id: channelId || undefined,
+        channel_name: channelName || undefined,
+        channel_url: channelUrl || undefined,
       }).unwrap();
       const filmId = res?.results?.filmId;
       // Auto-tag the originating break (best-effort — never blocks navigation).

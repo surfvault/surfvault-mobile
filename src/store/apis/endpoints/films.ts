@@ -192,7 +192,7 @@ const filmsApi = rootApi.injectEndpoints({
     // ---- Writes ----
     createFilm: builder.mutation<
       { results: { filmId: string } },
-      { youtube_video_id?: string; youtube_url?: string; title: string; description?: string; poster_url?: string | null; creator_name?: string | null; film_date?: string }
+      { youtube_video_id?: string; youtube_url?: string; title: string; description?: string; poster_url?: string | null; creator_name?: string | null; film_date?: string; channel_id?: string | null; channel_name?: string | null; channel_url?: string | null }
     >({
       invalidatesTags: [ApiTag.Film],
       query: (payload) => ({ url: `/films`, method: 'POST', body: payload }),
