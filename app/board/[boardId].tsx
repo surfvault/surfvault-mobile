@@ -43,6 +43,7 @@ import type { ActionSheetSection } from '../../src/components/ActionSheet';
 import ReportBoardSheet from '../../src/components/ReportBoardSheet';
 import ContactUserSheet from '../../src/components/ContactUserSheet';
 import BoardEditSheet from '../../src/components/shaper/BoardEditSheet';
+import BoardBottomRails from '../../src/components/rails/BoardBottomRails';
 import { getBoardPhotoUrl, boardPhotoDisplay } from '../../src/helpers/mediaUrl';
 import { MAX_CLIP_SECONDS, MAX_CLIP_BYTES, MAX_CLIP_GB } from '../../src/helpers/clipMedia';
 import { getViewerHash } from '../../src/helpers/viewerHash';
@@ -943,6 +944,12 @@ export default function BoardDetailScreen() {
               ))}
             </View>
           )}
+
+          {/* Bottom rail — more boards from this shaper. Boards load whole, so
+              it sits right below the grid. Hidden during select mode. */}
+          {!inActionMode && board.shaper?.handle ? (
+            <BoardBottomRails handle={board.shaper.handle} excludeBoardId={board.id} />
+          ) : null}
         </ScrollView>
 
         {/* Floating "Message Shaper" CTA — non-self, no action mode. Mirrors

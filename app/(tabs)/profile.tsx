@@ -50,7 +50,6 @@ import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
 import ProfileFilmsGrid, { type ProfileFilmsGridHandle } from '../../src/components/ProfileFilmsGrid';
 import ActionSheet from '../../src/components/ActionSheet';
 import type { ActionSheetSection } from '../../src/components/ActionSheet';
-import CreateFilmSheet from '../../src/components/CreateFilmSheet';
 import ProfileSkeleton from '../../src/components/ProfileSkeleton';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 import { fetchAccountBadge, type AccountBadge } from '../../src/helpers/accountBadges';
@@ -77,7 +76,6 @@ export default function ProfileScreen() {
 
   const [activeTab, setActiveTab] = useState<'grid' | 'list' | 'films' | 'tagged' | 'favorites'>('grid');
   const [menuVisible, setMenuVisible] = useState(false);
-  const [createFilmVisible, setCreateFilmVisible] = useState(false);
   const [accountSwitcherVisible, setAccountSwitcherVisible] = useState(false);
   const { accounts: linkedAccounts, activeUserId, switchTo: switchLinkedAccount, patchAccount, getFreshToken } =
     useLinkedAccounts();
@@ -581,14 +579,6 @@ export default function ProfileScreen() {
     {
       options: [
         {
-          label: 'Add a Film',
-          icon: 'film-outline',
-          onPress: () => {
-            setMenuVisible(false);
-            setCreateFilmVisible(true);
-          },
-        },
-        {
           label: 'Manage Favorites',
           icon: 'heart-outline',
           onPress: () => trackedPush('/manage-favorites'),
@@ -653,7 +643,7 @@ export default function ProfileScreen() {
           <Text style={[s.emptySubtitle, { color: isDark ? '#6b7280' : '#9ca3af' }]}>
             Manage your profile, track session analytics, and customize your settings
           </Text>
-          <Pressable onPress={login} style={s.signInBtn}>
+          <Pressable onPress={() => login()} style={s.signInBtn}>
             <Text style={s.signInText}>Sign In to Get Started</Text>
           </Pressable>
         </View>
@@ -1286,7 +1276,6 @@ export default function ProfileScreen() {
         onClose={() => setMenuVisible(false)}
       />
 
-      <CreateFilmSheet visible={createFilmVisible} onClose={() => setCreateFilmVisible(false)} />
 
       {/* Quick switcher — active account (with checkmark) + siblings + manage entry. */}
       <ActionSheet

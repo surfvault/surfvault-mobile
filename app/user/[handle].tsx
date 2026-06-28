@@ -45,7 +45,6 @@ import UserSkeleton from '../../src/components/UserSkeleton';
 import ShaperBoardsGrid from '../../src/components/ShaperBoardsGrid';
 import ProfileFilmsGrid, { type ProfileFilmsGridHandle } from '../../src/components/ProfileFilmsGrid';
 import AdvertiserAdsGrid from '../../src/components/AdvertiserAdsGrid';
-import FilmsGrid from '../../src/components/FilmsGrid';
 import PaymentSheet, { hasPaymentChannels, acceptsDonations } from '../../src/components/PaymentSheet';
 import { formatSessionDate } from '../../src/helpers/dateTime';
 import { safeShare, openUrl } from '../../src/helpers/share';
@@ -639,15 +638,7 @@ export default function UserProfileScreen() {
               ) : null
             }
             ListFooterComponent={
-              <>
-                {/* Surf films this user created / is tagged in. Self-hides when
-                    empty so non-film profiles show nothing extra. Hidden while
-                    the gallery is locked/blocked. */}
-                {!isBlocked && !isLocked && handle ? (
-                  <FilmsGrid handle={handle} title="Surf Films" hideWhenEmpty />
-                ) : null}
-                {sessionsFetching ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null}
-              </>
+              sessionsFetching ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null
             }
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5}

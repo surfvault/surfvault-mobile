@@ -79,6 +79,7 @@ import { parseExifTakenAt, bakeOrderedTimestamps } from '../../src/helpers/photo
 import { getViewerHash } from '../../src/helpers/viewerHash';
 import SessionHero from '../../src/components/SessionHero';
 import SessionSkeleton from '../../src/components/SessionSkeleton';
+import SessionBottomRails from '../../src/components/rails/SessionBottomRails';
 import { useKeyboardVisible } from '../../src/hooks/useKeyboardVisible';
 
 // Page size for the gallery. Sized generously so the densest zoom (5 columns)
@@ -153,6 +154,11 @@ export default function SessionDetailScreen() {
 
   const [sessionMedia, setSessionMedia] = useState<any[]>([]);
   const [continuationToken, setContinuationToken] = useState('');
+  // Render-visible mirror of nextTokenRef: whether the gallery still has pages
+  // to fetch. Refs don't re-render, so the bottom rails (which must only appear
+  // once nothing is left to fetch) gate on this state instead. Set at every
+  // authoritative site where a server response's next-cursor is known.
+  const [galleryHasMore, setGalleryHasMore] = useState(false);
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const seenMediaRef = useRef(new Set<string>());
   const shouldReplaceRef = useRef(false);
@@ -452,6 +458,7 @@ export default function SessionDetailScreen() {
       });
       setSessionMedia(unique);
       setContinuationToken(initialToken);
+      setGalleryHasMore(Boolean(initialToken));
     }
   }, [sessionData, activeGroupId]);
 
@@ -482,6 +489,7 @@ export default function SessionDetailScreen() {
       setSessionMedia([]);
       shouldReplaceRef.current = false;
       nextTokenRef.current = '';
+      setGalleryHasMore(false);
       return;
     }
     if (!media.length) return;
@@ -501,6 +509,7 @@ export default function SessionDetailScreen() {
     }
     // Store next token in ref — only promote to state on scroll (onEndReached)
     nextTokenRef.current = morePhotos?.results?.continuationToken ?? '';
+    setGalleryHasMore(Boolean(morePhotos?.results?.continuationToken));
   }, [morePhotos]);
 
   const handleLoadMore = useCallback(() => {
@@ -534,6 +543,7 @@ export default function SessionDetailScreen() {
         prevInitialFingerprintRef.current = media.map((m: any) => m?.id).join(',');
         shouldReplaceRef.current = false;
         nextTokenRef.current = nextToken; // page 2 loads on the first scroll
+        setGalleryHasMore(Boolean(nextToken));
         setSessionMedia(deduped);
         setContinuationToken(''); // keep the paginated query idle until scroll
       } else {
@@ -564,6 +574,7 @@ export default function SessionDetailScreen() {
           });
           shouldReplaceRef.current = false;
           nextTokenRef.current = nextToken;
+          setGalleryHasMore(Boolean(nextToken));
           setSessionMedia(deduped);
         }
       }
@@ -634,8 +645,12 @@ export default function SessionDetailScreen() {
       });
       setSessionMedia(unique);
       setContinuationToken(initialToken);
+      setGalleryHasMore(Boolean(initialToken));
       shouldReplaceRef.current = false;
     } else {
+      // Entering a group: assume more until the group's first page resolves and
+      // updates the mirror — keeps the rails hidden during the swap.
+      setGalleryHasMore(true);
       shouldReplaceRef.current = true;
     }
     setActiveGroupId(groupId);
@@ -1586,7 +1601,18 @@ export default function SessionDetailScreen() {
               ) : null
             }
             ListFooterComponent={
-              loadingMore ? <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View> : null
+              loadingMore ? (
+                <View style={{ paddingVertical: 16 }}><ActivityIndicator /></View>
+              ) : (!isLocked && sessionMedia.length > 0 && !galleryHasMore && !sessionAction && session) ? (
+                // Gallery fully exhausted (nothing left to fetch) — surface the
+                // "more from photographer" + sponsored-nearby rails at the very
+                // bottom, never before.
+                <SessionBottomRails
+                  session={session}
+                  isOwner={isOwner}
+                  excludeSessionId={session.id}
+                />
+              ) : null
             }
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.5}
